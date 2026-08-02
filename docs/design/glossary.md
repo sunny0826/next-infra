@@ -26,6 +26,9 @@
 | Query Service | 查询服务 | Desktop 与 MCP 共用的 Rust 查询语义入口；统一字段过滤、分页、Topology 边界、Freshness 和错误清洗 | 不是 HTTP API，也不等于 SQLite Repository |
 | Local RPC | 本地 RPC | MCP Bridge 与 Desktop Host 之间的版本化 Unix Domain Socket 协议 | 不是远程 MCP、localhost HTTP 或公开网络接口 |
 | MCP Bridge | MCP 桥接进程 | 独立 `next-infra-mcp` 短生命周期 STDIO 进程；把 MCP 请求转换为 Local RPC | 不是 Runtime、Connector 或数据库 owner |
+| BackgroundOnly | 纯后台宿主状态 | 登录自动启动或受控 MCP 启动后的 Desktop Host 状态；保留 tray，但初始不创建 WebView、不抢焦点、不显示 Dock icon | 不是无用户可见入口的 daemon，也不代表已授权 MCP 拉起 |
+| Release Set | 发布集合 | 必须共同 stage、验证、切换和回滚的一组 `Next Infra.app`、`next-infra-mcp`、manifest 与协议元数据 | 不是可独立升级的两个二进制 |
+| Integration Record | 集成记录 | 用户 Application Support 中权限为 `0600` 的可信本地记录；绑定当前 Release Set、稳定路径、hash、签名身份、协议版本和 MCP 自动拉起授权 | 不是 Agent 参数、签名替代品或 Provider 配置 |
 | Scheduler | 调度器 | 按 Connection 周期、抖动、退避、startup/catch-up 规则发起 SyncRun | 不直接解释 Provider 响应 |
 | Sync Engine | 同步引擎 | 编排 Connector、Normalizer、Writer、Coverage 和 SyncRun 生命周期 | 不等于某个 Connector |
 | Normalizer | 规范化器 | 对 ObservationBatch 做字段白名单、Schema 验证、Fingerprint 和敏感字段检查 | 不是通用原始 JSON 存储 |
@@ -129,6 +132,7 @@ Connector Health: auth_failed
 
 `user_quit` 是 Desktop Host 显式退出前写入的本地自动拉起抑制状态：
 
+- 规范文件位于当前用户 Application Support 的 `state/user-quit-v1.json`，不保存在 SQLite。
 - 跨后续 MCP Bridge 进程生效。
 - MCP 参数和 Agent 无权清除。
 - 只有用户主动启动 App，或已经启用的下一次登录自动启动可以清除。

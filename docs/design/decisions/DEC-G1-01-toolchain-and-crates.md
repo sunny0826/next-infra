@@ -137,7 +137,7 @@ Desktop package 的 `default-run` 与 Tauri `mainBinaryName` 都固定为 `next-
 - `tauri.conf.json > bundle.externalBin` 或任何 sidecar 配置；
 - `.app/Contents/MacOS`、Resources 或其他 Desktop bundle 内容。
 
-Goal 1 只保证 `cargo build -p next-infra-mcp-bridge --bin next-infra-mcp --locked` 可独立产物，不执行用户级安装、不写 `~/.local/bin`，也不向 Hermes/Codex 写配置。稳定安装路径、可信 app 记录、原子替换、签名和 Desktop/Bridge 升级顺序由 `DEC-G1-03` 决定；在该决策前保持 **TBD**。
+Goal 1 只保证 `cargo build -p next-infra-mcp-bridge --bin next-infra-mcp --locked` 可独立产物，不执行用户级安装、不写 `~/.local/bin`，也不向 Hermes/Codex 写配置。稳定安装路径、可信 app 记录、原子替换、签名和 Desktop/Bridge 升级顺序由已接受的 [`DEC-G1-03`](./DEC-G1-03-bridge-install-and-upgrade.md) 决定。
 
 ## 7. Rust QDTO → TypeScript Binding
 
@@ -183,10 +183,10 @@ rtk pnpm --dir apps/desktop test:bundle-boundary
 
 `test:bundle-boundary` 必须检查 Desktop bundle 只含 `next-infra` 主 executable，且任意 bundle 目录均不存在 `next-infra-mcp`。`cargo metadata` 的自动架构检查必须证明只有 `next-infra-desktop-adapter` 的 normal/build dependency closure 出现 Tauri；Core/Store/Sync/Query/Runtime 与 Bridge closures 中出现 Tauri 即失败。
 
-## 9. 升级触发器、非目标与 TBD
+## 9. 升级触发器、非目标与后续边界
 
 以下任一事件触发独立工具链升级决策：Rust/Tauri 安全公告或编译缺陷；Node v24 离开 LTS；pnpm engine/lockfile 格式改变；官方插件要求更高 MSRV；macOS/Xcode 使当前组合无法 build/smoke；`ts-rs` 无法表达已冻结 QDTO；增加新的 Tauri 官方插件。
 
 明确非目标：不初始化 workspace、不安装依赖、不实现 crate、UI、RPC、MCP 或 Provider；不定义 release cadence、自动 updater、签名/公证、用户支持周期、Windows/Linux 支持矩阵；不决定 Bridge 稳定安装路径。
 
-保持 TBD：最低支持 macOS 与 Intel Mac；用户可见 Node/Rust 支持承诺；Bridge 安装/发现/原子升级方案；Tauri updater 与发布签名策略。这些选择不得由 Goal 1 实施者自行补全。
+后续仍待定：最低支持 macOS 与 Intel Mac、用户可见 Node/Rust 支持承诺。Bridge 安装/发现/原子升级方案见 [`DEC-G1-03`](./DEC-G1-03-bridge-install-and-upgrade.md)，Tauri updater 与发布签名策略见 [`DEC-G1-04`](./DEC-G1-04-keychain-signing.md)；这些决策不得由 Goal 1 实施者自行改写。

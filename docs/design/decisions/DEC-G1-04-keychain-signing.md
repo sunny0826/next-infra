@@ -1,6 +1,6 @@
 # DEC-G1-04：Keychain、签名与发布边界
 
-**状态：** Proposed（技术边界已冻结；外部标识与发布凭据等待用户决定）  
+**状态：** Accepted technical boundary（外部标识与发布凭据仍待用户决定）  
 **任务：** `DEC-G1-04`  
 **适用范围：** Goal 1 及后续 macOS Desktop Host、SecretProvider、直接分发  
 **不构成：** 工程实现、Keychain item 创建、签名、公证或发布授权

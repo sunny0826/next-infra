@@ -1,6 +1,6 @@
 # Next Infra 设计文档
 
-本目录是 Next Infra 在工程实现前的设计基线。当前状态为草案，仅描述已确认约束、架构边界、领域契约、接口、安全策略和后续实施目标；独立 HTML 原型只用于验证这些设计，不代表 React/Tauri/Rust 实现已经开始。
+本目录是 Next Infra 的权威设计基线。Goal 0 已完成，Goal 1 前置决策已冻结并获准开始本地实现；独立 HTML 原型与 Interface System 仍是界面验收规范，不能被脚手架默认样式取代。
 
 ## 已确认约束
 
@@ -36,11 +36,12 @@
 7. [Agent 接口与安全](./agent-interface-and-security.md)：MCP 工具、响应边界、本地通信和凭据策略。
 8. [界面与可视化设计](./visualization-and-interaction.md)：信息架构、视觉语义、拓扑边界和桌面交互状态。
 9. [串行 Goal 与并行任务](./implementation-goals.md)：定义不可跨越的 Goal 验收顺序。
-10. [文档 Review 报告](./REVIEW-2026-08-02.md)：记录 Tauri 架构调整后的审查发现、修复和保留风险。
-11. [HTML 交互原型](../../prototype/README.md)：用虚构 Fixture 验证 Overview、Topology、Evidence Spine 和窄屏布局。
-12. [Interface System](../../.interface-design/system.md)：固化已通过浏览器验收的 UI token、响应式框架、重复组件和状态语义；它仍是工程实现前的 UI 规范，不代表 React/Tauri/Rust 开发已经开始。
-13. [Luna Worker 并行任务总表](../tasks/README.md)：按 Runtime、Connector、Desktop UI 拆解依赖波次、独占路径、验收和 Gate Captain。
-14. [任务拆解独立 Review](../tasks/REVIEW-2026-08-02.md)：记录首轮 blocker、修订和二轮 `PASS`。
+10. [Goal 1 决策索引](./decisions/README.md)：工具链、生命周期、Bridge、Keychain/签名的冻结状态与当前阻塞。
+11. [文档 Review 报告](./REVIEW-2026-08-02.md)：记录 Tauri 架构调整后的审查发现、修复和保留风险。
+12. [HTML 交互原型](../../prototype/README.md)：用虚构 Fixture 验证 Overview、Topology、Evidence Spine 和窄屏布局。
+13. [Interface System](../../.interface-design/system.md)：固化已通过浏览器验收的 UI token、响应式框架、重复组件和状态语义，是 React 实现的视觉规范。
+14. [Luna Worker 并行任务总表](../tasks/README.md)：按 Runtime、Connector、Desktop UI 拆解依赖波次、独占路径、验收和 Gate Captain。
+15. [任务拆解独立 Review](../tasks/REVIEW-2026-08-02.md)：记录首轮 blocker、修订和二轮 `PASS`。
 
 ## 文档治理
 
@@ -52,7 +53,7 @@
 - MCP、安全和秘密处理以《Agent 接口与安全》为准。
 - 如果文档冲突，应先修改主 RFC 并记录取舍，再同步下游文档。
 - Goal 验收门保持串行；Goal 内并行规则、任务 ID 和文件所有权以 `docs/tasks/` 为准。
-- 在用户明确授权开发前，不创建 `Cargo.toml`、`package.json`、源码、迁移或构建配置。
+- 开发已经获准，但只能按通过 Gate 的任务包修改其独占路径；共享 manifest、lockfile、生成 DTO 和 entrypoint 仍由对应 Captain 串行维护。
 
 ## 当前非目标
 

@@ -1,6 +1,6 @@
 # Luna Worker 并行任务总表
 
-本文将 Next Infra 的未来实施拆解为可交给 `luna_worker` 的有界任务包。它只固化调度、依赖、文件所有权和验收方式，**不授权开始 React、Tauri 或 Rust 开发**。
+本文将 Next Infra 的实施拆解为可交给 `luna_worker` 的有界任务包，并固化调度、依赖、文件所有权和验收方式。用户已于 2026-08-02 授权按本表开始本地只读首版开发；该授权不包含真实凭据、Agent 用户配置、安装、发布、公证或外部基础设施写操作。
 
 实现仍受 [`implementation-goals.md`](../design/implementation-goals.md) 约束：Goal 验收门保持串行；只有当前 Goal 的共享契约冻结后，Goal 内部任务才允许并行。
 
@@ -39,7 +39,7 @@ flowchart LR
 | `BLOCKED` | 需要用户选择、外部凭据、环境能力或上游契约变更 |
 | `DONE` | 验收命令及当前 Goal gate 均已通过 |
 
-`READY` 只描述依赖，不扩大授权。当前所有工程包都是 `HELD-AUTH`；只有设计决策包可以被标记为 `READY-DESIGN`。
+`READY` 只描述依赖，不扩大授权。Goal 1 已获开发授权；尚未通过前序 Gate 的工程包保持 `WAITING`，不得跨 Goal 提前派发。
 
 ## 3. 角色与单写规则
 
@@ -111,11 +111,11 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ## 6. 设计决策包
 
-这些任务只修改设计文档，完成后也不自动授权开发。
+这些任务只修改设计文档；当前 Goal 1 的开发授权来自用户明确指令，不来自决策任务自身。
 
 ### `DEC-G1-01` — 工具链与 crate 拓扑冻结
 
-- **状态：** `READY-DESIGN`
+- **状态：** `DONE`
 - **目标：** 固定 Rust、Node/pnpm、Tauri 与官方插件版本；固定 workspace、`next-infra-runtime`、Desktop App 和 MCP Bridge 的目标边界。
 - **依赖：** 当前环境基线和 RFC。
 - **独占路径：** `docs/design/decisions/DEC-G1-01-toolchain-and-crates.md`；不创建工程文件。
@@ -127,7 +127,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G1-02` — Desktop 生命周期策略冻结
 
-- **状态：** `READY-DESIGN`
+- **状态：** `DONE`
 - **目标：** 固定单实例、close→hide、托盘恢复、自动登录、后台启动、显式退出、睡眠/唤醒和 `user_quit` 状态机。
 - **依赖：** RFC 生命周期章节。
 - **独占路径：** `docs/design/decisions/DEC-G1-02-desktop-lifecycle.md`。
@@ -138,7 +138,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G1-03` — Bridge 安装、协议与升级策略冻结
 
-- **状态：** `READY-DESIGN`
+- **状态：** `DONE`
 - **目标：** 固定 Bridge 安装位置、可信 App 记录、Host/Bridge 原子升级、协议兼容窗口和自动拉起授权。
 - **依赖：** `DEC-G1-01/02` 的候选结论。
 - **独占路径：** `docs/design/decisions/DEC-G1-03-bridge-install-and-upgrade.md`。
@@ -148,7 +148,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G1-04` — Keychain、签名与发布边界冻结
 
-- **状态：** `READY-DESIGN`
+- **状态：** `DONE`（技术边界；发布身份仍 `BLOCKED`）
 - **目标：** 固定 Keychain service/account 命名、签名 ACL、锁屏/后台不可用语义、首版签名/公证/更新边界。
 - **依赖：** 当前 macOS 环境报告。
 - **独占路径：** `docs/design/decisions/DEC-G1-04-keychain-signing.md`。
@@ -158,10 +158,10 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G1-05` — Goal 1 决策合并
 
-- **状态：** `WAITING`，等待 `DEC-G1-01..04`。
+- **状态：** `DONE`。
 - **目标：** 由单一 Decision Captain 将四份结论合并到权威 RFC、架构、安全和实施目标，消除冲突与未决项。
 - **依赖：** `DEC-G1-01..04` 完成；涉及产品选择时已有用户结论。
-- **独占路径：** 执行期间独占受影响的 `docs/design/*.md` 和设计 Review 报告；不改四份源决策文件。
+- **独占路径：** 执行期间独占受影响的 `docs/design/*.md` 和设计 Review 报告；源决策只允许更新状态与已解决交叉引用，不重写其技术结论。
 - **非目标：** 不创建工程、不安装依赖、不替用户做尚未决定的产品选择。
 - **输出：** 更新后的权威设计、决策追踪表和待独立 Review 的候选 readiness 结论。
 - **验收：** 版本、crate 图、生命周期、Bridge、Keychain、签名和 binding pipeline 无相互矛盾或阻塞级 TBD。
@@ -170,7 +170,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G1-06` — Goal 1 独立只读 Review
 
-- **状态：** `WAITING`，等待 `DEC-G1-05`。
+- **状态：** `READY`。
 - **目标：** 由未参与四项决策和合并的全新 worker 独立判断 Goal 1 是否具备无歧义、可验证的工程入口。
 - **依赖：** `DEC-G1-05` 完成并停止写入权威设计。
 - **独占路径：** 只读，无写路径；Review 报告由调度者在 reviewer 完成后单写固化。
@@ -307,7 +307,7 @@ Gate Captain 必须：
 
 ## 8. 当前可执行边界
 
-- 已完成：任务拆解和三条 lane 的只读分析。
-- 可继续派发：首波可并行派发 `DEC-G1-01`、`DEC-G1-02`、`DEC-G1-04`、`DEC-G6-01`、`DEC-G8-01`；`DEC-G1-03` 等待前两项，`DEC-G1-05` 串行合并，`DEC-G1-06` 由新 worker 独立 Review。所有派发仍需要用户单独指示。
-- 暂停：所有 `RHM-*`、`CON-*`、`UI-*` 和 `GATE-*` 工程任务，状态均为 `HELD-AUTH`。
-- 开发入口：用户明确批准 Goal 0 并授权进入 Goal 1 后，必须先取得 `DEC-G1-06` 的无 blocker `READY` 结论，再派发 `RHM-G1-01`；不得直接从页面或 Provider 任务开工。
+- 已完成：Git 初始化、Goal 0、`DEC-G1-01..05` 和任务拆解。
+- 当前可派发：`DEC-G1-06` 独立只读 Review。
+- 当前等待：`RHM-G1-01` 等待 Review 给出无 blocker 的 `READY`；Goal 1 其余 UI/Host 任务等待 Bootstrap。Goal 2 以后全部等待前序 Gate。
+- 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。

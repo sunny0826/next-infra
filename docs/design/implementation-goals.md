@@ -1,6 +1,6 @@
 # 串行 Goal 与并行任务
 
-本文只定义未来获准开发后的执行顺序，不授权当前开始编码。Goal 验收门必须串行完成；前一 Goal 未达到验收标准时，不进入后一 Goal。一个 Goal 内部只有在共享契约冻结后，才可按照 [`docs/tasks/`](../tasks/README.md) 的依赖波次与独占文件所有权并行派发给 `luna_worker`。
+本文定义已经获准的只读首版开发顺序。用户于 2026-08-02 授权初始化 Git 并按 [`docs/tasks/`](../tasks/README.md) 开始实现；授权不包含真实凭据、Agent 用户配置、发布、公证或外部基础设施写操作。Goal 验收门必须串行完成；前一 Goal 未达到验收标准时，不进入后一 Goal。一个 Goal 内部只有在共享契约冻结后，才可按依赖波次与独占文件所有权并行派发给 `luna_worker`。
 
 ## 通用完成标准
 
@@ -25,7 +25,7 @@
 
 ## Goal 0：设计基线冻结
 
-**状态：** 当前阶段  
+**状态：** Completed  
 **依赖：** 无
 
 ### 范围
@@ -60,9 +60,12 @@ rtk proxy find . -maxdepth 3 -type f -print
 
 ## Goal 1：Tauri 工程骨架与发布边界
 
+**状态：** Authorized / In progress  
 **依赖：** Goal 0 获得用户批准
 
 ### 开始前必须冻结
+
+以下事项均已冻结，状态索引见 [`docs/design/decisions/`](./decisions/README.md)：
 
 - Tauri 与官方插件版本。
 - `next-infra-mcp` 的稳定安装路径。
@@ -96,8 +99,8 @@ rtk proxy find . -maxdepth 3 -type f -print
 
 ```bash
 rtk cargo fmt --all --check
-rtk cargo clippy --workspace --all-targets -- -D warnings
-rtk cargo test --workspace
+rtk cargo clippy --workspace --all-targets --locked -- -D warnings
+rtk cargo test --workspace --all-targets --locked
 rtk pnpm --dir apps/desktop lint
 rtk pnpm --dir apps/desktop test
 rtk pnpm --dir apps/desktop build
@@ -311,6 +314,9 @@ Hermes 的实际命令必须在安装后根据当时版本重新确认，不提�
 - 审批不是布尔值。
 - 任意 SSH 命令和删除操作不进入第一批 Action。
 
-## 当前停止条件
+## 当前推进与停止条件
 
-Goal 0 文档和 Review 完成后必须停止。只有用户明确回复允许进入开发，才能开始 Goal 1；“继续设计”或“继续 Review”不构成编码授权。
+- Goal 1 已获授权，可以按任务表实现；每个后续 Goal 只有在前一 Gate 通过后才可开始。
+- 本次授权覆盖 Goal 0-9 的本地、只读实现，但不因通过 Gate 自动扩大到真实凭据录入、Codex/Hermes 用户配置修改、安装、发布或公证；这些外部状态变更仍需独立授权。
+- Goal 10 仍只允许设计，任何外部写操作都必须等待新的明确授权。
+- 若 Gate 发现 blocker，应修复并重新验收，不能为了保持进度跳过或降级标准。

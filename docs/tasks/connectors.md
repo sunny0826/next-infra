@@ -1,6 +1,6 @@
 # Connector 与 Provider 任务包
 
-本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。所有工程任务当前均为 `HELD-AUTH`。
+本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。当前任务均为 `WAITING`，只有在 Goal 1 Gate 通过并进入对应 Goal 后才能派发。
 
 ## 1. 所有 Connector 的硬边界
 

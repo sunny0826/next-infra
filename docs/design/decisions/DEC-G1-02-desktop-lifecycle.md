@@ -1,6 +1,6 @@
 # DEC-G1-02：Desktop 生命周期策略
 
-**状态：** 唯一候选，等待 `DEC-G1-05` 合并；不授权开发 · **平台：** 首版 arm64 macOS · **范围：** `Next Infra.app` / Desktop Host
+**状态：** Accepted（已由 `DEC-G1-05` 合并） · **平台：** 首版 arm64 macOS · **范围：** `Next Infra.app` / Desktop Host
 **最后核对：** 2026-08-02
 
 ## 1. 决策
@@ -142,7 +142,7 @@ Tauri restart 的 `ExitRequested` 不能被 `prevent_exit()` 延迟，因此禁�
 
 ## 8. `user_quit` 唯一规则
 
-逻辑路径固定为 `Application Support/next-infra/state/user-quit-v1.json`：
+逻辑路径固定为 `~/Library/Application Support/Next Infra/state/user-quit-v1.json`：
 
 - `state/` 为当前用户独占目录 `0700`，marker 为 `0600`。
 - 文件只包含 `schema_version`、`latched_at`、`host_version` 和固定 `reason=user_explicit`，不含 Secret、Socket 路径或 Agent 输入。
@@ -250,4 +250,4 @@ rtk test pnpm --dir apps/desktop test:desktop-smoke
 
 生命周期语义已唯一；仍需用户确认首次引导是否推荐 autostart（默认仍关闭）、由 `DEC-G1-03` 决定 MCP 自动拉起授权与可信 App Bundle 路径、由 `DEC-G1-04` 决定签名/公证/更新渠道。
 
-这些项目不改变 close、Quit、sleep/wake 和 `user_quit` 语义；但 `DEC-G1-03/04` 完成前不能开始 Goal 1 工程。
+这些项目不改变 close、Quit、sleep/wake 和 `user_quit` 语义；`DEC-G1-03/04` 已完成并合并，本地 Goal 1 可以开始，发布与真实 Keychain 验收仍受外部身份条件约束。

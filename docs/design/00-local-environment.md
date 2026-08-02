@@ -2,7 +2,7 @@
 
 **检测日期：** 2026-08-02  
 **工作目录：** `/Users/guoxudong/codes/next-infra`  
-**检测方式：** 只读命令；未安装、启动或修改任何本地工具与服务
+**检测方式：** 只读命令；未安装或修改任何系统级工具与服务
 
 ## 1. 环境摘要
 
@@ -25,7 +25,7 @@
 | Codex | codex-cli 0.146.0-alpha.9.2；支持 STDIO 与 Streamable HTTP MCP | 可以在本机验证 STDIO MCP |
 | Hermes | 未安装 | 本轮不安装；Hermes 实际兼容性验收必须作为后续独立步骤 |
 | Tailscale | 未安装 | 不假定远程主机天然可达；SSH 网络连通性由用户现有网络负责 |
-| 仓库状态 | 目录为空，尚未初始化 Git | 当前可以先建立设计文档，不兼容任何既有代码 |
+| 仓库状态 | Git 已初始化为 `main`，设计基线与 Goal 1 决策已提交；工程脚手架尚未创建 | 可以按已冻结边界进入 Goal 1 |
 
 检测输出中可能出现的设备序列号、硬件 UUID 等标识不写入本项目文档。
 
@@ -74,17 +74,18 @@ Tauri 只是桌面宿主：领域、同步、存储和 Query Service 必须保�
 
 这些是可调整的默认值，不是数据库硬上限。
 
-## 3. 后续脚手架建议基线
+## 3. Goal 1 脚手架固定基线
 
-开始编码时再创建并确认以下版本文件：
+[`DEC-G1-01`](./decisions/DEC-G1-01-toolchain-and-crates.md) 已固定以下版本文件与依赖规则，由 `RHM-G1-01` 创建：
 
-- `rust-toolchain.toml`：以检测到的 stable 1.92.0 为候选基线。
-- 前端 `packageManager`：以 `pnpm@11.9.0` 为候选基线，并通过 Corepack 使用。
+- `rust-toolchain.toml`：固定 Rust `1.92.0`，附带 rustfmt 与 Clippy。
+- `.node-version`：固定 Node.js `24.12.0`。
+- 根 `package.json#packageManager`：固定 `pnpm@11.9.0`，通过 Corepack 使用。
 - Rust edition：2024。
-- Desktop：Tauri v2 + React/TypeScript；具体 Tauri 小版本在 Goal 1 开始前根据当时稳定版本固定。
+- Desktop：Tauri Rust `2.11.5`、`tauri-build 2.6.3`、JavaScript API `2.11.1`、CLI `2.11.4` + React/TypeScript。
 - SQLite：由 Rust 依赖提供可复现构建，不依赖 `/usr/bin/sqlite3` 的可选模块。
 
-版本固定属于后续脚手架目标，本轮不创建这些文件。
+精确插件、crate/package 布局、锁定规则和 QDTO binding 见该决策；普通功能任务不得顺带升级。
 
 ## 4. 已执行的代表性验证
 
@@ -118,4 +119,4 @@ SQLite JSON 与 FTS5 分别使用最小内存数据库进行了能力探测：JS
 - Hermes 尚未安装，因此只能完成协议级设计，不能声明 Hermes 端到端验收通过。
 - 远程 Mac mini、云主机的 SSH 地址、Host Key 和网络路径尚未提供，不能验证 SSH Connector 可达性。
 - 各厂商只读凭据尚未配置，不能验证 API 权限覆盖与速率限制。
-- 工作目录尚未初始化 Git；这不是设计阶段阻塞项。
+- 正式 release bundle ID、Apple Team、Developer ID certificate/profile 与公证凭据尚未提供；本地 Mock/Fixture 开发不受阻，发布与真实 Keychain smoke 保持阻塞。

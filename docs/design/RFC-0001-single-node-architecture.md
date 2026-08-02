@@ -1,7 +1,7 @@
 # RFC-0001：Next Infra 单机 Tauri 控制平面架构
 
 **作者：** Maintainer / Codex  
-**状态：** Draft（草案）  
+**状态：** Accepted（Goal 1 实现基线）  
 **最后更新：** 2026-08-02
 
 ## 1. 背景
@@ -149,10 +149,12 @@ flowchart LR
 
 ## 8. Desktop Host 生命周期
 
+本节的可实现状态机、Tauri/AppKit 事件映射和真实 bundle smoke 矩阵以 [`DEC-G1-02`](./decisions/DEC-G1-02-desktop-lifecycle.md) 为准。
+
 ### 8.1 单实例
 
 - 同一用户只允许一个 Desktop Host 持有 SQLite 和 Unix Socket。
-- Tauri 单实例能力负责把第二次桌面启动转发给现有实例并显示主窗口。
+- 官方 single-instance plugin 必须作为第一个 Tauri plugin 注册；第二次桌面启动只转发给现有实例并显示主窗口。
 - 第二实例转发的参数、deep link 和文件路径均视为不可信；首版只接受“激活现有窗口”或固定后台启动意图，不把转发载荷解释为查询、配置或操作。
 - SQLite 文件锁和 Socket owner 校验是第二层防护，不能只依赖 UI 单实例插件。
 - MCP Bridge 是短生命周期客户端进程，不计入 Desktop Host 单实例。
@@ -168,11 +170,11 @@ flowchart LR
 5. 注册 Tauri Commands/Events。
 6. 根据启动模式显示窗口或仅驻留托盘。
 
-自动登录启动应由用户显式启用。后台启动使用无主窗口模式，避免每次登录打断用户。
+自动登录启动默认关闭，只能由用户显式启用。登录或受控 MCP 后台启动进入 `BackgroundOnly`：初始不创建 WebView、不抢焦点、不显示 Dock icon，但保留 tray；用户激活后才创建并显示主窗口。
 
 ### 8.3 关闭窗口
 
-- 关闭主窗口只隐藏现有窗口，不销毁 WebView，也不退出 Desktop Host。
+- 关闭按钮和 `Command-W` 都执行 prevent-close 后隐藏现有窗口，不销毁 WebView，也不退出 Desktop Host。
 - Control Plane Runtime、SQLite、Scheduler 和 Unix Socket 继续运行。
 - 再次点击 Dock、托盘或启动应用时恢复主窗口。
 - React UI 重新打开后必须从 Query Service 获取当前快照，不依赖之前内存状态。
@@ -269,15 +271,18 @@ Codex / Hermes
 
 规则：
 
+- Desktop App 与 Bridge 是同一个 Release Set 的独立产物；稳定 App 路径为 `~/Applications/Next Infra.app`，Bridge 位于用户 Application Support 的版本目录并经 `current` 相对 symlink 暴露稳定命令路径。
 - 用户安装 Codex/Hermes 集成时，显式选择是否允许 MCP Bridge 启动 Desktop Host；该授权是本地集成设置，不由 Agent 参数控制。
 - Bridge 启动时若 Socket 不存在且已授权，只能通过冻结的可信 App Bundle 路径后台启动唯一 Desktop Host，并在有限时间内等待 Socket。
 - Bridge 不能自行承载 Control Plane Runtime，也不能启动参数提供的任意可执行路径。
 - 未授权、启动失败或超时返回结构化 `host_unavailable`。
 - 发现有效 `user_quit` 抑制标记时，即使之前授予过自动拉起权限，Bridge 也返回 `host_unavailable`；新建 Bridge 进程不得绕过该标记。
 - 已连接的 Desktop Host 被用户显式退出后，Bridge 不循环重新拉起应用。
-- Bridge 与 Host 执行协议版本握手；不兼容时返回升级指引。
-- Bridge 的稳定安装路径和随 App 更新策略必须在 Goal 1 冻结前确定。
+- Bridge 与 Host 执行协议版本握手；只接受同一 major 且当前/前一 minor 的恢复窗口，能力不满足时拒绝并返回升级指引。
+- 安装器必须 stage、验证并整体切换 App + Bridge + Integration Record；失败时整体回滚，不能留下永久不兼容的混合终态。
 - 远程 Streamable HTTP MCP 不进入首版。
+
+完整路径、权限、Integration Record、协议协商、原子切换和恢复规则见 [`DEC-G1-03`](./decisions/DEC-G1-03-bridge-install-and-upgrade.md)。
 
 ## 11. 本地存储
 
@@ -313,15 +318,22 @@ Desktop Adapter 和 MCP Bridge 都不能持有数据库连接。详细语义见[
 
 ## 13. 本地目录、凭据和权限
 
-推荐使用系统目录解析库获得以下逻辑位置：
+使用系统目录解析库获得以下逻辑位置：
 
 ```text
-Application Support/next-infra/
+~/Library/Application Support/Next Infra/
   next-infra.db
   backups/
   logs/
+  integration/
+    mcp/
+      releases/<release_id>/
+      current -> releases/<release_id>
+      integration-v1.json
+  state/
+    user-quit-v1.json
   run/
-    control.sock
+    next-infra-v1.sock
 ```
 
 要求：
@@ -332,26 +344,33 @@ Application Support/next-infra/
 - React 只能通过受限 Command 一次性提交 Secret，不能读取已保存值。
 - 导出功能默认移除内部属性、路径和 SecretRef。
 - WebView 禁止加载远程应用代码，外部链接通过受控 opener 交给系统浏览器。
+- Bridge 路径、`current` link、Integration Record 和 `user_quit` 的 owner/mode/损坏处理遵守 [`DEC-G1-03`](./decisions/DEC-G1-03-bridge-install-and-upgrade.md)。
+- Data Protection Keychain 的 service/account、access group、无交互读取和开发/发布身份隔离遵守 [`DEC-G1-04`](./decisions/DEC-G1-04-keychain-signing.md)。
 
 ## 14. 推荐工程边界
 
-以下只是未来工程布局，不代表本轮创建代码：
+Goal 1 固定以下 Cargo workspace 边界：
 
 ```text
 crates/
-  next-infra-core/          # 领域模型与端口
-  next-infra-store/         # SQLite 与 migration
-  next-infra-sync/          # Scheduler、Writer、diff
-  next-infra-query/         # Shared Query Service
-  next-infra-connectors/    # 编译期 Connector
-  next-infra-local-rpc/     # Unix Socket 协议
-  next-infra-mcp/           # MCP Server 逻辑
+  next-infra-core/
+  next-infra-store/
+  next-infra-connector-api/
+  next-infra-normalizer/
+  next-infra-connector-fixture/
+  next-infra-connector-contract-tests/
+  next-infra-connector-catalog/
+  next-infra-sync/
+  next-infra-query/
+  next-infra-runtime/
+  next-infra-local-rpc/
+  next-infra-mcp/
 apps/
-  desktop/                  # Tauri v2 + React/TypeScript
-  mcp-bridge/               # STDIO 可执行文件
+  desktop/                  # @next-infra/desktop + next-infra-desktop-adapter / next-infra
+  mcp-bridge/               # next-infra-mcp-bridge / next-infra-mcp
 ```
 
-Tauri Command handler 位于 `apps/desktop`，只能调用 `next-infra-query` 或明确的本地配置 service。Core crate 禁止依赖 Tauri 类型。
+Tauri Command handler 位于 `apps/desktop`，只能调用 `next-infra-query` 或明确的本地配置 service。Core、Store、Sync、Query、Runtime、Local RPC、MCP 与 Connector crates 禁止依赖 Tauri；Bridge 不得作为 sidecar 或 App Bundle 内容。精确 package、版本与依赖方向见 [`DEC-G1-01`](./decisions/DEC-G1-01-toolchain-and-crates.md)。
 
 ## 15. 优势
 
@@ -402,20 +421,16 @@ Tauri Command handler 位于 `apps/desktop`，只能调用 `next-infra-query` �
 
 资源关系查询适合图模型，但本地规模可以用 SQLite 关系表和递归查询满足。首版不引入独立图数据库。
 
-## 18. 未决问题
+## 18. Goal 1 已冻结决策与后续问题
 
-以下问题不阻塞本轮文档 Review，但必须在 Goal 1 开始前或对应目标前确认：
+Goal 1 前置决策已经冻结：工具链与 crate 边界见 [`DEC-G1-01`](./decisions/DEC-G1-01-toolchain-and-crates.md)，Desktop 生命周期见 [`DEC-G1-02`](./decisions/DEC-G1-02-desktop-lifecycle.md)，Bridge 安装与升级见 [`DEC-G1-03`](./decisions/DEC-G1-03-bridge-install-and-upgrade.md)，Keychain/签名边界见 [`DEC-G1-04`](./decisions/DEC-G1-04-keychain-signing.md)。本地 Goal 1 已具备实施条件；正式 release bundle ID、Apple Team、证书/profile 和公证凭据仍阻塞发布与真实 Keychain 验收。
 
-1. `next-infra-mcp` 在 App Bundle、用户级 bin 目录或独立安装包中的稳定路径。
-2. Desktop App 与 MCP Bridge 的原子升级和协议兼容策略。
-3. 自动登录启动默认关闭、首次引导推荐开启，还是默认开启并允许关闭；它与 MCP 的受控自动拉起授权必须分开设置。
-4. macOS 首版采用本地开发签名、Developer ID，还是在发布阶段再加入公证。
-5. Keychain item 的稳定命名、访问控制和后台启动时的可用性策略。
-6. Tauri 与插件具体版本的固定策略。
-7. 首批真实 Connector 是否按 GitHub/Actions、SSH、Dokploy、Cloudflare 顺序实施。
-8. 是否把本机自身作为 `local.host` 纳入首版。
-9. 默认历史保留期和 1 GiB 软预算是否需要进一步缩小。
-10. Hermes 何时安装，以便安排真实 MCP 兼容性验收。
+以下问题在对应后续 Goal 前确认，不阻塞本地 Goal 1：
+
+1. 首批真实 Connector 的最终实现顺序；当前建议 GitHub/Actions、SSH、Dokploy、Cloudflare。
+2. 是否把本机自身作为 `local.host` 纳入首版。
+3. 默认历史保留期和 1 GiB 软预算是否需要进一步缩小。
+4. Hermes 何时安装，以便安排真实 MCP 兼容性验收。
 
 ## 19. 设计验收标准
 

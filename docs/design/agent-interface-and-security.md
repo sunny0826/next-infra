@@ -101,7 +101,7 @@ Codex 与 Hermes 都支持远程 MCP，但首版禁用 HTTP MCP，也不启动 l
 
 Bridge 不能为了恢复连接自行创建 Runtime。Host 显式退出时先写入 `user_quit` 抑制标记；所有后续 Bridge 进程都必须尊重该标记并返回不可用，不能通过重启 Bridge 复活应用。只有用户主动启动 App，或已启用的下一次登录自动启动可以清除标记；MCP 拉起不能清除。
 
-Bridge 的安装路径、代码签名、随 App 原子升级和 Codex/Hermes 配置方式必须在 Goal 1 冻结。Host 与 Bridge 不兼容时应拒绝连接，而不是猜测字段语义。
+Bridge 的路径、可信记录与升级规则已经由 [`DEC-G1-03`](./decisions/DEC-G1-03-bridge-install-and-upgrade.md) 冻结：稳定 App 位于 `~/Applications/Next Infra.app`，Bridge 通过用户 Application Support 中的版本目录和 `current` link 暴露固定命令路径；二者作为同一个 Release Set stage、验证、切换和整体回滚。Integration Record 必须绑定 owner、mode、路径、hash、签名身份和协议版本。Host/Bridge 只在同 major 且当前/前一 minor 的恢复窗口内协商，必要 capability 不满足时拒绝连接，不能猜测字段语义。
 
 参考：
 
@@ -239,10 +239,13 @@ Secret Command 只能写入或替换指定 Connection 的 Keychain item，不能
 
 ### 9.4 Keychain 访问策略
 
-- Keychain service/account 名称由 Rust 根据 Connection ID 和 Secret 类型生成，React 不能传入原始 Keychain 定位符。
-- Item 的访问控制应绑定当前用户和稳定签名身份；开发签名、Developer ID 与升级后的访问行为必须分别验收。
-- 自动登录后台启动、屏幕锁定和 Keychain 暂不可用时不得循环弹出系统授权框；Connector 返回 `credential_unavailable` 并等待用户处理。
+- 使用 macOS Data Protection Keychain 的 generic password item，设置 `kSecUseDataProtectionKeychain=true`、`kSecAttrSynchronizable=false` 和 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`。
+- Keychain service/account 名称由 Rust 根据当前 bundle ID、Connection ID、Secret 类型和 generation 生成，React 不能传入原始 Keychain 定位符。
+- Item 绑定 provisioning profile 授权的显式私有 access group；开发与发布使用不同 bundle ID、service 和 access group，MCP Bridge 不共享该 entitlement。
+- 自动登录后台启动、屏幕锁定和 Keychain 暂不可用时采用无交互读取，不得循环弹出系统授权框；Connector 返回 `credential_unavailable` 并等待用户处理。
 - Secret 替换采用先写新 item、验证引用、再删除旧 item 的顺序，避免失败后失去可用凭据。
+
+完整 item 命名、SecretRef、错误语义、签名和公证边界见 [`DEC-G1-04`](./decisions/DEC-G1-04-keychain-signing.md)。Ad-hoc 构建只能验证 Mock/Fixture；真实 Keychain smoke 需要 Apple Development 签名，外部分发需要 Developer ID、Hardened Runtime、公证与 staple。
 
 ## 10. SSH 安全
 
@@ -281,10 +284,11 @@ Secret Command 只能写入或替换指定 Connection 的 Keychain item，不能
 - 自动启动由用户明确选择，后台启动不显示主窗口。
 - 第二个 Desktop Host 不得接管已被活动进程持有的数据库或 Socket。
 - App 与 MCP Bridge 必须进行协议版本握手。
-- 发布更新时不得先升级 Bridge 再留下永久不兼容 Host；原子性策略在 Goal 1 冻结。
+- 发布更新必须按 Release Set stage 并验证新 App/Bridge，在旧 Host 有界关闭后切换 App、Bridge `current` 和 Integration Record；新版本 smoke 失败则整体回滚，不能留下永久不兼容 Host/Bridge。
 - MCP 自动拉起只能使用安装时冻结的可信 App 路径，并尊重用户关闭该授权的选择。
 - 显式退出写入的 `user_quit` 标记跨 Bridge 进程生效，MCP 无权清除。
 - migration 失败时不得继续运行旧二进制写入新 schema，也不得自动破坏性回滚。
+- 首版不启用 Tauri Updater；发布身份和完整 App/DMG 分发遵守 [`DEC-G1-04`](./decisions/DEC-G1-04-keychain-signing.md)。
 
 ## 14. 未来操作接口
 

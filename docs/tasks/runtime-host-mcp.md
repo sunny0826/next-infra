@@ -1,6 +1,6 @@
 # Runtime、Host 与 MCP 任务包
 
-本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。所有工程任务当前均为 `HELD-AUTH`。
+本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。Goal 1 已获授权；`RHM-G1-01` 等待 `DEC-G1-06`，其余任务等待各自依赖与 Gate。
 
 ## Goal 1：工程与发布骨架
 

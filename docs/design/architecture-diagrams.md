@@ -285,13 +285,15 @@ stateDiagram-v2
 ```
 
 - 关闭窗口是隐藏，不是退出。
+- single-instance plugin 必须最先注册；BackgroundOnly 初始不创建 WebView，登录启动和 MCP 启动都不能把参数当授权。
 - `user_quit` 只由显式退出写入；崩溃、关机和升级重启不写入。
 - MCP 自动拉起不能清除 `user_quit`。
 - 崩溃恢复依靠 WAL、事务、interrupted SyncRun 和 cursor 提交规则，而不是假装上次同步成功。
+- 完整事件映射与验收矩阵见 [`DEC-G1-02`](./decisions/DEC-G1-02-desktop-lifecycle.md)。
 
-## 7. 未来工程依赖方向
+## 7. Goal 1 工程依赖方向
 
-以下只规定依赖方向，不授权创建工程：
+以下依赖方向与 package 边界已由 [`DEC-G1-01`](./decisions/DEC-G1-01-toolchain-and-crates.md) 冻结：
 
 ```mermaid
 flowchart TD
@@ -301,35 +303,53 @@ flowchart TD
     MCPLogic["next-infra-mcp"]
     LocalRPC["next-infra-local-rpc"]
     Query["next-infra-query"]
+    Runtime["next-infra-runtime"]
     Sync["next-infra-sync"]
-    Connectors["next-infra-connectors"]
+    Catalog["next-infra-connector-catalog"]
+    API["next-infra-connector-api"]
+    Normalizer["next-infra-normalizer"]
+    Fixture["next-infra-connector-fixture"]
+    ContractTests["next-infra-connector-contract-tests"]
     Store["next-infra-store"]
     Core["next-infra-core"]
 
     DesktopApp --> Tauri
+    DesktopApp --> Runtime
     DesktopApp --> Query
-    DesktopApp --> Sync
     DesktopApp --> LocalRPC
     BridgeApp --> MCPLogic
     MCPLogic --> LocalRPC
-    LocalRPC --> Core
-    Query --> Store
+    LocalRPC --> Query
+    Runtime --> Store
+    Runtime --> Sync
+    Runtime --> Query
+    Runtime --> Catalog
     Query --> Core
-    Sync --> Connectors
-    Sync --> Store
     Sync --> Core
-    Connectors --> Core
+    Sync --> API
+    Sync --> Normalizer
+    Catalog --> API
+    Normalizer --> API
+    Normalizer --> Core
+    API --> Core
+    Fixture --> API
+    Fixture --> Core
+    ContractTests -. test-only .-> API
+    ContractTests -. test-only .-> Fixture
+    ContractTests -. test-only .-> Normalizer
     Store --> Core
 ```
 
 禁止方向：
 
 ```text
-core/store/sync/query/connectors -> Tauri
+core/store/sync/query/runtime/local-rpc/mcp/connector-* -> Tauri
 React -> SQLite / Keychain / Provider SDK / system shell
 MCP Bridge -> SQLite / Keychain / Connector
 Connector -> SQLite writer
 ```
+
+`apps/mcp-bridge` 是独立 Cargo package 和 `next-infra-mcp` binary；它不得成为 Tauri sidecar、Desktop binary target 或 App Bundle 内容。
 
 ## 8. 图的变更规则
 
