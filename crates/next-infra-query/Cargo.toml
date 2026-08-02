@@ -5,5 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = []
+typescript-bindings = ["dep:ts-rs"]
+
 [dependencies]
 next-infra-core = { workspace = true }
+serde = { workspace = true }
+ts-rs = { workspace = true, optional = true, features = ["no-serde-warnings"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }

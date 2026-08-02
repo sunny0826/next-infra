@@ -14,6 +14,7 @@
     "build": "tsc --noEmit && vite build",
     "tauri": "tauri",
     "test:dependency-direction": "node scripts/check-cargo-dependencies.mjs",
+    "test:query-bindings": "node scripts/check-query-bindings.mjs",
     "test:bundle-boundary": "node scripts/check-bundle-boundary.mjs"
   },
   "dependencies": {
