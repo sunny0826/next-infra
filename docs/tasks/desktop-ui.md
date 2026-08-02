@@ -23,7 +23,7 @@
 - `V-CONTRACT`：Query DTO Rust tests、binding drift check、TypeScript build。
 - `V-ADAPTER`：`rtk cargo test -p next-infra-desktop-adapter` + `V-UI`。
 - `V-VIEWPORT`：至少 1600×1000、900×800、390×844；最终仍须六页逐页回归。
-- `V-DESKTOP`：真实 Tauri build 和 `test:desktop-smoke`；Vite 页面不能替代。
+- `V-DESKTOP`：依次执行 `rtk pnpm --dir apps/desktop tauri build`、`rtk pnpm --dir apps/desktop test:bundle-boundary` 与 `rtk pnpm --dir apps/desktop test:desktop-smoke`；Vite 页面不能替代。
 
 Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不得在任务执行时各自发明不同脚本。
 
@@ -88,6 +88,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G1-04` — Tauri Bootstrap Smoke
 
+- **状态：** `BLOCKED`（当前 macOS 控制台处于锁屏状态，无法完成窗口截图）。
 - **目标：** 证明真实 Tauri App 可以承载 Mock Shell。
 - **依赖：** `UI-G1-02/03`、Host skeleton。
 - **独占路径：** `apps/desktop/e2e/bootstrap/**`；QA 只提交测试。
@@ -96,6 +97,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输出：** 最小真实 bundle smoke。
 - **验收：** App 实际启动并渲染 Shell；不访问 SQLite、Keychain 或 Provider。
 - **验证：** `V-DESKTOP` 的 Goal 1 子集。
+- **实现证据（2026-08-02）：** smoke 已使用真实 release bundle 验证唯一新 PID、屏幕内主窗口（900×600）和精确 PID 退出；系统状态确认 `IOConsoleLocked=Yes`、`CGSSessionScreenIsLocked=Yes`，锁屏下 ScreenCaptureKit 返回 `SCStreamErrorDomain -3811` 且系统 `screencapture` 无法生成图像。脚本会显式拒绝锁屏会话，因此尚无足够证据确认 Shell 内容渲染，任务保持阻塞而非降级放行。
 - **风险/停止：** 签名/环境失败单独归因；QA 不改 Host。
 
 ## 4. Goal 2：Query Snapshot Fixture
