@@ -74,7 +74,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G1-03` — Empty/Mock Desktop Adapter
 
-- **状态：** `RUNNING`。
+- **状态：** `REVIEW`。
 - **目标：** 确保 SPA 只能通过 `DesktopAdapter` port 获取数据。
 - **依赖：** `UI-G1-01`。
 - **独占路径：** TypeScript Adapter paths；UI fixture 使用专属目录。
@@ -83,6 +83,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输入/输出：** generated bindings → adapter port 与 deterministic mock。
 - **验收：** feature code 不直接 `invoke/listen`；browser component tests 不需要 Tauri；mock 无真实身份/凭据。
 - **验证：** `V-UI + V-CONTRACT`。
+- **实现证据（2026-08-02）：** 只读 port、Empty/Mock Adapter、React DI 与虚构 fixture 已落地，生产 composition 仅注入 Empty Adapter；5 个测试文件共 30 项测试、依赖图守卫、TypeScript build 与 QDTO drift 均通过。
 - **风险/停止：** 页面不能私自扩展 Adapter；mock 不成为第二套 Query Service。
 
 ### `UI-G1-04` — Tauri Bootstrap Smoke
