@@ -1,20 +1,15 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-export function App() {
-  return (
-    <main>
-      <h1>Next Infra</h1>
-    </main>
-  );
-}
+import { AppShell } from "./app/AppShell";
+import "./styles/shell.css";
 
 const container = document.getElementById("root");
 
 if (container) {
   createRoot(container).render(
     <StrictMode>
-      <App />
+      <AppShell />
     </StrictMode>,
   );
 }
