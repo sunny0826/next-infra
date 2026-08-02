@@ -1,0 +1,12 @@
+[package]
+name = "next-infra-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+next-infra-connector-catalog = { workspace = true }
+next-infra-query = { workspace = true }
+next-infra-store = { workspace = true }
+next-infra-sync = { workspace = true }

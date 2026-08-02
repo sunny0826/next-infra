@@ -1,0 +1,11 @@
+[package]
+name = "next-infra-sync"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+next-infra-connector-api = { workspace = true }
+next-infra-core = { workspace = true }
+next-infra-normalizer = { workspace = true }

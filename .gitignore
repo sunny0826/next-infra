@@ -1,1 +1,6 @@
 .playwright-cli
+.DS_Store
+target/
+node_modules/
+dist/
+apps/desktop/src-tauri/gen/

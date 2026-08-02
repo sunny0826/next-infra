@@ -1,0 +1,11 @@
+[package]
+name = "next-infra-connector-contract-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dev-dependencies]
+next-infra-connector-api = { workspace = true }
+next-infra-connector-fixture = { workspace = true }
+next-infra-normalizer = { workspace = true }

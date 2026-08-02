@@ -1,0 +1,44 @@
+[workspace]
+members = [
+  "crates/next-infra-core",
+  "crates/next-infra-store",
+  "crates/next-infra-connector-api",
+  "crates/next-infra-normalizer",
+  "crates/next-infra-connector-fixture",
+  "crates/next-infra-connector-contract-tests",
+  "crates/next-infra-connector-catalog",
+  "crates/next-infra-sync",
+  "crates/next-infra-query",
+  "crates/next-infra-runtime",
+  "crates/next-infra-local-rpc",
+  "crates/next-infra-mcp",
+  "apps/desktop/src-tauri",
+  "apps/mcp-bridge",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+publish = false
+
+[workspace.dependencies]
+next-infra-core = { path = "crates/next-infra-core", version = "=0.1.0" }
+next-infra-store = { path = "crates/next-infra-store", version = "=0.1.0" }
+next-infra-connector-api = { path = "crates/next-infra-connector-api", version = "=0.1.0" }
+next-infra-normalizer = { path = "crates/next-infra-normalizer", version = "=0.1.0" }
+next-infra-connector-fixture = { path = "crates/next-infra-connector-fixture", version = "=0.1.0" }
+next-infra-connector-contract-tests = { path = "crates/next-infra-connector-contract-tests", version = "=0.1.0" }
+next-infra-connector-catalog = { path = "crates/next-infra-connector-catalog", version = "=0.1.0" }
+next-infra-sync = { path = "crates/next-infra-sync", version = "=0.1.0" }
+next-infra-query = { path = "crates/next-infra-query", version = "=0.1.0" }
+next-infra-runtime = { path = "crates/next-infra-runtime", version = "=0.1.0" }
+next-infra-local-rpc = { path = "crates/next-infra-local-rpc", version = "=0.1.0" }
+next-infra-mcp = { path = "crates/next-infra-mcp", version = "=0.1.0" }
+tauri = { version = "=2.11.5" }
+tauri-build = { version = "=2.6.3" }
+tauri-plugin-single-instance = { version = "=2.4.3" }
+tauri-plugin-autostart = { version = "=2.5.1" }
+tauri-plugin-opener = { version = "=2.5.4" }
+ts-rs = { version = "=12.0.1" }

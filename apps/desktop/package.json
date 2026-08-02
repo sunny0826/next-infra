@@ -1,0 +1,39 @@
+{
+  "name": "@next-infra/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24.12.0 <25"
+  },
+  "scripts": {
+    "dev": "vite",
+    "lint": "tsc --noEmit",
+    "test": "pnpm run test:dependency-direction && vitest run",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "test:dependency-direction": "node scripts/check-cargo-dependencies.mjs",
+    "test:bundle-boundary": "node scripts/check-bundle-boundary.mjs"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-autostart": "2.5.1",
+    "@tauri-apps/plugin-opener": "2.5.4",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@testing-library/jest-dom": "7.0.0",
+    "@testing-library/react": "16.3.2",
+    "@testing-library/user-event": "14.6.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.5",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.0",
+    "vitest": "4.1.10"
+  }
+}

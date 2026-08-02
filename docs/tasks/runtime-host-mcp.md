@@ -1,21 +1,22 @@
 # Runtime、Host 与 MCP 任务包
 
-本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。Goal 1 已获授权；`RHM-G1-01` 等待 `DEC-G1-06`，其余任务等待各自依赖与 Gate。
+本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。Goal 1 已获授权；`RHM-G1-01` 已进入复核，其余任务等待各自依赖与 Gate。
 
 ## Goal 1：工程与发布骨架
 
 ### `RHM-G1-01` — Workspace Bootstrap 与空发布目标
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 建立可编译、无业务实现的 Rust workspace、Tauri App、React host 和独立 MCP Bridge target。
 - **依赖：** 用户授权进入 Goal 1；`DEC-G1-06` 已给出无 blocker 的 `READY` 结论。
-- **独占路径：** 根 manifests/lockfiles/toolchain/ignore 配置；所有初始 crate/app manifests；全部空 crate `src/lib.rs`；`apps/mcp-bridge/src/main.rs`；Goal 1 的 `apps/desktop/src-tauri/{build.rs,src/main.rs,tauri.conf.json,capabilities/**}`；以及可由后续 Shell Owner 接管的最小 `apps/desktop/{index.html,vite.config.ts,tsconfig*.json,src/main.tsx,src/vite-env.d.ts}`。本任务同时是 Goal 1 Bootstrap Captain 与临时 Desktop Composition Captain。
+- **独占路径：** 根 manifests/lockfiles/toolchain/ignore 配置；所有初始 crate/app manifests；全部空 crate `src/lib.rs`；`apps/mcp-bridge/src/main.rs`；Goal 1 的 `apps/desktop/src-tauri/{build.rs,src/main.rs,tauri.conf.json,capabilities/**,icons/icon.png}`；依赖与 bundle guard 的 `apps/desktop/scripts/**`；以及可由后续 Shell Owner 接管的最小 `apps/desktop/{index.html,vite.config.ts,tsconfig*.json,src/main.tsx,src/main.test.tsx,src/test/setup.ts,src/vite-env.d.ts}`。本任务同时是 Goal 1 Bootstrap Captain 与临时 Desktop Composition Captain。
 - **只读输入：** crate 拓扑、版本矩阵、Bridge 安装和签名决策。
 - **范围：** 空 crates/targets、工具链固定、依赖方向 guard、最小 React/Vite host、最小 Tauri composition、lint/test/build 和 bundle-boundary 命令。
 - **非目标：** 不创建数据库表、真实 Connector、MCP Tool、业务页面或 Secret。
 - **输出：** 可构建 workspace、独立 Core 测试目标、独立 `next-infra-mcp` 二进制目标、可显示空主窗口的 React/Tauri host，以及逐路径 handoff 清单。完成后，React Shell 路径交给 `UI-G1-02`；Tauri composition 路径在 Goal 1 Gate 后保持冻结，Goal 3 再交给 `RHM-G3-05`。
 - **验收：** Core 不依赖 Tauri；Bridge 不成为 Desktop 默认 binary；无 Provider SDK；版本不依赖全局漂移。
 - **验证：** `rtk cargo metadata --locked --format-version 1`；`rtk cargo test -p next-infra-core --locked`；`rtk cargo test --workspace --all-targets --locked`；`rtk cargo clippy --workspace --all-targets --locked -- -D warnings`；Desktop frozen install/lint/test/build；独立 Bridge build；Tauri build；`test:bundle-boundary`。QDTO export/drift 在 `UI-G1-01` 完成后由 `GATE-G1` 执行。
+- **实现证据（2026-08-02）：** workspace、独立 Bridge、最小 React/Tauri host、依赖闭包 guard、受限 CSP 与 bundle-boundary guard 均已落地；上述验证全部通过，最终 `.app` 已完成真实启动、进程确认与正常退出回归。
 - **风险/停止：** 根 manifest 和 lockfile 禁止其他 worker 同时编辑；发现 crate 图与决策不一致时停止，不自行改设计。
 
 ## Goal 2：领域与 SQLite

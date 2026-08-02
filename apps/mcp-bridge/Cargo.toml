@@ -1,0 +1,13 @@
+[package]
+name = "next-infra-mcp-bridge"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "next-infra-mcp"
+path = "src/main.rs"
+
+[dependencies]
+next-infra-mcp = { workspace = true }
