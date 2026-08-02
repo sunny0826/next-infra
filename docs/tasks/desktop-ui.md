@@ -46,6 +46,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G1-01` — Rust QDTO → TypeScript Binding Pipeline
 
+- **状态：** `REVIEW`。
 - **目标：** 建立 Rust 权威 schema 到只读 TypeScript binding 的单向管线。
 - **依赖：** `RHM-G1-01` workspace bootstrap。
 - **独占路径：** QDTO/schema/generator/generated paths；由未来 QDTO Owner 执行，不与页面任务并行修改。
@@ -54,10 +55,12 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输入/输出：** glossary/resource model → Rust DTO、generated TS、CI drift failure。
 - **验收：** React 无手写同名 schema；Rust 变化未生成时 CI 失败；Secret 字段结构上不可达。
 - **验证：** `V-CONTRACT`。
+- **实现证据（2026-08-02）：** Rust QDTO、12 个只读 TypeScript binding、确定性导出及 modified/untracked drift guard 已落地；6 个 Rust 契约测试、Clippy、TypeScript build、clean/negative drift 回归均通过。
 - **风险/停止：** Rust 定义、生成物和 snapshot 必须由一个 owner 原子提交。
 
 ### `UI-G1-02` — React App Shell
 
+- **状态：** `REVIEW`。
 - **目标：** 建立符合 Interface System 的三栏桌面应用框架。
 - **依赖：** `RHM-G1-01` 提供可启动的 Tauri/Vite host；可与 `UI-G1-01` 并行。
 - **独占路径：** Shell Owner paths。
@@ -66,10 +69,12 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输入/输出：** Interface System → 稳定 Shell 与 feature registration points。
 - **验收：** 188/316 桌面栏、52/29 上下条、1180/820/560 响应规则按规范生效；六项导航有可访问名称；不退回 KPI/card-grid 仪表盘。
 - **验证：** `V-UI + V-VIEWPORT`。
+- **实现证据（2026-08-02）：** 六 route Shell、可开闭 Inspector、只读 Context/Runtime bar 与精确响应规则已落地；8 个组件测试及 1600×1000、900×800、390×844 真实浏览器回归通过，三种 viewport 均无页面级横向溢出或控制台错误。
 - **风险/停止：** 不复制原型 fixture 文案为产品常量；页面 owner 不编辑 route registry/global CSS。
 
 ### `UI-G1-03` — Empty/Mock Desktop Adapter
 
+- **状态：** `RUNNING`。
 - **目标：** 确保 SPA 只能通过 `DesktopAdapter` port 获取数据。
 - **依赖：** `UI-G1-01`。
 - **独占路径：** TypeScript Adapter paths；UI fixture 使用专属目录。
