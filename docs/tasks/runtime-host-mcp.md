@@ -6,6 +6,7 @@
 
 ### `RHM-G1-01` — Workspace Bootstrap 与空发布目标
 
+- **状态：** `READY`。
 - **目标：** 建立可编译、无业务实现的 Rust workspace、Tauri App、React host 和独立 MCP Bridge target。
 - **依赖：** 用户授权进入 Goal 1；`DEC-G1-06` 已给出无 blocker 的 `READY` 结论。
 - **独占路径：** 根 manifests/lockfiles/toolchain/ignore 配置；所有初始 crate/app manifests；全部空 crate `src/lib.rs`；`apps/mcp-bridge/src/main.rs`；Goal 1 的 `apps/desktop/src-tauri/{build.rs,src/main.rs,tauri.conf.json,capabilities/**}`；以及可由后续 Shell Owner 接管的最小 `apps/desktop/{index.html,vite.config.ts,tsconfig*.json,src/main.tsx,src/vite-env.d.ts}`。本任务同时是 Goal 1 Bootstrap Captain 与临时 Desktop Composition Captain。

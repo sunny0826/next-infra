@@ -170,7 +170,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G1-06` — Goal 1 独立只读 Review
 
-- **状态：** `READY`（首轮 `BLOCKED` 已修复，等待另一名 fresh reviewer 复核）。
+- **状态：** `DONE`（fresh reviewer 结论 `READY`）。
 - **目标：** 由未参与四项决策和合并的全新 worker 独立判断 Goal 1 是否具备无歧义、可验证的工程入口。
 - **依赖：** `DEC-G1-05` 完成并停止写入权威设计。
 - **独占路径：** 只读，无写路径；Review 报告由调度者在 reviewer 完成后单写固化。
@@ -308,6 +308,6 @@ Gate Captain 必须：
 ## 8. 当前可执行边界
 
 - 已完成：Git 初始化、Goal 0、`DEC-G1-01..05` 和任务拆解。
-- 当前可派发：`DEC-G1-06` 独立只读 Review。
-- 当前等待：`RHM-G1-01` 等待 Review 给出无 blocker 的 `READY`；Goal 1 其余 UI/Host 任务等待 Bootstrap。Goal 2 以后全部等待前序 Gate。
+- 当前可派发：`RHM-G1-01` Workspace Bootstrap 与空发布目标。
+- 当前等待：Goal 1 其余 UI/Host 任务等待 Bootstrap。Goal 2 以后全部等待前序 Gate。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。
