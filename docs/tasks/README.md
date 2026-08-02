@@ -56,7 +56,7 @@ flowchart LR
 - `crates/next-infra-core/**`：Domain Contract Owner。
 - SQLite migration 目录和 migration 编号：Store Migration Owner。
 - Query DTO、Schema、生成器和生成后的 TypeScript：QDTO Owner；生成文件禁止手改。
-- Tauri `main.rs`、`lib.rs`、配置、capabilities：Desktop Composition Captain。
+- Tauri `main.rs`、`lib.rs`、配置、capabilities：Goal 1 由 `RHM-G1-01` 临时 Desktop Composition Captain 创建，Goal 3 再由 `RHM-G3-05` 接管；其他 worker 不编辑。
 - Local RPC protocol 和 golden fixtures：RPC Contract Owner。
 - App route registry 和全局 Shell CSS：Shell Owner。
 - 每个 Provider crate 和 fixture 目录：对应 Provider Owner；根 registry 仍由 Gate Captain 修改。
@@ -92,7 +92,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 | Goal | 串行冻结 / 入口 | 可并行任务 | 串行汇合 |
 | --- | --- | --- | --- |
-| 1 | `DEC-G1-01/02/04` 并行 → `DEC-G1-03` → `DEC-G1-05` 合并 → `DEC-G1-06` 独立 Review → `RHM-G1-01` | Bootstrap 后 `UI-G1-01` 与 `UI-G1-02`；随后 `UI-G1-03` | `GATE-G1` |
+| 1 | `DEC-G1-01/02/04` 并行 → `DEC-G1-03` → `DEC-G1-05` 合并 → `DEC-G1-06` 独立 Review → `RHM-G1-01` | Bootstrap 后 `UI-G1-01` 与 `UI-G1-02`；随后 `UI-G1-03`，再执行 `UI-G1-04` | `GATE-G1` |
 | 2 | `RHM-G2-01` Domain | `RHM-G2-02` Migration 与 `CON-G2-01` Connector API | Store、Sync、Normalizer、Fixture、Contract Tests 分支 | `GATE-G2` |
 | 3 | `RHM-G3-01` Query/QDTO | Runtime、Host、Keychain、Adapter、UI Foundation | 页面分支 → Shell 集成 → QA | `GATE-G3` |
 | 4 | `RHM-G4-01` RPC Contract | Unix Socket、STDIO MCP、Host Availability | Agent/security E2E | `GATE-G4` |
@@ -170,7 +170,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G1-06` — Goal 1 独立只读 Review
 
-- **状态：** `READY`。
+- **状态：** `READY`（首轮 `BLOCKED` 已修复，等待另一名 fresh reviewer 复核）。
 - **目标：** 由未参与四项决策和合并的全新 worker 独立判断 Goal 1 是否具备无歧义、可验证的工程入口。
 - **依赖：** `DEC-G1-05` 完成并停止写入权威设计。
 - **独占路径：** 只读，无写路径；Review 报告由调度者在 reviewer 完成后单写固化。
@@ -222,7 +222,7 @@ Gate Captain 必须：
 - **独占路径：** Goal 1 shared manifests/lockfiles、Desktop/MCP target wiring、`tests/gates/goal-1/**` 和验收报告。
 - **非目标：** 不创建数据库表、Provider、MCP tools 或业务页面。
 - **验收：** 真实 Tauri App 启动并退出；Core 独立测试；Mock/Empty Adapter 启动；Rust→TS binding drift guard；独立 Bridge target；无 Provider SDK/credential。
-- **验证：** Goal 1 的 format/clippy/test/Desktop build/Tauri build 全部执行。
+- **验证：** 必须完整执行 [`DEC-G1-01`](../design/decisions/DEC-G1-01-toolchain-and-crates.md#8-goal-1-验证合同) 的冻结合同，并补充 `cargo fmt --all --check`、Desktop lint/test 和真实 App 启动/退出 smoke；不得以 `RHM-G1-01` 的阶段性子集替代。
 - **风险/停止：** toolchain、签名或 target ambiguity 失败时区分环境和实现根因；未通过不得进入 Goal 2。
 
 ### `GATE-G2` — Domain、Connector 与 SQLite 验收门

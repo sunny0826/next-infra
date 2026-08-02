@@ -101,7 +101,7 @@ Codex 与 Hermes 都支持远程 MCP，但首版禁用 HTTP MCP，也不启动 l
 
 Bridge 不能为了恢复连接自行创建 Runtime。Host 显式退出时先写入 `user_quit` 抑制标记；所有后续 Bridge 进程都必须尊重该标记并返回不可用，不能通过重启 Bridge 复活应用。只有用户主动启动 App，或已启用的下一次登录自动启动可以清除标记；MCP 拉起不能清除。
 
-Bridge 的路径、可信记录与升级规则已经由 [`DEC-G1-03`](./decisions/DEC-G1-03-bridge-install-and-upgrade.md) 冻结：稳定 App 位于 `~/Applications/Next Infra.app`，Bridge 通过用户 Application Support 中的版本目录和 `current` link 暴露固定命令路径；二者作为同一个 Release Set stage、验证、切换和整体回滚。Integration Record 必须绑定 owner、mode、路径、hash、签名身份和协议版本。Host/Bridge 只在同 major 且当前/前一 minor 的恢复窗口内协商，必要 capability 不满足时拒绝连接，不能猜测字段语义。
+Bridge 的路径、可信记录与升级规则已经由 [`DEC-G1-03`](./decisions/DEC-G1-03-bridge-install-and-upgrade.md) 冻结：稳定 App 位于 `~/Applications/Next Infra.app`，Bridge 通过用户 Application Support 中的版本目录和 `current` link 暴露固定命令路径；二者作为同一个 Release Set stage、验证、切换和整体回滚。Integration Record 必须绑定 owner、mode、路径、hash、签名身份和协议版本。初始协议为 `1.0`、最低支持 minor `0`；Host/Bridge 交换完整区间并选择最高交集，只在同 major 且至多当前/前一 minor 的恢复窗口内协商，双向必要 capability 不满足时拒绝连接，不能猜测字段语义。
 
 参考：
 

@@ -37,11 +37,12 @@
 8. [界面与可视化设计](./visualization-and-interaction.md)：信息架构、视觉语义、拓扑边界和桌面交互状态。
 9. [串行 Goal 与并行任务](./implementation-goals.md)：定义不可跨越的 Goal 验收顺序。
 10. [Goal 1 决策索引](./decisions/README.md)：工具链、生命周期、Bridge、Keychain/签名的冻结状态与当前阻塞。
-11. [文档 Review 报告](./REVIEW-2026-08-02.md)：记录 Tauri 架构调整后的审查发现、修复和保留风险。
-12. [HTML 交互原型](../../prototype/README.md)：用虚构 Fixture 验证 Overview、Topology、Evidence Spine 和窄屏布局。
-13. [Interface System](../../.interface-design/system.md)：固化已通过浏览器验收的 UI token、响应式框架、重复组件和状态语义，是 React 实现的视觉规范。
-14. [Luna Worker 并行任务总表](../tasks/README.md)：按 Runtime、Connector、Desktop UI 拆解依赖波次、独占路径、验收和 Gate Captain。
-15. [任务拆解独立 Review](../tasks/REVIEW-2026-08-02.md)：记录首轮 blocker、修订和二轮 `PASS`。
+11. [Goal 1 独立 Review](./decisions/REVIEW-G1-2026-08-02.md)：记录工程入口首轮 blocker、修复和 fresh re-review。
+12. [文档 Review 报告](./REVIEW-2026-08-02.md)：记录 Tauri 架构调整后的审查发现、修复和保留风险。
+13. [HTML 交互原型](../../prototype/README.md)：用虚构 Fixture 验证 Overview、Topology、Evidence Spine 和窄屏布局。
+14. [Interface System](../../.interface-design/system.md)：固化已通过浏览器验收的 UI token、响应式框架、重复组件和状态语义，是 React 实现的视觉规范。
+15. [Luna Worker 并行任务总表](../tasks/README.md)：按 Runtime、Connector、Desktop UI 拆解依赖波次、独占路径、验收和 Gate Captain。
+16. [任务拆解独立 Review](../tasks/REVIEW-2026-08-02.md)：记录首轮 blocker、修订和二轮 `PASS`。
 
 ## 文档治理
 

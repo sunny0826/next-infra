@@ -7,7 +7,7 @@
 
 ## 1. 唯一决策
 
-Next Infra 使用 Rust `1.92.0`、Edition 2024、Node.js `24.12.0`、pnpm `11.9.0`、Tauri v2 精确 patch 版本和 `ts-rs 12.0.1`。仓库采用一个 Cargo virtual workspace；长生命周期 Desktop Host 与短生命周期 `next-infra-mcp` 是两个独立 Cargo package / binary target。领域、存储、同步、查询与 Runtime 不得依赖 Tauri，Bridge 不得被打入 Desktop App Bundle。
+Next Infra 使用 Rust `1.92.0`、Edition 2024、Node.js `24.12.0`、pnpm `11.9.0`、Tauri v2、React/Vite 测试栈的精确 patch 版本和 `ts-rs 12.0.1`。仓库采用一个 Cargo virtual workspace；长生命周期 Desktop Host 与短生命周期 `next-infra-mcp` 是两个独立 Cargo package / binary target。领域、存储、同步、查询与 Runtime 不得依赖 Tauri，Bridge 不得被打入 Desktop App Bundle。
 
 选择当前已测环境而非追逐最新版本，目的是让 Goal 1 有可复现起点。版本升级必须显式触发本文复核，不能在普通功能任务中顺带发生。
 
@@ -40,8 +40,15 @@ Next Infra 使用 Rust `1.92.0`、Edition 2024、Node.js `24.12.0`、pnpm `11.9.
 | --- | --- | --- | --- |
 | Rust toolchain | `1.92.0` | 根 `rust-toolchain.toml`，`profile=minimal`，components 为 `rustfmt, clippy` | [release notes](https://doc.rust-lang.org/stable/releases.html#version-1920-2025-12-11) |
 | Rust edition / resolver | `2024` / `3` | 根 `Cargo.toml` 的 `workspace.package.edition` / `workspace.resolver` | [Edition Guide](https://doc.rust-lang.org/edition-guide/rust-2024/index.html) |
+| Project version | `0.1.0` | `workspace.package.version`、Desktop package/app version；前端保持 `private: true` | 本地首个开发版本，不构成发布承诺 |
 | Node.js | `24.12.0` | 根 `.node-version`；`engines.node` 为 `>=24.12.0 <25` | [v24 LTS](https://nodejs.org/en/about/previous-releases) |
 | pnpm | `11.9.0` | 根 `package.json#packageManager` 为 `pnpm@11.9.0` | [npm registry](https://www.npmjs.com/package/pnpm/v/11.9.0) |
+| `react` / `react-dom` | `19.2.8` / `19.2.8` | Desktop dependencies | [React](https://www.npmjs.com/package/react/v/19.2.8) · [React DOM](https://www.npmjs.com/package/react-dom/v/19.2.8) |
+| `typescript` | `7.0.2` | Desktop devDependency；`lint` 使用 `tsc --noEmit` | [npm registry](https://www.npmjs.com/package/typescript/v/7.0.2) |
+| `vite` / `@vitejs/plugin-react` | `8.2.0` / `6.0.5` | Desktop devDependencies | [Vite](https://www.npmjs.com/package/vite/v/8.2.0) · [React plugin](https://www.npmjs.com/package/@vitejs/plugin-react/v/6.0.5) |
+| `@types/react` / `@types/react-dom` | `19.2.18` / `19.2.4` | Desktop devDependencies | [React types](https://www.npmjs.com/package/@types/react/v/19.2.18) · [React DOM types](https://www.npmjs.com/package/@types/react-dom/v/19.2.4) |
+| `vitest` / `jsdom` | `4.1.10` / `30.0.1` | Desktop devDependencies；组件测试环境 | [Vitest](https://www.npmjs.com/package/vitest/v/4.1.10) · [jsdom](https://www.npmjs.com/package/jsdom/v/30.0.1) |
+| Testing Library | `@testing-library/react 16.3.2`、`@testing-library/jest-dom 7.0.0`、`@testing-library/user-event 14.6.1` | Desktop devDependencies | [React](https://www.npmjs.com/package/@testing-library/react/v/16.3.2) · [jest-dom](https://www.npmjs.com/package/@testing-library/jest-dom/v/7.0.0) · [user-event](https://www.npmjs.com/package/@testing-library/user-event/v/14.6.1) |
 | `tauri` | `2.11.5` | 根 `workspace.dependencies`，Desktop 使用 `workspace = true` | [crates.io](https://crates.io/crates/tauri/2.11.5) |
 | `tauri-build` | `2.6.3` | 根 `workspace.dependencies`，仅 Desktop build-dependency | [crates.io](https://crates.io/crates/tauri-build/2.6.3) |
 | `@tauri-apps/api` | `2.11.1` | Desktop dependency | [npm registry](https://www.npmjs.com/package/@tauri-apps/api/v/2.11.1) |
@@ -54,6 +61,8 @@ Next Infra 使用 Rust `1.92.0`、Edition 2024、Node.js `24.12.0`、pnpm `11.9.
 `single-instance` 没有 JavaScript API，因此没有 `@tauri-apps/plugin-single-instance` 依赖，也不需要对应 capability；依据见[官方插件文档](https://v2.tauri.app/plugin/single-instance/)。托盘使用 Tauri 自带 `tray-icon` feature，不新增插件。
 
 Goal 1 只允许上述三个官方插件。暂不引入 Shell、SQL、Store、Updater、Process、Notification、Provider SDK 或 Git 依赖。Opener 只用于受 capability 限制的外部 `https` 链接；Autostart 的 capability 与行为由 Desktop Host 后续任务实现。
+
+前端 Goal 1 不引入 ESLint 及其 plugin matrix；`pnpm lint` 的冻结含义是 TypeScript `noEmit` 静态检查，避免为了空骨架增加第二套 lint 配置。Vitest + jsdom + Testing Library 是 React 组件测试的唯一基础栈，页面任务不得自行换测试 runner。
 
 ### 3.1 锁定规则
 

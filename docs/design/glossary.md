@@ -1,6 +1,6 @@
 # Next Infra 术语表
 
-**状态：** Draft（规范性术语基线）  
+**状态：** Accepted（规范性术语基线）
 **适用范围：** 设计文档、未来 Rust/TypeScript 命名、UI 文案、MCP Schema 和测试描述
 
 本文定义 Next Infra 中每个核心词的唯一含义。英文术语是代码、Schema 和跨文档引用的规范名称；中文用于解释，不另造同义架构名。

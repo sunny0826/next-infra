@@ -278,7 +278,7 @@ Codex / Hermes
 - 未授权、启动失败或超时返回结构化 `host_unavailable`。
 - 发现有效 `user_quit` 抑制标记时，即使之前授予过自动拉起权限，Bridge 也返回 `host_unavailable`；新建 Bridge 进程不得绕过该标记。
 - 已连接的 Desktop Host 被用户显式退出后，Bridge 不循环重新拉起应用。
-- Bridge 与 Host 执行协议版本握手；只接受同一 major 且当前/前一 minor 的恢复窗口，能力不满足时拒绝并返回升级指引。
+- Bridge 与 Host 执行协议版本握手；初始协议固定为 `1.0`、最低支持 minor `0`。双方交换完整 minor 区间并选择最高交集，只接受同一 major 且至多当前/前一 minor 的恢复窗口；双向 capability 不满足时拒绝并返回升级指引。
 - 安装器必须 stage、验证并整体切换 App + Bridge + Integration Record；失败时整体回滚，不能留下永久不兼容的混合终态。
 - 远程 Streamable HTTP MCP 不进入首版。
 

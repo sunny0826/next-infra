@@ -125,6 +125,7 @@ sequenceDiagram
 ### 5.1 开发
 
 - ad-hoc 仅用于 Mock Desktop Adapter、Fixture 和无 Secret 测试，不能宣称 Keychain 已验证。
+- Goal 1 Tauri 骨架固定使用 ad-hoc bootstrap bundle ID `dev.guoxudong.next-infra.dev`，不声明 Keychain access group、application identifier 或 team entitlement。它不是下述 Apple Development 身份，未来切换签名配置时不得沿用或迁移其中的 Secret。
 - Keychain smoke 使用 `development_bundle_id`、Apple Development certificate、对应 profile 和 dev access group。
 - dev/release 双向不可读；从开发切换发布时由用户重新录入，不提供 Secret 迁移工具。
 

@@ -65,7 +65,11 @@ host_version
 bridge_version
 protocol_major
 protocol_minor
-minimum_peer_minor
+minimum_supported_minor
+host_supported_capabilities
+host_required_capabilities
+bridge_supported_capabilities
+bridge_required_capabilities
 bridge_sha256
 expected_host_bundle_id
 expected_team_id | null
@@ -88,6 +92,11 @@ app_designated_requirement
 bridge_designated_requirement
 protocol_major
 protocol_minor
+minimum_supported_minor
+host_supported_capabilities
+host_required_capabilities
+bridge_supported_capabilities
+bridge_required_capabilities
 allow_mcp_auto_launch
 installed_at
 updated_at
@@ -102,21 +111,35 @@ updated_at
 
 ## 4. Protocol Handshake
 
+首个 Local RPC 协议版本固定为：
+
+```text
+protocol_major = 1
+protocol_minor = 0
+minimum_supported_minor = 0
+```
+
+这些常量在 Goal 1 仅作为冻结契约；握手与 Query capability 到 Goal 4 实现。后续每个 Release Set 的兼容窗口最多覆盖当前与前一 minor，即 `protocol_minor - minimum_supported_minor <= 1`。
+
 Local RPC 握手在任何 Query 之前完成：
 
 ```text
-client: protocol_major, protocol_minor, bridge_version, release_id, required_capabilities
-host:   protocol_major, protocol_minor, host_version, release_id, capabilities
+client: protocol_major, protocol_minor, minimum_supported_minor,
+        bridge_version, release_id, supported_capabilities, required_capabilities
+host:   protocol_major, protocol_minor, minimum_supported_minor,
+        selected_protocol_minor, host_version, release_id,
+        supported_capabilities, required_capabilities
 ```
 
 兼容规则：
 
 1. major 必须相同，否则返回 `protocol_mismatch`，不得发送 Query。
-2. peer minor 必须位于 `minimum_peer_minor..=protocol_minor`；首版窗口固定为当前 minor 与前一个 minor。
-3. 即使版本窗口相交，缺少 `required_capabilities` 仍必须拒绝，不能猜测字段或静默降级权限。
-4. Host 与 Bridge release ID 不同但在恢复窗口内时允许只读查询，并返回 `upgrade_recommended=true`。
-5. 超出窗口时返回双方版本、支持范围和无秘密修复指引；Bridge 不读取 SQLite 兜底。
-6. protocol compatibility tests 必须保存为 golden fixtures，并覆盖 N/N、N/N-1、N-1/N、major mismatch 和 capability mismatch。
+2. 令 `lower = max(client.minimum_supported_minor, host.minimum_supported_minor)`，`upper = min(client.protocol_minor, host.protocol_minor)`；只有 `lower <= upper` 才兼容，协商值固定为最高交集 `selected_protocol_minor = upper`。这同一算法同时覆盖 N/N、N/N-1 和 N-1/N。
+3. capability 必须双向检查：`client.required_capabilities` 是 `host.supported_capabilities` 的子集，且 `host.required_capabilities` 是 `client.supported_capabilities` 的子集；任一不满足均拒绝，不能猜测字段或静默降级权限。
+4. 初始 Host `1.0` 支持 `query.search_resources.v1`、`query.get_resource.v1`、`query.get_topology.v1`、`query.get_health_summary.v1`、`query.get_recent_changes.v1`、`query.get_sync_status.v1`、`query.list_connector_coverage.v1`，且不要求 Bridge capability；初始 Bridge `1.0` 要求这七项且不声明额外 supported capability。
+5. Host 与 Bridge release ID 不同但版本区间和 capability 均兼容时允许只读查询，并返回 `upgrade_recommended=true`。
+6. 超出窗口时返回双方版本、支持范围和无秘密修复指引；Bridge 不读取 SQLite 兜底。
+7. protocol compatibility tests 必须保存为 golden fixtures，并覆盖 1.0/1.0、未来 N/N、N/N-1、N-1/N、无区间交集、major mismatch 和双向 capability mismatch。
 
 相邻 minor 窗口只用于升级/回滚短期恢复，不承诺长期兼容；每个 Release Set 仍必须以相同 release ID 完整安装。
 
@@ -232,4 +255,3 @@ rtk proxy codex mcp add --help
 - [Apple TN3127：Inside Code Signing Requirements](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements)
 - [Apple Developer ID](https://developer.apple.com/developer-id/)
 - 本机 `man 2 rename`、`man 1 open` 与 `codex mcp add --help`；具体命令在对应 Goal 执行时重新验证。
-
