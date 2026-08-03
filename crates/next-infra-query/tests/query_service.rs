@@ -11,22 +11,28 @@ struct FakeSource {
     fail: bool,
 }
 
+impl FakeSource {
+    fn snapshot<T>(&self, body: T) -> Result<SourceSnapshot<T>, &'static str> {
+        if self.fail {
+            Err("sensitive local path must not escape")
+        } else {
+            Ok(SourceSnapshot {
+                metadata: metadata(),
+                body,
+            })
+        }
+    }
+}
+
 impl QuerySource for FakeSource {
     type Error = &'static str;
-
-    fn metadata(&self) -> Result<SnapshotMetadata, Self::Error> {
-        if self.fail {
-            return Err("sensitive local path must not escape");
-        }
-        Ok(metadata())
-    }
 
     fn search_resources(
         &self,
         plan: &ResourceSearchPlan,
-    ) -> Result<SourcePage<ResourceDto>, Self::Error> {
+    ) -> Result<SourceSnapshot<SourcePage<ResourceDto>>, Self::Error> {
         self.search_plan.replace(Some(plan.clone()));
-        Ok(SourcePage {
+        self.snapshot(SourcePage {
             items: vec![resource("fixture-resource-alpha")],
             next_after: Some("fixture-resource-alpha".into()),
         })
@@ -36,8 +42,8 @@ impl QuerySource for FakeSource {
         &self,
         resource_id: &str,
         _include: &BTreeSet<ResourceInclude>,
-    ) -> Result<Option<ResourceDetailBody>, Self::Error> {
-        Ok(
+    ) -> Result<SourceSnapshot<Option<ResourceDetailBody>>, Self::Error> {
+        self.snapshot(
             (resource_id == "fixture-resource-alpha").then(|| ResourceDetailBody {
                 resource: resource(resource_id),
                 attributes: json!({"state": "ready"}),
@@ -48,9 +54,12 @@ impl QuerySource for FakeSource {
         )
     }
 
-    fn get_topology(&self, plan: &TopologyPlan) -> Result<Option<TopologyBody>, Self::Error> {
+    fn get_topology(
+        &self,
+        plan: &TopologyPlan,
+    ) -> Result<SourceSnapshot<Option<TopologyBody>>, Self::Error> {
         self.topology_plan.replace(Some(plan.clone()));
-        Ok(Some(TopologyBody {
+        self.snapshot(Some(TopologyBody {
             nodes: vec![resource(&plan.focus_resource_id)],
             edges: vec![],
             frontier: vec![TopologyFrontierDto {
@@ -61,8 +70,8 @@ impl QuerySource for FakeSource {
         }))
     }
 
-    fn get_health_summary(&self) -> Result<HealthSummaryBody, Self::Error> {
-        Ok(HealthSummaryBody {
+    fn get_health_summary(&self) -> Result<SourceSnapshot<HealthSummaryBody>, Self::Error> {
+        self.snapshot(HealthSummaryBody {
             resource_health: ResourceHealthCountsDto {
                 unhealthy: 1,
                 ..ResourceHealthCountsDto::default()
@@ -81,8 +90,8 @@ impl QuerySource for FakeSource {
     fn get_recent_changes(
         &self,
         _plan: &RecentChangesPlan,
-    ) -> Result<SourcePage<ChangeDto>, Self::Error> {
-        Ok(SourcePage {
+    ) -> Result<SourceSnapshot<SourcePage<ChangeDto>>, Self::Error> {
+        self.snapshot(SourcePage {
             items: vec![change()],
             next_after: None,
         })
@@ -92,8 +101,8 @@ impl QuerySource for FakeSource {
         &self,
         connection_id: &str,
         _recent_run_limit: usize,
-    ) -> Result<Option<SyncStatusBody>, Self::Error> {
-        Ok(
+    ) -> Result<SourceSnapshot<Option<SyncStatusBody>>, Self::Error> {
+        self.snapshot(
             (connection_id == "fixture-connection").then(|| SyncStatusBody {
                 connection: connection(),
                 recent_runs: vec![],
@@ -102,8 +111,10 @@ impl QuerySource for FakeSource {
         )
     }
 
-    fn list_connector_coverage(&self) -> Result<Vec<ConnectorCoverageDto>, Self::Error> {
-        Ok(coverage())
+    fn list_connector_coverage(
+        &self,
+    ) -> Result<SourceSnapshot<Vec<ConnectorCoverageDto>>, Self::Error> {
+        self.snapshot(coverage())
     }
 }
 

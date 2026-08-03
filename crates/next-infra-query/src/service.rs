@@ -102,6 +102,12 @@ pub struct SourcePage<T> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub struct SourceSnapshot<T> {
+    pub metadata: SnapshotMetadata,
+    pub body: T,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ResourceDetailBody {
     pub resource: ResourceDto,
     pub attributes: serde_json::Value,
@@ -135,28 +141,32 @@ pub struct SyncStatusBody {
 pub trait QuerySource {
     type Error;
 
-    fn metadata(&self) -> Result<SnapshotMetadata, Self::Error>;
     fn search_resources(
         &self,
         plan: &ResourceSearchPlan,
-    ) -> Result<SourcePage<ResourceDto>, Self::Error>;
+    ) -> Result<SourceSnapshot<SourcePage<ResourceDto>>, Self::Error>;
     fn get_resource(
         &self,
         resource_id: &str,
         include: &BTreeSet<ResourceInclude>,
-    ) -> Result<Option<ResourceDetailBody>, Self::Error>;
-    fn get_topology(&self, plan: &TopologyPlan) -> Result<Option<TopologyBody>, Self::Error>;
-    fn get_health_summary(&self) -> Result<HealthSummaryBody, Self::Error>;
+    ) -> Result<SourceSnapshot<Option<ResourceDetailBody>>, Self::Error>;
+    fn get_topology(
+        &self,
+        plan: &TopologyPlan,
+    ) -> Result<SourceSnapshot<Option<TopologyBody>>, Self::Error>;
+    fn get_health_summary(&self) -> Result<SourceSnapshot<HealthSummaryBody>, Self::Error>;
     fn get_recent_changes(
         &self,
         plan: &RecentChangesPlan,
-    ) -> Result<SourcePage<ChangeDto>, Self::Error>;
+    ) -> Result<SourceSnapshot<SourcePage<ChangeDto>>, Self::Error>;
     fn get_sync_status(
         &self,
         connection_id: &str,
         recent_run_limit: usize,
-    ) -> Result<Option<SyncStatusBody>, Self::Error>;
-    fn list_connector_coverage(&self) -> Result<Vec<ConnectorCoverageDto>, Self::Error>;
+    ) -> Result<SourceSnapshot<Option<SyncStatusBody>>, Self::Error>;
+    fn list_connector_coverage(
+        &self,
+    ) -> Result<SourceSnapshot<Vec<ConnectorCoverageDto>>, Self::Error>;
 }
 
 pub struct QueryService<S> {
@@ -196,14 +206,14 @@ where
             limit,
             after: decode_cursor(request.cursor.as_deref())?,
         };
-        let metadata = self.metadata()?;
-        let page = self
+        let snapshot = self
             .source
             .search_resources(&plan)
             .map_err(|_| source_error())?;
+        let page = snapshot.body;
         validate_page_size(page.items.len(), limit)?;
         Ok(ResourcePageDto {
-            metadata,
+            metadata: snapshot.metadata,
             items: page.items,
             page_info: PageInfo::new(page.next_after.map(encode_cursor)),
         })
@@ -211,14 +221,15 @@ where
 
     pub fn get_resource(&self, request: GetResourceRequest) -> QueryResult<ResourceDetailDto> {
         let resource_id = required_text(request.resource_id, "resource_id")?;
-        let metadata = self.metadata()?;
-        let body = self
+        let snapshot = self
             .source
             .get_resource(&resource_id, &request.include)
-            .map_err(|_| source_error())?
+            .map_err(|_| source_error())?;
+        let body = snapshot
+            .body
             .ok_or_else(|| not_found("resource_not_found", "Resource was not found."))?;
         Ok(ResourceDetailDto {
-            metadata,
+            metadata: snapshot.metadata,
             resource: body.resource,
             attributes: body.attributes,
             relations: body.relations,
@@ -246,17 +257,18 @@ where
             max_nodes,
             max_edges,
         };
-        let metadata = self.metadata()?;
-        let body = self
+        let snapshot = self
             .source
             .get_topology(&plan)
-            .map_err(|_| source_error())?
+            .map_err(|_| source_error())?;
+        let body = snapshot
+            .body
             .ok_or_else(|| not_found("resource_not_found", "Topology focus was not found."))?;
         if body.nodes.len() > max_nodes || body.edges.len() > max_edges {
             return Err(contract_error("query source exceeded topology limits"));
         }
         Ok(TopologyDto {
-            metadata,
+            metadata: snapshot.metadata,
             focus_resource_id,
             depth,
             nodes: body.nodes,
@@ -267,13 +279,13 @@ where
     }
 
     pub fn get_health_summary(&self) -> QueryResult<HealthSummaryDto> {
-        let metadata = self.metadata()?;
-        let body = self
+        let snapshot = self
             .source
             .get_health_summary()
             .map_err(|_| source_error())?;
+        let body = snapshot.body;
         Ok(HealthSummaryDto {
-            metadata,
+            metadata: snapshot.metadata,
             resource_health: body.resource_health,
             freshness: body.freshness,
             connector_health: body.connector_health,
@@ -289,14 +301,14 @@ where
             limit,
             after: decode_cursor(request.cursor.as_deref())?,
         };
-        let metadata = self.metadata()?;
-        let page = self
+        let snapshot = self
             .source
             .get_recent_changes(&plan)
             .map_err(|_| source_error())?;
+        let page = snapshot.body;
         validate_page_size(page.items.len(), limit)?;
         Ok(ChangePageDto {
-            metadata,
+            metadata: snapshot.metadata,
             items: page.items,
             page_info: PageInfo::new(page.next_after.map(encode_cursor)),
         })
@@ -305,17 +317,18 @@ where
     pub fn get_sync_status(&self, request: SyncStatusRequest) -> QueryResult<SyncStatusDto> {
         let connection_id = required_text(request.connection_id, "connection_id")?;
         let limit = bounded_limit(request.recent_run_limit, 10, 100)?;
-        let metadata = self.metadata()?;
-        let body = self
+        let snapshot = self
             .source
             .get_sync_status(&connection_id, limit)
-            .map_err(|_| source_error())?
+            .map_err(|_| source_error())?;
+        let body = snapshot
+            .body
             .ok_or_else(|| not_found("connection_not_found", "Connection was not found."))?;
         if body.recent_runs.len() > limit {
             return Err(contract_error("query source exceeded sync run limit"));
         }
         Ok(SyncStatusDto {
-            metadata,
+            metadata: snapshot.metadata,
             connection: body.connection,
             recent_runs: body.recent_runs,
             next_scheduled_at: body.next_scheduled_at,
@@ -323,17 +336,14 @@ where
     }
 
     pub fn list_connector_coverage(&self) -> QueryResult<ConnectorCoverageSnapshotDto> {
+        let snapshot = self
+            .source
+            .list_connector_coverage()
+            .map_err(|_| source_error())?;
         Ok(ConnectorCoverageSnapshotDto {
-            metadata: self.metadata()?,
-            items: self
-                .source
-                .list_connector_coverage()
-                .map_err(|_| source_error())?,
+            metadata: snapshot.metadata,
+            items: snapshot.body,
         })
-    }
-
-    fn metadata(&self) -> QueryResult<SnapshotMetadata> {
-        self.source.metadata().map_err(|_| source_error())
     }
 }
 
