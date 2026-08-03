@@ -54,20 +54,11 @@ export class MockDesktopAdapter implements DesktopAdapter {
     this.#snapshot = copySnapshot(snapshot);
   }
 
-  async getSnapshotMetadata(): Promise<SnapshotMetadata | null> {
-    return copyMetadata(this.#snapshot.metadata);
-  }
-
-  async listResources(): Promise<readonly ResourceDto[]> {
-    return copyItems(this.#snapshot.resources);
-  }
-
-  async listRelations(): Promise<readonly RelationDto[]> {
-    return copyItems(this.#snapshot.relations);
-  }
-
-  async listConnections(): Promise<readonly ConnectionDto[]> {
-    return copyItems(this.#snapshot.connections);
+  async listConnections() {
+    return {
+      metadata: this.#metadata(),
+      items: copyItems(this.#snapshot.connections),
+    };
   }
 
   async searchResources(_input: SearchResourcesInput = {}) {

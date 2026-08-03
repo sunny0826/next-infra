@@ -9,6 +9,7 @@ struct FakeSource {
     search_plan: RefCell<Option<ResourceSearchPlan>>,
     topology_plan: RefCell<Option<TopologyPlan>>,
     fail: bool,
+    connection_count: usize,
 }
 
 impl FakeSource {
@@ -85,6 +86,11 @@ impl QuerySource for FakeSource {
                 ..ConnectorHealthCountsDto::default()
             },
         })
+    }
+
+    fn list_connections(&self) -> Result<SourceSnapshot<Vec<ConnectionDto>>, Self::Error> {
+        let count = self.connection_count.max(1);
+        self.snapshot((0..count).map(|_| connection()).collect())
     }
 
     fn get_recent_changes(
@@ -267,6 +273,22 @@ fn health_dimensions_remain_separate() {
 }
 
 #[test]
+fn connection_snapshot_is_bounded_and_keeps_metadata() {
+    let service = QueryService::new(FakeSource::default());
+    let result = service.list_connections().unwrap();
+    assert_eq!(result.metadata.snapshot_version, "fixture-snapshot-v1");
+    assert_eq!(result.items, vec![connection()]);
+
+    let overflow = QueryService::new(FakeSource {
+        connection_count: MAX_CONNECTIONS + 1,
+        ..FakeSource::default()
+    })
+    .list_connections()
+    .unwrap_err();
+    assert_eq!(overflow.code, "query_contract_violation");
+}
+
+#[test]
 fn source_errors_are_cleaned_and_not_found_is_distinct() {
     let source_error = QueryService::new(FakeSource {
         fail: true,
@@ -305,12 +327,14 @@ fn all_query_surfaces_share_snapshot_metadata() {
         })
         .unwrap();
     let coverage = service.list_connector_coverage().unwrap();
+    let connections = service.list_connections().unwrap();
 
     for snapshot_version in [
         detail.metadata.snapshot_version,
         changes.metadata.snapshot_version,
         sync.metadata.snapshot_version,
         coverage.metadata.snapshot_version,
+        connections.metadata.snapshot_version,
     ] {
         assert_eq!(snapshot_version, "fixture-snapshot-v1");
     }

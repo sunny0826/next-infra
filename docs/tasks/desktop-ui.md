@@ -129,7 +129,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输入/输出：** Query/local-config services → TS Real Adapter 与 Rust Command/Event adapter。
 - **验收：** Event 只含 version/minimal scope；丢失/乱序 Event 不破坏状态；Manual Sync 返回 `sync_run_id`；页面无直接 Tauri API。
 - **验证：** `V-ADAPTER`。
-- **实现证据（2026-08-03）：** TypeScript `DesktopAdapter` 已扩展为七个共享 Query 入口、Manual Sync、local settings/capabilities 和 invalidation subscription；`RealDesktopAdapter` 仅通过稳定 command/event 名称调用 Tauri，未知平台错误清洗为安全 envelope，Manual Sync 只返回 `sync_run_id`，Event 只承载 version/scopes。Rust `DesktopQueryAdapter` 只将 transport request 映射到共享 Query Service，并提供 ManualSyncPort 与最小 QueryInvalidation DTO；未接 SQL、Provider、Keychain 或 Tauri entrypoint。Desktop Rust 23 项测试、前端 44 项测试、严格 Clippy、lint 和 build 通过。真实 command registration/event emission 由 `RHM-G3-05` Composition Captain 串行接入。
+- **实现证据（2026-08-03）：** TypeScript `DesktopAdapter` 已冻结为八个共享 Query 入口、Manual Sync、local settings/capabilities 和 invalidation subscription；Connection list 使用带 metadata、硬上限 200 的 `ConnectionSnapshotDto`。Goal 1 遗留且无 Rust Query 对应入口的 metadata/resource/relation list methods 已删除，Empty Adapter 不再把 Host unavailable 伪装成 empty snapshot。`RealDesktopAdapter` 仅通过稳定 command/event 名称调用 Tauri，未知平台错误清洗为安全 envelope，Manual Sync 只返回 `sync_run_id`，Event 只承载 version/scopes。Rust `DesktopQueryAdapter` 只映射共享 Query Service，并提供 ManualSyncPort 与最小 QueryInvalidation DTO；未接 SQL、Provider、Keychain 或 Tauri entrypoint。Desktop Rust 23 项测试、前端 67 项测试、严格 Clippy、lint 和 build 通过。真实 command registration/event emission 由 `RHM-G3-05` Composition Captain 串行接入。
 - **风险/停止：** Command 不复制 Query 规则；Event 不是权威状态。
 
 ### `UI-G3-02` — Evidence Spine

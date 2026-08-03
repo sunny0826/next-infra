@@ -44,11 +44,11 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
       adapter.listConnections(),
       adapter.getRecentChanges({ limit: 8 }),
     ])
-      .then(([resourcePage, connections, changePage]) => {
+      .then(([resourcePage, connectionsSnapshot, changePage]) => {
         if (!active) return;
         setState({
           resources: resourcePage.items,
-          connections,
+          connections: connectionsSnapshot.items,
           changes: changePage.items,
         });
       })

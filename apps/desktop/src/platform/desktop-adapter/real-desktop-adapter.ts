@@ -90,23 +90,6 @@ export class RealDesktopAdapter implements DesktopAdapter {
     }
   }
 
-  async getSnapshotMetadata() {
-    return this.#invoke<Awaited<ReturnType<DesktopAdapter["getSnapshotMetadata"]>>>(
-      "query_snapshot_metadata",
-    );
-  }
-
-  async listResources() {
-    const page = await this.searchResources();
-    return page.items;
-  }
-
-  async listRelations() {
-    return this.#invoke<Awaited<ReturnType<DesktopAdapter["listRelations"]>>>(
-      "query_list_relations",
-    );
-  }
-
   async listConnections() {
     return this.#invoke<Awaited<ReturnType<DesktopAdapter["listConnections"]>>>(
       "query_list_connections",

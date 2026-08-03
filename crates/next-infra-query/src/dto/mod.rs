@@ -187,6 +187,13 @@ pub struct ConnectionDto {
     pub last_attempt_at: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ConnectionSnapshotDto {
+    pub metadata: SnapshotMetadata,
+    pub items: Vec<ConnectionDto>,
+}
+
 /// UI-visible lifecycle of a bounded query request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

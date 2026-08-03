@@ -32,6 +32,7 @@ describe("RealDesktopAdapter", () => {
       max_nodes: 100,
       max_edges: 200,
     });
+    await adapter.listConnections();
 
     expect(invoke).toHaveBeenNthCalledWith(1, "query_search_resources", {
       request: { limit: 25, query: "fixture" },
@@ -44,6 +45,7 @@ describe("RealDesktopAdapter", () => {
         max_edges: 200,
       },
     });
+    expect(invoke).toHaveBeenNthCalledWith(3, "query_list_connections", undefined);
   });
 
   it("returns the manual sync run id without treating it as a UI refresh", async () => {

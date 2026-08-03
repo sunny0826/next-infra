@@ -6,22 +6,24 @@ use std::path::{Path, PathBuf};
 
 use next_infra_query::dto::{
     ChangeDto, ChangeOriginDto, ChangePageDto, ChangeSubjectDto, ConnectionDto,
-    ConnectorCoverageDto, ConnectorCoverageLevelDto, ConnectorCoverageSnapshotDto, ConnectorHealth,
-    ConnectorHealthCountsDto, ErrorEnvelope, EvidenceType, FieldChangeDto, Freshness,
-    FreshnessCountsDto, FrontierDirectionDto, HealthSummaryDto, Lifecycle, PageInfo,
-    QueryViewState, RelationDto, RelationEvidenceDto, ResourceDetailDto, ResourceDto,
-    ResourceHealth, ResourceHealthCountsDto, ResourcePageDto, SchemaVersion, SnapshotMetadata,
-    SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto, SyncRunErrorDto, SyncRunStatusDto,
-    SyncStatusDto, SyncTriggerDto, TopologyDto, TopologyFrontierDto,
+    ConnectionSnapshotDto, ConnectorCoverageDto, ConnectorCoverageLevelDto,
+    ConnectorCoverageSnapshotDto, ConnectorHealth, ConnectorHealthCountsDto, ErrorEnvelope,
+    EvidenceType, FieldChangeDto, Freshness, FreshnessCountsDto, FrontierDirectionDto,
+    HealthSummaryDto, Lifecycle, PageInfo, QueryViewState, RelationDto, RelationEvidenceDto,
+    ResourceDetailDto, ResourceDto, ResourceHealth, ResourceHealthCountsDto, ResourcePageDto,
+    SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto,
+    SyncRunErrorDto, SyncRunStatusDto, SyncStatusDto, SyncTriggerDto, TopologyDto,
+    TopologyFrontierDto,
 };
 use ts_rs::{Config, TS};
 
-const EXPECTED_BINDINGS: [&str; 39] = [
+const EXPECTED_BINDINGS: [&str; 40] = [
     "ChangeDto.ts",
     "ChangeOriginDto.ts",
     "ChangePageDto.ts",
     "ChangeSubjectDto.ts",
     "ConnectionDto.ts",
+    "ConnectionSnapshotDto.ts",
     "ConnectorCoverageDto.ts",
     "ConnectorCoverageLevelDto.ts",
     "ConnectorCoverageSnapshotDto.ts",
@@ -96,6 +98,8 @@ fn export_types() {
     RelationDto::export_all(&config).expect("failed to export relation binding");
     ConnectorHealth::export_all(&config).expect("failed to export connector health binding");
     ConnectionDto::export_all(&config).expect("failed to export connection binding");
+    ConnectionSnapshotDto::export_all(&config)
+        .expect("failed to export connection snapshot binding");
     QueryViewState::export_all(&config).expect("failed to export query view state binding");
     SyncModeDto::export_all(&config).expect("failed to export sync mode binding");
     SyncTriggerDto::export_all(&config).expect("failed to export sync trigger binding");

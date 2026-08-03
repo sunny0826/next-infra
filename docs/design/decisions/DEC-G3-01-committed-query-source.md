@@ -66,6 +66,7 @@ Store crate 新增只读、DTO-neutral 的 query projection API，返回 Core mo
 至少需要：
 
 - projection metadata；
+- bounded safe Connection snapshot；
 - resource search page；
 - resource identity/attributes/relations；
 - bounded topology adjacency/frontier；

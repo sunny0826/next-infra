@@ -22,9 +22,9 @@ export function ConnectorsPage() {
   useEffect(() => {
     let active = true;
     Promise.all([adapter.listConnections(), adapter.listConnectorCoverage()])
-      .then(async ([connections, coverageSnapshot]) => {
+      .then(async ([connectionsSnapshot, coverageSnapshot]) => {
         const statuses = await Promise.all(
-          connections.map(async (connection) => {
+          connectionsSnapshot.items.map(async (connection) => {
             const status = await adapter.getSyncStatus({ connection_id: connection.connection_id, recent_run_limit: 1 });
             return {
               connection,

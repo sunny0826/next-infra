@@ -5,8 +5,9 @@
 //! registration and event emission remain in the composition layer.
 
 use next_infra_query::dto::{
-    ChangePageDto, ConnectorCoverageSnapshotDto, ErrorEnvelope, Freshness, HealthSummaryDto,
-    ResourceDetailDto, ResourceHealth, ResourcePageDto, SyncStatusDto, TopologyDto,
+    ChangePageDto, ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, ErrorEnvelope, Freshness,
+    HealthSummaryDto, ResourceDetailDto, ResourceHealth, ResourcePageDto, SyncStatusDto,
+    TopologyDto,
 };
 use next_infra_query::service::{
     GetResourceRequest, GetTopologyRequest, QueryService, QuerySource, RecentChangesRequest,
@@ -138,6 +139,10 @@ where
 
     pub fn get_health_summary(&self) -> Result<HealthSummaryDto, ErrorEnvelope> {
         self.service.get_health_summary()
+    }
+
+    pub fn list_connections(&self) -> Result<ConnectionSnapshotDto, ErrorEnvelope> {
+        self.service.list_connections()
     }
 
     pub fn get_recent_changes(

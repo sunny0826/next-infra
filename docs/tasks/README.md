@@ -122,6 +122,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 16. [RHM-G3-05P0 Atomic QuerySource Envelope 验收记录](./RHM-G3-05P0-2026-08-03.md)
 17. [RHM-G3-05P1A Store Projection Revision 验收记录](./RHM-G3-05P1A-2026-08-03.md)
 18. [RHM-G3-05P1B Bounded Store Query Projection 验收记录](./RHM-G3-05P1B-2026-08-03.md)
+19. [RHM-G3-05P0B Connection Snapshot Contract 验收记录](./RHM-G3-05P0B-2026-08-03.md)
 
 ## 6. 设计决策包
 

@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const DEFAULT_RESOURCE_LIMIT: usize = 25;
 pub const MAX_RESOURCE_LIMIT: usize = 100;
+pub const MAX_CONNECTIONS: usize = 200;
 pub const DEFAULT_CHANGE_LIMIT: usize = 20;
 pub const MAX_CHANGE_LIMIT: usize = 100;
 pub const DEFAULT_TOPOLOGY_DEPTH: u8 = 1;
@@ -155,6 +156,7 @@ pub trait QuerySource {
         plan: &TopologyPlan,
     ) -> Result<SourceSnapshot<Option<TopologyBody>>, Self::Error>;
     fn get_health_summary(&self) -> Result<SourceSnapshot<HealthSummaryBody>, Self::Error>;
+    fn list_connections(&self) -> Result<SourceSnapshot<Vec<ConnectionDto>>, Self::Error>;
     fn get_recent_changes(
         &self,
         plan: &RecentChangesPlan,
@@ -289,6 +291,17 @@ where
             resource_health: body.resource_health,
             freshness: body.freshness,
             connector_health: body.connector_health,
+        })
+    }
+
+    pub fn list_connections(&self) -> QueryResult<ConnectionSnapshotDto> {
+        let snapshot = self.source.list_connections().map_err(|_| source_error())?;
+        if snapshot.body.len() > MAX_CONNECTIONS {
+            return Err(contract_error("query source exceeded connection limit"));
+        }
+        Ok(ConnectionSnapshotDto {
+            metadata: snapshot.metadata,
+            items: snapshot.body,
         })
     }
 

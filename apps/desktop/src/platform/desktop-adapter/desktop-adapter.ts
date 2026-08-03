@@ -1,14 +1,11 @@
-import type { ConnectionDto } from "../../generated/query/ConnectionDto";
+import type { ConnectionSnapshotDto } from "../../generated/query/ConnectionSnapshotDto";
 import type { ChangePageDto } from "../../generated/query/ChangePageDto";
 import type { ConnectorCoverageSnapshotDto } from "../../generated/query/ConnectorCoverageSnapshotDto";
 import type { Freshness } from "../../generated/query/Freshness";
 import type { HealthSummaryDto } from "../../generated/query/HealthSummaryDto";
-import type { RelationDto } from "../../generated/query/RelationDto";
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
-import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { ResourceHealth } from "../../generated/query/ResourceHealth";
 import type { ResourcePageDto } from "../../generated/query/ResourcePageDto";
-import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TopologyDto } from "../../generated/query/TopologyDto";
 
@@ -78,10 +75,7 @@ export interface QueryInvalidation {
 export type Unsubscribe = () => void;
 
 export interface DesktopAdapter {
-  getSnapshotMetadata(): Promise<SnapshotMetadata | null>;
-  listResources(): Promise<readonly ResourceDto[]>;
-  listRelations(): Promise<readonly RelationDto[]>;
-  listConnections(): Promise<readonly ConnectionDto[]>;
+  listConnections(): Promise<ConnectionSnapshotDto>;
   searchResources(input?: SearchResourcesInput): Promise<ResourcePageDto>;
   getResource(input: GetResourceInput): Promise<ResourceDetailDto>;
   getTopology(input: GetTopologyInput): Promise<TopologyDto>;
