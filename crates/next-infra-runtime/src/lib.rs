@@ -4,12 +4,17 @@
 //! IO, timers, and threads stay behind injected traits so Desktop Host tests can
 //! exercise the same state machine without starting Tauri.
 
-use next_infra_core::{ConnectionId, Timestamp};
+use next_infra_core::{
+    CommitResult, Connection, ConnectionId, Fingerprint, MissingEvidenceState, Relation,
+    RelationId, Resource, ResourceId, Scope, StoreReader, StoreWriter, SyncCommit, SyncCursor,
+    SyncRun, SyncRunId, Timestamp,
+};
 use next_infra_query::service::QueryService;
 use next_infra_store::{Store, StoreError};
 use next_infra_sync::SyncEngine;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 const MAX_TIMESTAMP_MILLIS: u64 = i64::MAX as u64;
 
@@ -83,22 +88,132 @@ pub trait RuntimeBackend {
 /// The SyncEngine owns the only WriterQueue and SQLite write connection.
 /// QueryService remains a separate Runtime handle so Desktop and MCP adapters
 /// consume the same bounded query semantics without gaining write access.
+#[derive(Clone)]
+pub struct SharedStore {
+    inner: Arc<Mutex<Store>>,
+}
+
+impl SharedStore {
+    pub fn new(store: Store) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(store)),
+        }
+    }
+
+    pub fn read<T>(
+        &self,
+        read: impl FnOnce(&Store) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let store = self.lock()?;
+        read(&store)
+    }
+
+    pub fn write<T>(
+        &self,
+        write: impl FnOnce(&mut Store) -> Result<T, StoreError>,
+    ) -> Result<T, StoreError> {
+        let mut store = self.lock()?;
+        write(&mut store)
+    }
+
+    fn lock(&self) -> Result<MutexGuard<'_, Store>, StoreError> {
+        self.inner
+            .lock()
+            .map_err(|_| StoreError::Contract("shared store lock is poisoned".into()))
+    }
+}
+
+impl StoreReader for SharedStore {
+    type Error = StoreError;
+
+    fn get_connection(&self, id: &ConnectionId) -> Result<Option<Connection>, Self::Error> {
+        self.read(|store| store.get_connection(id))
+    }
+
+    fn get_resource(&self, id: &ResourceId) -> Result<Option<Resource>, Self::Error> {
+        self.read(|store| store.get_resource(id))
+    }
+
+    fn get_relation(&self, id: &RelationId) -> Result<Option<Relation>, Self::Error> {
+        self.read(|store| store.get_relation(id))
+    }
+
+    fn latest_relation_version_fingerprint(
+        &self,
+        id: &RelationId,
+    ) -> Result<Option<Fingerprint>, Self::Error> {
+        self.read(|store| store.latest_relation_version_fingerprint(id))
+    }
+
+    fn get_sync_run(&self, id: &SyncRunId) -> Result<Option<SyncRun>, Self::Error> {
+        self.read(|store| store.get_sync_run(id))
+    }
+
+    fn sync_cursor(&self, connection_id: &ConnectionId) -> Result<Option<SyncCursor>, Self::Error> {
+        self.read(|store| store.sync_cursor(connection_id))
+    }
+
+    fn list_resources_for_scope(
+        &self,
+        connection_id: &ConnectionId,
+        scope: &Scope,
+    ) -> Result<Vec<Resource>, Self::Error> {
+        self.read(|store| store.list_resources_for_scope(connection_id, scope))
+    }
+
+    fn missing_evidence_state(
+        &self,
+        connection_id: &ConnectionId,
+        scope: &Scope,
+    ) -> Result<Option<MissingEvidenceState>, Self::Error> {
+        self.read(|store| store.missing_evidence_state(connection_id, scope))
+    }
+}
+
+impl StoreWriter for SharedStore {
+    type Error = StoreError;
+
+    fn upsert_connection(&mut self, connection: Connection) -> Result<(), Self::Error> {
+        self.write(|store| store.upsert_connection(connection))
+    }
+
+    fn start_sync_run(&mut self, sync_run: SyncRun) -> Result<(), Self::Error> {
+        self.write(|store| store.start_sync_run(sync_run))
+    }
+
+    fn commit_sync(&mut self, commit: SyncCommit) -> Result<CommitResult, Self::Error> {
+        self.write(|store| store.commit_sync(commit))
+    }
+
+    fn mark_running_syncs_interrupted(&mut self, at: Timestamp) -> Result<usize, Self::Error> {
+        self.write(|store| store.mark_running_syncs_interrupted(at))
+    }
+}
+
 pub struct SqliteRuntimeBackend {
-    sync_engine: SyncEngine<Store>,
+    sync_engine: SyncEngine<SharedStore>,
 }
 
 impl SqliteRuntimeBackend {
     pub fn new(store: Store) -> Self {
+        Self::from_shared_store(SharedStore::new(store))
+    }
+
+    pub fn from_shared_store(store: SharedStore) -> Self {
         Self {
             sync_engine: SyncEngine::new(store),
         }
     }
 
-    pub fn sync_engine(&self) -> &SyncEngine<Store> {
+    pub fn shared_store(&self) -> SharedStore {
+        self.sync_engine.writer().store().clone()
+    }
+
+    pub fn sync_engine(&self) -> &SyncEngine<SharedStore> {
         &self.sync_engine
     }
 
-    pub fn sync_engine_mut(&mut self) -> &mut SyncEngine<Store> {
+    pub fn sync_engine_mut(&mut self) -> &mut SyncEngine<SharedStore> {
         &mut self.sync_engine
     }
 }
@@ -119,7 +234,10 @@ impl RuntimeBackend for SqliteRuntimeBackend {
     }
 
     fn checkpoint_store(&mut self) -> Result<(), Self::Error> {
-        self.sync_engine.writer().store().checkpoint_wal()
+        self.sync_engine
+            .writer()
+            .store()
+            .read(Store::checkpoint_wal)
     }
 }
 
@@ -663,16 +781,13 @@ mod tests {
             .start_sync_run(fixture_run(SyncRunStatus::Running, None))
             .unwrap();
 
-        let backend = SqliteRuntimeBackend::new(store);
+        let shared_store = SharedStore::new(store);
+        let backend = SqliteRuntimeBackend::from_shared_store(shared_store.clone());
         let mut runtime = Runtime::new(backend, QueryService::new(()), Scheduler::default());
         let startup = runtime.start_background(timestamp(2)).unwrap();
         assert_eq!(startup.interrupted_runs, 1);
 
-        let recovered = runtime
-            .backend()
-            .sync_engine()
-            .writer()
-            .store()
+        let recovered = shared_store
             .get_sync_run(&SyncRunId::new("fixture-runtime-run").unwrap())
             .unwrap()
             .unwrap();
@@ -697,11 +812,7 @@ mod tests {
         assert!(report.writer_drained);
         assert!(report.store_checkpointed);
         assert_eq!(runtime.backend().sync_engine().writer().pending_len(), 0);
-        let committed = runtime
-            .backend()
-            .sync_engine()
-            .writer()
-            .store()
+        let committed = shared_store
             .get_sync_run(&SyncRunId::new("fixture-runtime-run").unwrap())
             .unwrap()
             .unwrap();
