@@ -73,7 +73,7 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-04` — Contract Tests 与 Coverage Catalog
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 建立所有 Connector 复用的 conformance suite，并将 Descriptor 投影为 Connector Coverage Snapshot。
 - **依赖：** `CON-G2-01`；最终验收依赖 `CON-G2-02/03`。
 - **独占路径：** `crates/next-infra-connector-contract-tests/**`、`crates/next-infra-connector-catalog/**`、`fixtures/connectors/common/**`。
@@ -82,6 +82,7 @@ rtk cargo fmt --all --check
 - **输出：** 任意 Connector 可调用的 suite；逐 module 的 supported/partial/unsupported snapshot。
 - **验收：** Catalog 包含 connector/version、module、resource/relation/schema、auth minimum、sync modes、known gaps、rate-limit guidance；不产生品牌级“已支持”。
 - **验证：** descriptor invariant、catalog golden、Fixture conformance tests。
+- **实现证据（2026-08-03）：** 已实现可复用 Descriptor/Batch/Outcome conformance checks 与确定性 ConnectorCoverageSnapshot；Catalog 逐 module 保留 resource/relation/schema/auth/sync modes/rate-limit/known gaps，不包含 Connection Health 或 SyncRun 推断。Fixture 的 full/incremental/targeted/partial replay 通过公共 suite，乱序与重复资源负例被拒绝；Catalog/Contract 3 项测试、双 crate Clippy 和全 workspace 37 项测试通过。
 - **风险/停止：** MCP/UI 只能消费统一 Snapshot，不得各自重新解释 Descriptor。
 
 ### `CON-G2-05` — Connector Pipeline 集成证据

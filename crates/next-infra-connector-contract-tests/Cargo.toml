@@ -5,7 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
-[dev-dependencies]
+[dependencies]
 next-infra-connector-api = { workspace = true }
+next-infra-connector-catalog = { workspace = true }
 next-infra-connector-fixture = { workspace = true }
 next-infra-normalizer = { workspace = true }
+next-infra-core = { workspace = true }
+serde_json.workspace = true

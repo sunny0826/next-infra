@@ -69,7 +69,7 @@ impl FixtureConnector {
         Ok(Self { descriptor, plan })
     }
 
-    fn outcome_for(&self, request: &SyncRequest) -> ConnectorResult<SyncOutcome> {
+    pub fn replay(&self, request: &SyncRequest) -> ConnectorResult<SyncOutcome> {
         let step = self
             .plan
             .steps
@@ -159,7 +159,7 @@ impl ReadConnector for FixtureConnector {
                 retry_after_ms: None,
             });
         }
-        self.outcome_for(&request)
+        self.replay(&request)
     }
 }
 
@@ -228,12 +228,8 @@ mod tests {
     #[test]
     fn replay_is_deterministic_for_same_request() {
         let connector = FixtureConnector::standard().unwrap();
-        let first = connector
-            .outcome_for(&request(SyncMode::Full, None))
-            .unwrap();
-        let second = connector
-            .outcome_for(&request(SyncMode::Full, None))
-            .unwrap();
+        let first = connector.replay(&request(SyncMode::Full, None)).unwrap();
+        let second = connector.replay(&request(SyncMode::Full, None)).unwrap();
         assert_eq!(first, second);
     }
 
@@ -241,24 +237,24 @@ mod tests {
     fn replay_covers_full_incremental_targeted_partial_and_fatal() {
         let connector = FixtureConnector::standard().unwrap();
         assert!(matches!(
-            connector.outcome_for(&request(SyncMode::Full, None)),
+            connector.replay(&request(SyncMode::Full, None)),
             Ok(SyncOutcome::Complete { .. })
         ));
         assert!(matches!(
-            connector.outcome_for(&request(SyncMode::Incremental, Some("cursor-v1"))),
+            connector.replay(&request(SyncMode::Incremental, Some("cursor-v1"))),
             Ok(SyncOutcome::Complete { .. })
         ));
         assert!(matches!(
-            connector.outcome_for(&request(SyncMode::Targeted, None)),
+            connector.replay(&request(SyncMode::Targeted, None)),
             Ok(SyncOutcome::Complete { .. })
         ));
         assert!(matches!(
-            connector.outcome_for(&request(SyncMode::Full, Some("cursor-partial"))),
+            connector.replay(&request(SyncMode::Full, Some("cursor-partial"))),
             Ok(SyncOutcome::Partial { .. })
         ));
         assert!(
             connector
-                .outcome_for(&request(SyncMode::Full, Some("cursor-fatal")))
+                .replay(&request(SyncMode::Full, Some("cursor-fatal")))
                 .is_err()
         );
     }

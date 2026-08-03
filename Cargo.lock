@@ -2166,6 +2166,9 @@ name = "next-infra-connector-catalog"
 version = "0.1.0"
 dependencies = [
  "next-infra-connector-api",
+ "next-infra-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -2173,8 +2176,11 @@ name = "next-infra-connector-contract-tests"
 version = "0.1.0"
 dependencies = [
  "next-infra-connector-api",
+ "next-infra-connector-catalog",
  "next-infra-connector-fixture",
+ "next-infra-core",
  "next-infra-normalizer",
+ "serde_json",
 ]
 
 [[package]]
