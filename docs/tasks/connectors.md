@@ -45,7 +45,7 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-02` — Normalizer
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 将候选 Resource/Relation 规范化为 `ValidatedBatch`。
 - **依赖：** `CON-G2-01`。
 - **独占路径：** `crates/next-infra-normalizer/**`。
@@ -54,6 +54,7 @@ rtk cargo fmt --all --check
 - **输入/输出：** ObservationBatch + attribute schema → ValidatedBatch 或清洗后的结构化错误。
 - **验收：** 输入顺序不影响 Fingerprint；未知字段消失；无效端点被拒；相同关系不产生新 evidence key。
 - **验证：** property、golden normalization、secret sentinel tests。
+- **实现证据（2026-08-03）：** Normalizer 已实现 exact dotted-path allowlist、递归 secret scan、稳定排序、SHA-256 semantic Fingerprint、重复身份冲突检测、relation endpoint/evidence schema 校验与完整 Redaction/Request Summary 传递；输入顺序不改变输出，未知嵌套字段消失。5 项聚焦测试、专属 Clippy 和全 workspace 31 项测试通过。
 - **风险/停止：** 不把缺失计数或 Provider workaround 放进 Normalizer。
 
 ### `CON-G2-03` — Fixture Connector
