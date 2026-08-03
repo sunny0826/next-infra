@@ -309,6 +309,6 @@ Gate Captain 必须：
 ## 8. 当前可执行边界
 
 - 已完成：Git 初始化、Goal 0、`DEC-G1-01..06`、Goal 1 工程任务与 `GATE-G1`。
-- 当前可派发：Goal 2 的 `RHM-G2-02` SQLite Migration 与 `CON-G2-01` Connector API，可按独占路径并行。
-- 当前等待：Store/Sync/Normalizer/Fixture/Contract Tests 分支等待上述契约；Goal 3 以后继续等待前序 Gate。
+- 当前可派发：Goal 2 的 `RHM-G2-03` Projection Store、`RHM-G2-04` Sync Engine、`CON-G2-02` Normalizer、`CON-G2-03` Fixture 与 `CON-G2-04` Contract/Catalog，可按独占路径并行。
+- 当前等待：两条 pipeline 集成证据等待上述分支汇合；Goal 3 以后继续等待前序 Gate。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。

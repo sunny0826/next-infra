@@ -1,6 +1,6 @@
 # Connector 与 Provider 任务包
 
-本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。`RHM-G2-01` 已进入复核，`CON-G2-01` 当前可派发；其余任务继续等待各自 Goal 与依赖。
+本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。`CON-G2-01` 已进入复核，当前可并行派发 `CON-G2-02/03/04`；真实 pipeline 汇合继续等待 Store 与 Sync 分支。
 
 ## 1. 所有 Connector 的硬边界
 
@@ -31,7 +31,7 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-01` — Connector API 契约冻结
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 实现并冻结 `ConnectorDescriptor`、`ReadConnector`、`ValidationReport`、`SyncRequest`、`ObservationBatch`、Sync Coverage 和结构化错误。
 - **依赖：** `RHM-G2-01` Domain Contract。
 - **独占路径：** `crates/next-infra-connector-api/**`。
@@ -40,10 +40,12 @@ rtk cargo fmt --all --check
 - **输入/输出：** Core types → 版本化 Rust API、serde/schema tests、descriptor invariants。
 - **验收：** partial/fatal 分界唯一；SecretRef 与 Secret value 不可混用；Sync Coverage 使用限定类型且不等于 Connector Coverage。
 - **验证：** connector-api tests/clippy。
+- **实现证据（2026-08-03）：** 已实现 object-safe async ReadConnector、Descriptor/Auth/RateLimit/Capability、非秘密 Validation/SyncRequest、Resource/Relation Observation、Redaction/Request Summary，以及结构上分离 complete/partial/fatal 的 SyncOutcome。6 项契约测试覆盖请求无 Secret 字段、Coverage/mode、partial/fatal、Descriptor 重复、状态一致性与 trait object，专属 Clippy 通过。
 - **风险/停止：** 这是 Provider 扇出契约；冻结前不得开始真实 Provider，后续破坏性变化必须显式升级 schema/version。
 
 ### `CON-G2-02` — Normalizer
 
+- **状态：** `READY`。
 - **目标：** 将候选 Resource/Relation 规范化为 `ValidatedBatch`。
 - **依赖：** `CON-G2-01`。
 - **独占路径：** `crates/next-infra-normalizer/**`。
@@ -56,6 +58,7 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-03` — Fixture Connector
 
+- **状态：** `READY`。
 - **目标：** 提供完全离线、确定、可重放的 Connector，供 Goal 2/3 同步和 UI 测试。
 - **依赖：** `CON-G2-01`。
 - **独占路径：** `crates/next-infra-connector-fixture/**`、`fixtures/connectors/fixture/**`。
@@ -68,6 +71,7 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-04` — Contract Tests 与 Coverage Catalog
 
+- **状态：** `READY`。
 - **目标：** 建立所有 Connector 复用的 conformance suite，并将 Descriptor 投影为 Connector Coverage Snapshot。
 - **依赖：** `CON-G2-01`；最终验收依赖 `CON-G2-02/03`。
 - **独占路径：** `crates/next-infra-connector-contract-tests/**`、`crates/next-infra-connector-catalog/**`、`fixtures/connectors/common/**`。

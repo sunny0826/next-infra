@@ -109,7 +109,7 @@ rtk pnpm --dir apps/desktop tauri build
 
 ## Goal 2：领域模型与 SQLite 投影
 
-**状态：** Authorized / Ready  
+**状态：** Authorized / In progress  
 **依赖：** Goal 1
 
 ### 范围

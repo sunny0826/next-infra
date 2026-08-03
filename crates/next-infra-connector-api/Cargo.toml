@@ -7,3 +7,6 @@ publish.workspace = true
 
 [dependencies]
 next-infra-core = { workspace = true }
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true

@@ -1,6 +1,6 @@
 # Runtime、Host 与 MCP 任务包
 
-本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。`RHM-G2-01` 已进入复核，当前可并行派发 `RHM-G2-02` 与 `CON-G2-01`；其余任务继续等待各自依赖与 Gate。
+本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。`RHM-G2-01/02` 与 `CON-G2-01` 已进入复核，当前可并行派发 Projection Store、Sync Engine、Normalizer、Fixture 与 Contract/Catalog 分支。
 
 ## Goal 1：工程与发布骨架
 
@@ -37,7 +37,7 @@
 
 ### `RHM-G2-02` — SQLite 基础与 Migration
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 建立安全、可恢复且不依赖系统 FTS5 的 SQLite schema 基础。
 - **依赖：** `RHM-G2-01`。
 - **独占路径：** `crates/next-infra-store/src/migrations/**`、Store 初始化和 migration tests。
@@ -46,10 +46,12 @@
 - **输入/输出：** Store ports 和逻辑模型 → 可在临时目录重复启动的 schema。
 - **验收：** migration 幂等启动；损坏或 migration 失败时拒绝写入；不依赖 FTS5。
 - **验证：** `rtk cargo test -p next-infra-store migrations`。
+- **实现证据（2026-08-03）：** 已固定 `rusqlite 0.39.0` bundled SQLite（0.40.1 因使用 Rust 1.92 尚未稳定的 `cfg_select!` 被拒绝），实现用户独占目录/数据库权限、WAL、foreign keys、5 秒 busy timeout、quick check、STRICT schema、事务化 user_version migration 和未来 schema 拒绝。6 项测试覆盖幂等重启、损坏数据库、无 FTS 依赖和 Unix 0700/0600 权限，专属 Clippy 通过。
 - **风险/停止：** migration 编号单写；已合并 migration 不由其他任务改写。
 
 ### `RHM-G2-03` — SQLite Projection Store
 
+- **状态：** `READY`。
 - **目标：** 实现当前投影、有限历史和原子批次提交。
 - **依赖：** `RHM-G2-01/02`。
 - **独占路径：** `crates/next-infra-store/**`，排除 migration owner 的冻结文件。
@@ -62,6 +64,7 @@
 
 ### `RHM-G2-04` — Writer 与 Sync Engine
 
+- **状态：** `READY`。
 - **目标：** 将已验证 ObservationBatch 通过唯一 Writer 原子提交。
 - **依赖：** `RHM-G2-01`、`CON-G2-01` Connector API；使用 fake Store 时可与 `RHM-G2-02/03` 并行；真实集成还依赖 `CON-G2-02` Normalizer。
 - **独占路径：** `crates/next-infra-sync/**`。
