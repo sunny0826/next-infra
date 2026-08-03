@@ -16,6 +16,7 @@ const execFile = promisify(execFileCallback);
 const pollTimeoutMs = 10_000;
 const pollIntervalMs = 150;
 const captureTimeoutMs = 10_000;
+const renderSettleMs = 1_000;
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "../../../..");
 const appBundle = path.join(
@@ -329,6 +330,7 @@ async function smoke() {
     );
   }
 
+  await delay(renderSettleMs);
   const captureMode = await captureWindow(probeExecutable, window);
   const png = await validatePng(screenshotPath, window);
 

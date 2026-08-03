@@ -88,7 +88,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G1-04` — Tauri Bootstrap Smoke
 
-- **状态：** `BLOCKED`（当前 macOS 控制台处于锁屏状态，无法完成窗口截图）。
+- **状态：** `REVIEW`。
 - **目标：** 证明真实 Tauri App 可以承载 Mock Shell。
 - **依赖：** `UI-G1-02/03`、Host skeleton。
 - **独占路径：** `apps/desktop/e2e/bootstrap/**`；QA 只提交测试。
@@ -97,7 +97,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输出：** 最小真实 bundle smoke。
 - **验收：** App 实际启动并渲染 Shell；不访问 SQLite、Keychain 或 Provider。
 - **验证：** `V-DESKTOP` 的 Goal 1 子集。
-- **实现证据（2026-08-02）：** smoke 已使用真实 release bundle 验证唯一新 PID、屏幕内主窗口（900×600）和精确 PID 退出；系统状态确认 `IOConsoleLocked=Yes`、`CGSSessionScreenIsLocked=Yes`，锁屏下 ScreenCaptureKit 返回 `SCStreamErrorDomain -3811` 且系统 `screencapture` 无法生成图像。脚本会显式拒绝锁屏会话，因此尚无足够证据确认 Shell 内容渲染，任务保持阻塞而非降级放行。
+- **实现证据（2026-08-03）：** 最新 release bundle 构建成功；`test:desktop-smoke` 验证唯一新 PID `76140`、屏幕内主窗口（900×600）、ScreenCaptureKit 截图 `/tmp/next-infra-goal1-rendered-20260803.png`（91921 bytes）和精确 PID 退出均通过。主 agent 已直接检查截图，确认完整深色 Shell、六项导航、Overview、Goal 1 placeholder、Inspector 控件和 Runtime Bar 可见。此前锁屏会话中的 `SCStreamErrorDomain -3811` 与系统 `screencapture` 失败属于环境归因，macOS 解锁后复验通过。
 - **风险/停止：** 签名/环境失败单独归因；QA 不改 Host。
 
 ## 4. Goal 2：Query Snapshot Fixture
