@@ -148,6 +148,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G3-03` — Overview
 
+- **状态：** `REVIEW`。
 - **目标：** 完成 Attention → Observation → Critical Path → Changes 核实路径。
 - **依赖：** `UI-G2-01`、`UI-G3-01/02`。
 - **独占路径：** `apps/desktop/src/features/overview/**`。
@@ -155,6 +156,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **非目标：** 无 KPI card grid、自动猜 Critical Path 或外部操作。
 - **验收：** 区分 Resource unhealthy、expired 和 Connector failure；默认聚焦最重要异常；始终显示来源/观察时间。
 - **验证：** `V-UI + V-VIEWPORT`。
+- **实现证据（2026-08-03）：** Overview feature 已实现 Attention Queue、Observation Strip、configured-only Critical Paths 和 Recent Changes 四段核实路径；Attention 明确分离 Resource Health、Freshness 与 Lifecycle，Observation 单列 Connector Health/last success/last attempt，未配置 Critical Path 时明确拒绝根据名称或活动猜测。页面始终显示来源上下文与 observed_at，并通过 callback 交给后续 Inspector。3 项页面测试及 Desktop 全部 47 项测试、lint/build 通过；Shell 接入与三 viewport 回归留 `UI-G3-07/08`。
 - **风险/停止：** Observation succeeded 不等于 Resource healthy。
 
 ### `UI-G3-04` — Inventory 与 Resource Detail
