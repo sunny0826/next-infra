@@ -27,11 +27,20 @@ pub trait StoreReader {
     fn get_connection(&self, id: &ConnectionId) -> Result<Option<Connection>, Self::Error>;
     fn get_resource(&self, id: &ResourceId) -> Result<Option<Resource>, Self::Error>;
     fn get_relation(&self, id: &RelationId) -> Result<Option<Relation>, Self::Error>;
+    fn get_sync_run(&self, id: &SyncRunId) -> Result<Option<SyncRun>, Self::Error>;
+    fn sync_cursor(&self, connection_id: &ConnectionId) -> Result<Option<SyncCursor>, Self::Error>;
+    fn list_resources_for_scope(
+        &self,
+        connection_id: &ConnectionId,
+        scope: &Scope,
+    ) -> Result<Vec<Resource>, Self::Error>;
 }
 
 pub trait StoreWriter {
     type Error;
 
+    fn upsert_connection(&mut self, connection: Connection) -> Result<(), Self::Error>;
+    fn start_sync_run(&mut self, sync_run: SyncRun) -> Result<(), Self::Error>;
     fn commit_sync(&mut self, commit: SyncCommit) -> Result<CommitResult, Self::Error>;
     fn mark_running_syncs_interrupted(&mut self, at: Timestamp) -> Result<usize, Self::Error>;
 }
