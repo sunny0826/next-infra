@@ -133,7 +133,9 @@ impl StoreWriter for Store {
     fn upsert_connection(&mut self, connection: Connection) -> Result<(), Self::Error> {
         let config = serde_json::to_string(&connection.config).map_err(StoreError::Json)?;
         let secret_ref = connection.secret_ref.as_ref().map(json_text).transpose()?;
-        self.connection
+        let health = enum_text(&connection.health)?;
+        let transaction = self.connection.transaction().map_err(StoreError::Sqlite)?;
+        transaction
             .execute(
                 "INSERT INTO connections(connection_id, connector_type, display_name, enabled, config_json, secret_ref, health, last_success_at, last_attempt_at, config_schema_version, deleted_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
@@ -145,7 +147,7 @@ impl StoreWriter for Store {
                     connection.enabled,
                     config,
                     secret_ref,
-                    enum_text(&connection.health)?,
+                    health,
                     timestamp_option(connection.last_success_at),
                     timestamp_option(connection.last_attempt_at),
                     connection.config_schema_version.get(),
@@ -153,6 +155,8 @@ impl StoreWriter for Store {
                 ],
             )
             .map_err(StoreError::Sqlite)?;
+        bump_projection_metadata(&transaction)?;
+        transaction.commit().map_err(StoreError::Sqlite)?;
         Ok(())
     }
 
@@ -162,7 +166,10 @@ impl StoreWriter for Store {
                 "start_sync_run requires running status without finished_at".into(),
             ));
         }
-        insert_sync_run(&self.connection, &sync_run)
+        let transaction = self.connection.transaction().map_err(StoreError::Sqlite)?;
+        insert_sync_run(&transaction, &sync_run)?;
+        bump_projection_metadata(&transaction)?;
+        transaction.commit().map_err(StoreError::Sqlite)
     }
 
     fn commit_sync(&mut self, commit: SyncCommit) -> Result<CommitResult, Self::Error> {
@@ -207,17 +214,40 @@ impl StoreWriter for Store {
                 ],
             )
             .map_err(StoreError::Sqlite)?;
+        bump_projection_metadata(&transaction)?;
         transaction.commit().map_err(StoreError::Sqlite)?;
         Ok(result)
     }
 
     fn mark_running_syncs_interrupted(&mut self, at: Timestamp) -> Result<usize, Self::Error> {
-        self.connection
+        let transaction = self.connection.transaction().map_err(StoreError::Sqlite)?;
+        let updated = transaction
             .execute(
                 "UPDATE sync_runs SET status = 'interrupted', finished_at = ?1 WHERE status = 'running'",
                 params![at.unix_millis()],
             )
-            .map_err(StoreError::Sqlite)
+            .map_err(StoreError::Sqlite)?;
+        if updated > 0 {
+            bump_projection_metadata(&transaction)?;
+        }
+        transaction.commit().map_err(StoreError::Sqlite)?;
+        Ok(updated)
+    }
+}
+
+fn bump_projection_metadata(connection: &rusqlite::Connection) -> Result<(), StoreError> {
+    let updated = connection
+        .execute(
+            "UPDATE projection_metadata SET committed_revision = committed_revision + 1, committed_at = CAST(unixepoch('subsec') * 1000 AS INTEGER) WHERE singleton_id = 1",
+            [],
+        )
+        .map_err(StoreError::Sqlite)?;
+    if updated == 1 {
+        Ok(())
+    } else {
+        Err(StoreError::Contract(
+            "projection metadata singleton is missing".into(),
+        ))
     }
 }
 
@@ -993,6 +1023,7 @@ mod tests {
         store
             .start_sync_run(run(SyncRunStatus::Running, None))
             .unwrap();
+        let revision_before_failure = store.projection_metadata().unwrap().committed_revision;
         store
             .connection
             .execute(
@@ -1032,6 +1063,10 @@ mod tests {
         });
 
         assert!(result.is_err());
+        assert_eq!(
+            store.projection_metadata().unwrap().committed_revision,
+            revision_before_failure
+        );
         assert!(
             store
                 .get_resource(&id("fixture-resource", ResourceId::new))
@@ -1077,5 +1112,44 @@ mod tests {
             .unwrap();
         assert_eq!(recovered.status, SyncRunStatus::Interrupted);
         assert_eq!(recovered.finished_at, Some(timestamp_at(9)));
+    }
+
+    #[test]
+    fn projection_revision_tracks_only_committed_query_visible_mutations() {
+        let (_directory, mut store) = store();
+        assert_eq!(store.projection_metadata().unwrap().committed_revision, 0);
+
+        store.upsert_connection(connection()).unwrap();
+        assert_eq!(store.projection_metadata().unwrap().committed_revision, 1);
+
+        store
+            .start_sync_run(run(SyncRunStatus::Running, None))
+            .unwrap();
+        assert_eq!(store.projection_metadata().unwrap().committed_revision, 2);
+
+        store
+            .commit_sync(SyncCommit {
+                sync_run: run(SyncRunStatus::Succeeded, Some(timestamp_at(3))),
+                resources: vec![resource()],
+                resource_versions: vec![version()],
+                relations: Vec::new(),
+                relation_versions: Vec::new(),
+                changes: Vec::new(),
+                cursor_after: Some(id("cursor-after", SyncCursor::new)),
+                missing_evidence: None,
+            })
+            .unwrap();
+        assert_eq!(store.projection_metadata().unwrap().committed_revision, 3);
+
+        assert_eq!(store.mark_running_syncs_interrupted(timestamp_at(4)).unwrap(), 0);
+        assert_eq!(store.projection_metadata().unwrap().committed_revision, 3);
+
+        let mut second_run = run(SyncRunStatus::Running, None);
+        second_run.sync_run_id = id("fixture-run-2", SyncRunId::new);
+        store.start_sync_run(second_run).unwrap();
+        assert_eq!(store.projection_metadata().unwrap().committed_revision, 4);
+
+        assert_eq!(store.mark_running_syncs_interrupted(timestamp_at(5)).unwrap(), 1);
+        assert_eq!(store.projection_metadata().unwrap().committed_revision, 5);
     }
 }

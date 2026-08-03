@@ -2,6 +2,9 @@
 
 mod migrations;
 mod projection;
+mod query_projection;
+
+pub use query_projection::ProjectionMetadata;
 
 use rusqlite::Connection;
 use std::{fmt, fs, path::Path, time::Duration};
@@ -70,6 +73,10 @@ impl Store {
                 "WAL checkpoint remained busy after writer drain".into(),
             ))
         }
+    }
+
+    pub fn projection_metadata(&self) -> Result<ProjectionMetadata, StoreError> {
+        query_projection::read_projection_metadata(&self.connection)
     }
 }
 

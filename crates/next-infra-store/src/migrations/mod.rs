@@ -1,7 +1,7 @@
 use crate::StoreError;
 use rusqlite::{Connection, TransactionBehavior, params};
 
-pub const LATEST_SCHEMA_VERSION: u32 = 1;
+pub const LATEST_SCHEMA_VERSION: u32 = 2;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE schema_migrations (
@@ -136,6 +136,17 @@ CREATE INDEX changes_observed_idx ON changes(observed_at DESC);
 CREATE INDEX sync_runs_connection_started_idx ON sync_runs(connection_id, started_at DESC);
 "#;
 
+const MIGRATION_2: &str = r#"
+CREATE TABLE projection_metadata (
+    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+    committed_revision INTEGER NOT NULL,
+    committed_at INTEGER NOT NULL
+) STRICT;
+
+INSERT INTO projection_metadata(singleton_id, committed_revision, committed_at)
+VALUES (1, 0, CAST(unixepoch('subsec') * 1000 AS INTEGER));
+"#;
+
 pub fn apply(connection: &mut Connection) -> Result<(), StoreError> {
     let current: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -165,6 +176,20 @@ pub fn apply(connection: &mut Connection) -> Result<(), StoreError> {
             .map_err(StoreError::Sqlite)?;
         transaction
             .pragma_update(None, "user_version", 1_u32)
+            .map_err(StoreError::Sqlite)?;
+    }
+    if current < 2 {
+        transaction
+            .execute_batch(MIGRATION_2)
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, unixepoch('subsec') * 1000)",
+                params![2_u32],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .pragma_update(None, "user_version", 2_u32)
             .map_err(StoreError::Sqlite)?;
     }
     transaction.commit().map_err(StoreError::Sqlite)
