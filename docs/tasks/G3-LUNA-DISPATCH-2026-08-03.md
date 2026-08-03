@@ -158,8 +158,8 @@ flowchart TD
 | `UI-G3-04A` (`REVIEW`) | `apps/desktop/src/features/inventory/**` | 有界 Inventory、filter/sort/cursor/selection | 单页最多 100；三类状态分离；opaque cursor 不可编辑 |
 | `UI-G3-04B` (`REVIEW`) | `apps/desktop/src/features/resource-detail/**` | 资源身份、状态、证据、关系、属性、Change、Coverage | 不显示 raw Provider JSON；expired/tombstoned/orphaned/partial 可核实 |
 | `UI-G3-05` (`REVIEW`) | `apps/desktop/src/features/topology/**` | focus-first depth 1 bounded topology | 默认 100/200、硬上限 200/400；Frontier/truncated；三类 evidence 不只靠颜色 |
-| `UI-G3-06A` | `apps/desktop/src/features/connectors/**` | Connection health、sync/backoff、coverage、manual sync | Manual Sync 与 UI refresh 分离；Secret/SecretRef 不进入 DOM |
-| `UI-G3-06B` | `apps/desktop/src/features/settings/**` | start-at-login、budget、retention、`user_quit` | unsupported capability 明确禁用；start-at-login 与 MCP auto-launch 分离 |
+| `UI-G3-06A` (`REVIEW`) | `apps/desktop/src/features/connectors/**` | Connection health、sync/backoff、coverage、manual sync | Manual Sync 与 UI refresh 分离；Secret/SecretRef 不进入 DOM |
+| `UI-G3-06B` (`REVIEW`) | `apps/desktop/src/features/settings/**` | start-at-login、budget、retention、`user_quit` | unsupported capability 明确禁用；start-at-login 与 MCP auto-launch 分离 |
 
 共同只读输入：UI fixture catalog、generated QDTO、Thin Adapter、Evidence Spine、Interface System、HTML prototype。  
 共同非目标：不编辑 route registry/global CSS、fixtures、generated bindings、Tauri Host/Keychain；不直接调用 Tauri API。  

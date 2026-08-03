@@ -187,6 +187,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G3-06` — Connectors 与 Settings 最小页
 
+- **状态：** `REVIEW`。
 - **目标：** 展示 Fixture Connection 状态和本地生命周期设置。
 - **依赖：** Adapter local-config methods、Host capability DTO；可与其他页面并行。
 - **独占路径：** `features/connectors/**`、`features/settings/**`。
@@ -194,6 +195,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **非目标：** 不实现 Goal 9 Coverage Matrix，不显示 Secret，不伪装 MCP auto-launch 已可用。
 - **验收：** Manual Sync 与 UI refresh 分离；start-at-login 与 MCP auto-launch 分离；Runtime Bar 不替代 Resource Health/Freshness。
 - **验证：** `V-UI + V-ADAPTER`。
+- **实现证据（2026-08-03）：** Connectors 已分开展示 Connection Health、last success/attempt、recent SyncRun、next scheduled 与 Connector Coverage，Manual Sync 只显示新 `sync_run_id` 并明确当前页面未刷新；disabled connection 不可触发。Settings 以连续 row 分开 start-at-login、MCP auto-launch、`user_quit`、data budget 与 retention；unsupported MCP capability 显式禁用，页面声明并测试 Secret/SecretRef 不进入 DOM。4 项页面测试及 Desktop 全部 59 项测试、lint/build 通过；真实 local-config/autostart wiring 留 Composition。
 - **风险/停止：** SecretRef 不进入 DOM；无 capability 的开关不能看似可用。
 
 ### `UI-G3-07` — Shell Integration

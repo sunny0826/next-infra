@@ -1,0 +1,30 @@
+.connectors-page { color: var(--label-primary); display: grid; gap: var(--space-4); padding: 18px 20px 28px; }
+.connectors-page > header, .connectors-section > div:first-child { align-items: flex-end; display: flex; justify-content: space-between; }
+.connectors-page h1 { font-size: 18px; font-weight: 620; letter-spacing: -.02em; margin: 2px 0 4px; }
+.connectors-page header p, .connectors-empty { color: var(--label-secondary); margin: 0; }
+.connectors-eyebrow, .connectors-page header > span, .connectors-section > div > span { color: var(--label-muted) !important; font: 9px var(--font-mono); }
+.connectors-eyebrow { letter-spacing: .08em; text-transform: uppercase; }
+.connectors-notice { background: var(--rack-surface); border: 1px solid var(--telemetry-cyan-soft); color: var(--label-secondary); padding: var(--space-3); }
+.connectors-section { border-top: 1px solid var(--aluminum-line); display: grid; gap: var(--space-3); padding-top: var(--space-3); }
+.connectors-section h2 { font-size: 11px; letter-spacing: .055em; margin: 0; text-transform: uppercase; }
+.connectors-frame { border: 1px solid var(--aluminum-line); overflow-x: auto; }
+.connectors-frame table { border-collapse: collapse; min-width: 920px; width: 100%; }
+.connectors-frame th { background: var(--rack-surface); color: var(--label-muted); font: 9px var(--font-mono); height: 30px; padding: 0 var(--space-2); text-align: left; text-transform: uppercase; }
+.connectors-frame td { border-top: 1px solid var(--aluminum-line); color: var(--label-secondary); font-size: 11px; height: 44px; padding: 0 var(--space-2); }
+.connectors-frame td:first-child { display: grid; gap: 2px; padding-top: 7px; }
+.connectors-frame code, .connectors-frame time { color: var(--label-muted); font: 9px var(--font-mono); }
+.connectors-frame button { background: var(--rack-raised); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-secondary); height: 26px; }
+.connectors-frame button:focus-visible { outline: 2px solid var(--telemetry-cyan); outline-offset: -2px; }
+.connectors-status, .connectors-level { font: 9px var(--font-mono); text-transform: uppercase; }
+.connectors-status.state-healthy, .connectors-level.level-supported { color: var(--heartbeat-green); }
+.connectors-status.state-degraded, .connectors-status.state-rate_limited, .connectors-level.level-partial { color: var(--inspection-amber); }
+.connectors-status.state-auth_failed, .connectors-status.state-unreachable { color: var(--fault-vermilion); }
+.connectors-status.state-disabled, .connectors-level.level-unsupported { color: var(--cloud-unknown); }
+.connectors-coverage { border: 1px solid var(--aluminum-line); }
+.connectors-coverage article { align-items: center; border-bottom: 1px solid var(--aluminum-line); display: grid; gap: var(--space-3); grid-template-columns: minmax(180px, .6fr) 90px 1fr; min-height: 48px; padding: var(--space-2); }
+.connectors-coverage article:last-child { border-bottom: 0; }
+.connectors-coverage article > div { display: grid; gap: 2px; }
+.connectors-coverage code, .connectors-coverage p { color: var(--label-muted); font: 9px var(--font-mono); margin: 0; }
+.connectors-state { background: var(--rack-surface); border: 1px solid var(--aluminum-line); color: var(--label-secondary); margin: var(--space-5); padding: var(--space-4); }
+.connectors-state--error { border-color: var(--fault-vermilion); }
+@media (max-width: 560px) { .connectors-page { padding: 14px 14px 24px; } .connectors-page > header { align-items: flex-start; flex-direction: column; } .connectors-frame table { min-width: 660px; } .connectors-coverage article { grid-template-columns: 1fr; } }

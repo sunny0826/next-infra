@@ -1,4 +1,5 @@
 import type { ConnectionDto } from "../../generated/query/ConnectionDto";
+import type { ConnectorCoverageSnapshotDto } from "../../generated/query/ConnectorCoverageSnapshotDto";
 import type { RelationDto } from "../../generated/query/RelationDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
@@ -169,7 +170,7 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async listConnectorCoverage() {
+  async listConnectorCoverage(): Promise<ConnectorCoverageSnapshotDto> {
     return { metadata: this.#metadata(), items: [] };
   }
 

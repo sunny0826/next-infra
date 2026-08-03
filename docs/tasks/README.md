@@ -115,6 +115,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 9. [UI-G3-04A Inventory 阶段验收](./UI-G3-04A-2026-08-03.md)
 10. [UI-G3-04B Resource Detail 阶段验收](./UI-G3-04B-2026-08-03.md)
 11. [UI-G3-05 Minimum Bounded Topology 验收记录](./UI-G3-05-2026-08-03.md)
+12. [UI-G3-06 Connectors 与 Settings 验收记录](./UI-G3-06-2026-08-03.md)
 
 ## 6. 设计决策包
 
