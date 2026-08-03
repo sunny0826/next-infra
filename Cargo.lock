@@ -2181,8 +2181,11 @@ dependencies = [
 name = "next-infra-connector-fixture"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "next-infra-connector-api",
  "next-infra-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

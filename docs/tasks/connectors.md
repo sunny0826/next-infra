@@ -59,7 +59,7 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-03` — Fixture Connector
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 提供完全离线、确定、可重放的 Connector，供 Goal 2/3 同步和 UI 测试。
 - **依赖：** `CON-G2-01`。
 - **独占路径：** `crates/next-infra-connector-fixture/**`、`fixtures/connectors/fixture/**`。
@@ -68,6 +68,7 @@ rtk cargo fmt --all --check
 - **输出：** schema-valid ObservationBatch 序列和确定性 snapshots。
 - **验收：** 覆盖相同批次、变化批次、连续两次权威缺失、partial 后恢复和 evidence 稳定性。
 - **验证：** Fixture tests、replay snapshots。
+- **实现证据（2026-08-03）：** FixtureConnector 已使用仓库内 `replay-v1.json` 提供确定性的 full、incremental、targeted、partial→recovery、连续 authoritative missing 与 fatal 场景；同一 mode/cursor 请求可重放为相同结果，fixture 不接受 Secret，且无真实 URL、账户、主机或 IP。3 项 Fixture 测试、专属 Clippy 和全 workspace 34 项测试通过。
 - **风险/停止：** Fixture 不成为生产 Connector 的共享逻辑入口。
 
 ### `CON-G2-04` — Contract Tests 与 Coverage Catalog

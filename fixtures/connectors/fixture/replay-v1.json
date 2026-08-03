@@ -1,0 +1,159 @@
+{
+  "steps": [
+    {
+      "mode": "full",
+      "cursor_before": null,
+      "result": {
+        "type": "complete",
+        "batch": {
+          "resources": [
+            {
+              "kind": "fixture.resource",
+              "external_id": "fixture-resource-a",
+              "name": "fixture-a",
+              "display_name": "Fixture Resource A",
+              "scope": "fixture-scope",
+              "labels": {"fixture.group": "primary"},
+              "health": "healthy",
+              "attributes": {"state": "ready"},
+              "attribute_schema_version": 1,
+              "observed_at": 1000
+            },
+            {
+              "kind": "fixture.resource",
+              "external_id": "fixture-resource-b",
+              "name": "fixture-b",
+              "display_name": "Fixture Resource B",
+              "scope": "fixture-scope",
+              "labels": {"fixture.group": "secondary"},
+              "health": "healthy",
+              "attributes": {"state": "ready"},
+              "attribute_schema_version": 1,
+              "observed_at": 1000
+            }
+          ],
+          "relations": [
+            {
+              "source": {"kind": "fixture.resource", "external_id": "fixture-resource-a"},
+              "target": {"kind": "fixture.resource", "external_id": "fixture-resource-b"},
+              "kind": "fixture.depends_on",
+              "evidence_key": "fixture-evidence-a-b",
+              "field_path": "attributes.target",
+              "observed_at": 1000
+            }
+          ],
+          "coverage": {"type": "authoritative_full", "scope": "fixture-scope"},
+          "next_cursor": "cursor-v1",
+          "warnings": [],
+          "redaction_report": {"removed_fields": 0, "unknown_fields_dropped": 0, "secret_sentinels_detected": 0},
+          "provider_request_summary": {"request_count": 1, "elapsed_ms": 1, "status_class_counts": {"2xx": 1}}
+        }
+      }
+    },
+    {
+      "mode": "incremental",
+      "cursor_before": "cursor-v1",
+      "result": {
+        "type": "complete",
+        "batch": {
+          "resources": [{"kind": "fixture.resource", "external_id": "fixture-resource-a", "name": "fixture-a", "display_name": "Fixture Resource A", "scope": "fixture-scope", "labels": {"fixture.group": "primary"}, "health": "degraded", "attributes": {"state": "changed"}, "attribute_schema_version": 1, "observed_at": 2000}],
+          "relations": [],
+          "coverage": {"type": "incremental", "cursor": "cursor-v1"},
+          "next_cursor": "cursor-v2",
+          "warnings": [],
+          "redaction_report": {"removed_fields": 0, "unknown_fields_dropped": 0, "secret_sentinels_detected": 0},
+          "provider_request_summary": {"request_count": 1, "elapsed_ms": 1, "status_class_counts": {"2xx": 1}}
+        }
+      }
+    },
+    {
+      "mode": "targeted",
+      "cursor_before": null,
+      "result": {
+        "type": "complete",
+        "batch": {
+          "resources": [{"kind": "fixture.resource", "external_id": "fixture-resource-a", "name": "fixture-a", "display_name": "Fixture Resource A", "scope": "fixture-scope", "labels": {}, "health": "healthy", "attributes": {"state": "ready"}, "attribute_schema_version": 1, "observed_at": 3000}],
+          "relations": [],
+          "coverage": {"type": "targeted", "resource_ids": ["fixture-resource-a"]},
+          "next_cursor": null,
+          "warnings": [],
+          "redaction_report": {"removed_fields": 0, "unknown_fields_dropped": 0, "secret_sentinels_detected": 0},
+          "provider_request_summary": {"request_count": 1, "elapsed_ms": 1, "status_class_counts": {"2xx": 1}}
+        }
+      }
+    },
+    {
+      "mode": "full",
+      "cursor_before": "cursor-partial",
+      "result": {
+        "type": "partial",
+        "batch": {
+          "resources": [{"kind": "fixture.resource", "external_id": "fixture-resource-a", "name": "fixture-a", "display_name": "Fixture Resource A", "scope": "fixture-scope", "labels": {}, "health": "healthy", "attributes": {"state": "ready"}, "attribute_schema_version": 1, "observed_at": 4000}],
+          "relations": [],
+          "coverage": {"type": "partial", "scope": "fixture-scope", "reason": {"type": "rate_limited"}},
+          "next_cursor": "cursor-recover",
+          "warnings": [{"code": "rate_limited", "message": "fixture rate limit"}],
+          "redaction_report": {"removed_fields": 0, "unknown_fields_dropped": 0, "secret_sentinels_detected": 0},
+          "provider_request_summary": {"request_count": 1, "elapsed_ms": 1, "status_class_counts": {"4xx": 1}}
+        },
+        "failure": {"code": "rate_limited", "message": "fixture rate limit", "retryable": true, "retry_after_ms": 1000}
+      }
+    },
+    {
+      "mode": "full",
+      "cursor_before": "cursor-recover",
+      "result": {
+        "type": "complete",
+        "batch": {
+          "resources": [{"kind": "fixture.resource", "external_id": "fixture-resource-a", "name": "fixture-a", "display_name": "Fixture Resource A", "scope": "fixture-scope", "labels": {}, "health": "healthy", "attributes": {"state": "recovered"}, "attribute_schema_version": 1, "observed_at": 5000}],
+          "relations": [],
+          "coverage": {"type": "authoritative_full", "scope": "fixture-scope"},
+          "next_cursor": "cursor-recovered",
+          "warnings": [],
+          "redaction_report": {"removed_fields": 0, "unknown_fields_dropped": 0, "secret_sentinels_detected": 0},
+          "provider_request_summary": {"request_count": 1, "elapsed_ms": 1, "status_class_counts": {"2xx": 1}}
+        }
+      }
+    },
+    {
+      "mode": "full",
+      "cursor_before": "cursor-missing-1",
+      "result": {
+        "type": "complete",
+        "batch": {
+          "resources": [{"kind": "fixture.resource", "external_id": "fixture-resource-a", "name": "fixture-a", "display_name": "Fixture Resource A", "scope": "fixture-scope", "labels": {}, "health": "healthy", "attributes": {"state": "ready"}, "attribute_schema_version": 1, "observed_at": 6000}],
+          "relations": [],
+          "coverage": {"type": "authoritative_full", "scope": "fixture-scope"},
+          "next_cursor": "cursor-missing-2",
+          "warnings": [],
+          "redaction_report": {"removed_fields": 0, "unknown_fields_dropped": 0, "secret_sentinels_detected": 0},
+          "provider_request_summary": {"request_count": 1, "elapsed_ms": 1, "status_class_counts": {"2xx": 1}}
+        }
+      }
+    },
+    {
+      "mode": "full",
+      "cursor_before": "cursor-missing-2",
+      "result": {
+        "type": "complete",
+        "batch": {
+          "resources": [{"kind": "fixture.resource", "external_id": "fixture-resource-a", "name": "fixture-a", "display_name": "Fixture Resource A", "scope": "fixture-scope", "labels": {}, "health": "healthy", "attributes": {"state": "ready"}, "attribute_schema_version": 1, "observed_at": 7000}],
+          "relations": [],
+          "coverage": {"type": "authoritative_full", "scope": "fixture-scope"},
+          "next_cursor": "cursor-missing-done",
+          "warnings": [],
+          "redaction_report": {"removed_fields": 0, "unknown_fields_dropped": 0, "secret_sentinels_detected": 0},
+          "provider_request_summary": {"request_count": 1, "elapsed_ms": 1, "status_class_counts": {"2xx": 1}}
+        }
+      }
+    },
+    {
+      "mode": "full",
+      "cursor_before": "cursor-fatal",
+      "result": {
+        "type": "fatal",
+        "failure": {"code": "permission_denied", "message": "fixture permission denied", "retryable": false, "retry_after_ms": null}
+      }
+    }
+  ]
+}
