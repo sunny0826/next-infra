@@ -149,7 +149,7 @@ rtk git diff --check
 
 ### `RHM-G3-05P` — SQLite QuerySource 前置决策
 
-- **状态：** `BLOCKED-CONTRACT`。
+- **状态：** `REVIEW`，见 `DEC-G3-01`；Query `P0` 与 Store `P1` 可并行，Runtime `P2` 必须等待两者。
 - **唯一目标：** 冻结 Composition 如何获得 SQLite-backed bounded `QuerySource`，同时保持唯一 Store/Writer/SQLite owner。
 - **必须回答：**
   - QuerySource 由 Store 暴露只读 adapter，还是由 Query crate 提供基于 StoreReader 的 concrete source？

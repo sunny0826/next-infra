@@ -1,4 +1,4 @@
-# Goal 1 决策索引
+# 设计决策索引
 
 **状态：** Accepted（Goal 1 本地实现基线）  
 **合并日期：** 2026-08-02
@@ -11,6 +11,7 @@
 | [DEC-G1-02](./DEC-G1-02-desktop-lifecycle.md) | Accepted | 单实例优先、close-to-hide、BackgroundOnly、默认关闭自动登录和 `user_quit` 语义 |
 | [DEC-G1-03](./DEC-G1-03-bridge-install-and-upgrade.md) | Accepted for local development | App/Bridge 组成 Release Set；稳定路径、初始协议 `1.0` 与双向区间协商、可信拉起和整体回滚已冻结 |
 | [DEC-G1-04](./DEC-G1-04-keychain-signing.md) | Accepted technical boundary | Data Protection Keychain、开发/发布身份隔离、Developer ID 与无在线 updater 边界已冻结 |
+| [DEC-G3-01](./DEC-G3-01-committed-query-source.md) | Proposed for Review | Runtime-owned SharedStore、DTO-neutral Store projection、CommittedQuerySource 与单 SQLite owner |
 
 ## 当前就绪结论
 
