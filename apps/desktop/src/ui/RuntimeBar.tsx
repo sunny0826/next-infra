@@ -8,8 +8,8 @@ export function RuntimeBar() {
         <span>local · read-only</span>
       </div>
       <div className="shell-runtime-cluster shell-runtime-secondary">
-        <span>Goal 1 shell</span>
-        <span>no provider access</span>
+        <span>Goal 3 query surface</span>
+        <span>provider writes disabled</span>
       </div>
     </footer>
   );

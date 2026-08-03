@@ -64,6 +64,9 @@ describe("React app shell", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("Saved fact is expired")).not.toHaveLength(0);
     expect(screen.queryByRole("heading", { name: "Goal 1 placeholder" })).not.toBeInTheDocument();
+    const runtime = screen.getByRole("contentinfo", { name: "Control Plane Runtime" });
+    expect(within(runtime).getByText("Goal 3 query surface")).toBeInTheDocument();
+    expect(within(runtime).getByText("provider writes disabled")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute(
       "aria-current",
       "page",

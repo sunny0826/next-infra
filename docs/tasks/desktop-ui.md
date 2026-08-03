@@ -213,6 +213,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G3-08` — Responsive 与 Accessibility QA
 
+- **状态：** `REVIEW`。
 - **目标：** 验证 Goal 3 代表路径的响应式和可访问性。
 - **依赖：** `UI-G3-07`。
 - **独占路径：** `tests/responsive/**`、`tests/accessibility/**`。
@@ -221,6 +222,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输出：** automated regressions 和按 owner 路由的 defects。
 - **验收：** 无 document-level 横向 overflow；状态均有文本；代表核实路径通过。
 - **验证：** `V-VIEWPORT`。
+- **实现证据（2026-08-03）：** QA-only Vite fixture 复用正式 Shell/CSS 与合成 Query snapshot，未给生产 `main.tsx` 增加 debug 分支。Playwright CLI 真实验证 1600×1000、900×800、390×844：HTML/body scrollWidth 均等于 viewport；桌面 grid 为 188/1096/316，900px 为 188/712，390px 为 56/334；900px 与 390px Inspector fixed drawer 均在 viewport 内并保留 close button。Inventory 670/261、Connectors 660/261、Topology 760/261 只在内部容器滚动。真实浏览器验证 Meta+K、2px cyan focus、reduced-motion、Settings disabled capability、Timeline unavailable 与 SecretRef 不进 DOM；干净 session 无 console error。新增 accessibility regression 后 Desktop 16 个测试文件共 67 项测试、lint/build 与 diff check 通过。真实 Tauri 窗口行为仍留 `UI-G3-09`。
 - **风险/停止：** 代表 viewport 通过不等于最终六页通过。
 
 ### `UI-G3-09` — Real Desktop Lifecycle QA

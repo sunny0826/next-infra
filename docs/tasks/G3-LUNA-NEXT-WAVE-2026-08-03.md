@@ -122,7 +122,7 @@ rtk git diff --check
 
 ### `UI-G3-08A` — Keyboard 与 Semantic QA
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **独占路径：**
   - `apps/desktop/tests/accessibility/**`
   - `apps/desktop/tests/support/**`
@@ -132,7 +132,7 @@ rtk git diff --check
 
 ### `UI-G3-08B` — Responsive 与 Overflow QA
 
-- **状态：** `READY`，可与 `UI-G3-08A` 并行。
+- **状态：** `REVIEW`。
 - **独占路径：**
   - `apps/desktop/tests/responsive/**`
   - 经批准后可用 `apps/desktop/e2e/ui/**`

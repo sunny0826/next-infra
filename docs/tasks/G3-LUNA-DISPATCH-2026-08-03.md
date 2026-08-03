@@ -192,7 +192,7 @@ flowchart TD
 
 ### `UI-G3-08` — Responsive 与 Accessibility QA
 
-- **状态：** `READY`，`UI-G3-07` 已进入 `REVIEW`。
+- **状态：** `REVIEW`。
 - **独占路径：** `apps/desktop/tests/responsive/**`、`apps/desktop/tests/accessibility/**`。
 - **目标：** 验证 1600×1000、900×800、390×844；focus、Cmd/Ctrl+K、Escape、Enter/Space、reduced motion、container scroll 和文本状态。
 - **限制：** QA 不修改生产文件；缺陷回派原 owner；Topology arrow navigation 留 Goal 7。
