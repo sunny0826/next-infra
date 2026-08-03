@@ -1,0 +1,151 @@
+use next_infra_core::{
+    BindingId, Confidence, ConnectionId, ConnectorHealth, ConnectorType, EvidenceType, FieldPath,
+    Freshness, Lifecycle, RelationEvidence, RelationKind, ResourceHealth, ResourceId, ResourceKind,
+    ResourceVersionId, RuleVersion, Scope, SecretRef, SecretValue, SyncCoverage, SyncCursor,
+    SyncRunId,
+};
+use std::any::TypeId;
+
+fn id<T>(
+    value: &str,
+    constructor: impl FnOnce(String) -> Result<T, next_infra_core::DomainError>,
+) -> T {
+    constructor(value.to_owned()).expect("fixture identifier must be valid")
+}
+
+#[test]
+fn connector_and_domain_kinds_enforce_lowercase_shapes() {
+    assert_eq!(ConnectorType::new("github").unwrap().as_str(), "github");
+    assert!(ConnectorType::new("GitHub").is_err());
+    assert!(ConnectorType::new("github.api").is_err());
+
+    assert_eq!(
+        ResourceKind::new("github.repository").unwrap().as_str(),
+        "github.repository"
+    );
+    assert_eq!(
+        RelationKind::new("deployment.runs_on").unwrap().as_str(),
+        "deployment.runs_on"
+    );
+
+    for invalid in [
+        "repository",
+        "GitHub.repository",
+        "github.Repository",
+        "github.",
+        ".repository",
+    ] {
+        assert!(ResourceKind::new(invalid).is_err(), "accepted {invalid}");
+        assert!(RelationKind::new(invalid).is_err(), "accepted {invalid}");
+    }
+}
+
+#[test]
+fn only_authoritative_full_coverage_contributes_missing_evidence() {
+    let authoritative = SyncCoverage::AuthoritativeFull {
+        scope: id("fixture-scope", Scope::new),
+    };
+    let incremental = SyncCoverage::Incremental {
+        cursor: id("fixture-cursor", SyncCursor::new),
+    };
+    let partial = SyncCoverage::Partial {
+        scope: Some(id("fixture-scope", Scope::new)),
+        reason: next_infra_core::CoverageGapReason::PaginationIncomplete,
+    };
+    let targeted = SyncCoverage::Targeted {
+        resource_ids: vec![id("fixture-resource", ResourceId::new)],
+    };
+
+    assert!(authoritative.contributes_missing_evidence());
+    assert!(!incremental.contributes_missing_evidence());
+    assert!(!partial.contributes_missing_evidence());
+    assert!(!targeted.contributes_missing_evidence());
+}
+
+#[test]
+fn relation_evidence_keeps_provenance_and_confidence_distinct() {
+    let provider_sync_run = id("fixture-sync-run", SyncRunId::new);
+    let provider = RelationEvidence::Provider {
+        connection_id: id("fixture-connection", ConnectionId::new),
+        sync_run_id: provider_sync_run.clone(),
+        field_path: id("attributes.fixture", FieldPath::new),
+    };
+    let configured = RelationEvidence::Configured {
+        binding_id: id("fixture-binding", BindingId::new),
+    };
+    let confidence = Confidence::from_basis_points(8_500).unwrap();
+    let inferred = RelationEvidence::Inferred {
+        rule_version: id("fixture-rule-v1", RuleVersion::new),
+        input_resource_version_ids: vec![id("fixture-resource-version", ResourceVersionId::new)],
+        confidence,
+    };
+
+    assert_eq!(provider.evidence_type(), EvidenceType::Provider);
+    assert_eq!(configured.evidence_type(), EvidenceType::Configured);
+    assert_eq!(inferred.evidence_type(), EvidenceType::Inferred);
+
+    assert_eq!(provider.sync_run_id(), Some(&provider_sync_run));
+    assert_eq!(configured.sync_run_id(), None);
+    assert_eq!(inferred.sync_run_id(), None);
+
+    assert_eq!(provider.confidence(), None);
+    assert_eq!(configured.confidence(), None);
+    assert_eq!(inferred.confidence(), Some(confidence));
+}
+
+#[test]
+fn confidence_is_bounded_to_basis_points() {
+    assert_eq!(Confidence::from_basis_points(0).unwrap().basis_points(), 0);
+    assert_eq!(
+        Confidence::from_basis_points(10_000)
+            .unwrap()
+            .basis_points(),
+        10_000
+    );
+    assert!(Confidence::from_basis_points(10_001).is_err());
+}
+
+#[test]
+fn secret_values_are_redacted_and_separate_from_serializable_references() {
+    let secret_ref = SecretRef::new("fixture-keychain-reference").unwrap();
+    let secret_value = SecretValue::new(b"fixture-sensitive-value".to_vec());
+
+    assert_eq!(
+        serde_json::to_string(&secret_ref).unwrap(),
+        r#""fixture-keychain-reference""#
+    );
+    assert_eq!(secret_value.expose(), b"fixture-sensitive-value");
+    assert_eq!(format!("{secret_value:?}"), "SecretValue([REDACTED])");
+    assert!(!format!("{secret_value:?}").contains("fixture-sensitive-value"));
+    assert_ne!(TypeId::of::<SecretRef>(), TypeId::of::<SecretValue>());
+}
+
+#[test]
+fn resource_connector_freshness_and_lifecycle_are_independent_enums() {
+    assert_ne!(
+        TypeId::of::<ResourceHealth>(),
+        TypeId::of::<ConnectorHealth>()
+    );
+    assert_ne!(TypeId::of::<ResourceHealth>(), TypeId::of::<Freshness>());
+    assert_ne!(TypeId::of::<ResourceHealth>(), TypeId::of::<Lifecycle>());
+    assert_ne!(TypeId::of::<ConnectorHealth>(), TypeId::of::<Freshness>());
+    assert_ne!(TypeId::of::<ConnectorHealth>(), TypeId::of::<Lifecycle>());
+    assert_ne!(TypeId::of::<Freshness>(), TypeId::of::<Lifecycle>());
+
+    assert_eq!(
+        serde_json::to_string(&ResourceHealth::Healthy).unwrap(),
+        r#""healthy""#
+    );
+    assert_eq!(
+        serde_json::to_string(&ConnectorHealth::Healthy).unwrap(),
+        r#""healthy""#
+    );
+    assert_eq!(
+        serde_json::to_string(&Freshness::Fresh).unwrap(),
+        r#""fresh""#
+    );
+    assert_eq!(
+        serde_json::to_string(&Lifecycle::Active).unwrap(),
+        r#""active""#
+    );
+}

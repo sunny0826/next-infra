@@ -1,6 +1,6 @@
 # Connector 与 Provider 任务包
 
-本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。`GATE-G1` 已通过；`CON-G2-01` 等待 `RHM-G2-01` 冻结 Domain Contract，其余任务继续等待各自 Goal 与依赖。
+本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。`RHM-G2-01` 已进入复核，`CON-G2-01` 当前可派发；其余任务继续等待各自 Goal 与依赖。
 
 ## 1. 所有 Connector 的硬边界
 
@@ -31,6 +31,7 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-01` — Connector API 契约冻结
 
+- **状态：** `READY`。
 - **目标：** 实现并冻结 `ConnectorDescriptor`、`ReadConnector`、`ValidationReport`、`SyncRequest`、`ObservationBatch`、Sync Coverage 和结构化错误。
 - **依赖：** `RHM-G2-01` Domain Contract。
 - **独占路径：** `crates/next-infra-connector-api/**`。

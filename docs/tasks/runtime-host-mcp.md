@@ -1,6 +1,6 @@
 # Runtime、Host 与 MCP 任务包
 
-本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。`GATE-G1` 已通过，当前串行入口为 `RHM-G2-01`；其余任务继续等待各自依赖与 Gate。
+本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。`RHM-G2-01` 已进入复核，当前可并行派发 `RHM-G2-02` 与 `CON-G2-01`；其余任务继续等待各自依赖与 Gate。
 
 ## Goal 1：工程与发布骨架
 
@@ -23,7 +23,7 @@
 
 ### `RHM-G2-01` — Domain Contract 冻结
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 冻结所有下游共享的领域类型和 ports。
 - **依赖：** `GATE-G1` 通过。
 - **独占路径：** `crates/next-infra-core/**`。
@@ -32,10 +32,12 @@
 - **输入/输出：** 资源模型和术语表 → 版本化 Rust types、invariant tests、契约变更流程。
 - **验收：** Provider/Connector/Connection 不混淆；Health/Freshness/两种 Coverage 分离；SecretRef 与 Secret 值无法混用；Provider kind 不成为无限增长大枚举。
 - **验证：** `rtk cargo test -p next-infra-core`；`rtk cargo clippy -p next-infra-core --all-targets -- -D warnings`。
+- **实现证据（2026-08-03）：** 已实现强类型 ID/kind、Connection/Resource/Version/Relation/Binding/SyncRun/Change、独立 Resource/Connector Health、Freshness、Lifecycle、两类 Coverage、结构化 Evidence/Origin/Error，以及 Store/Connector/Secret ports；SecretValue 不可序列化且 Debug 脱敏。6 项黑盒不变量测试、Core Clippy `-D warnings` 和全 workspace 11 项测试通过。
 - **风险/停止：** 下游不得直接修改 Core；缺字段时提交契约请求并等待 owner 串行处理。
 
 ### `RHM-G2-02` — SQLite 基础与 Migration
 
+- **状态：** `READY`。
 - **目标：** 建立安全、可恢复且不依赖系统 FTS5 的 SQLite schema 基础。
 - **依赖：** `RHM-G2-01`。
 - **独占路径：** `crates/next-infra-store/src/migrations/**`、Store 初始化和 migration tests。
