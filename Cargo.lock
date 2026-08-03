@@ -2290,6 +2290,8 @@ dependencies = [
  "next-infra-query",
  "next-infra-store",
  "next-infra-sync",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

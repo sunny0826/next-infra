@@ -109,7 +109,7 @@
 
 ### `RHM-G3-02` — Control Plane Runtime
 
-- **状态：** `RUNNING`；纯 Runtime 状态机已完成 Review，真实 Store/Writer/Query composition evidence 仍缺失。
+- **状态：** `REVIEW`。
 - **目标：** 将 Store、Writer、Query、Scheduler 和维护组合为不依赖 Tauri 的可测试 Runtime。
 - **依赖：** `RHM-G3-01` 的 Query handle 和冻结后的 Runtime API；可与 Host/Keychain/UI 基础并行。
 - **独占路径：** `crates/next-infra-runtime/**`。
@@ -118,7 +118,7 @@
 - **输入/输出：** Core ports 与服务 handles → Runtime start/stop API 和独立集成测试。
 - **验收：** 不启动 WebView 可测试；关闭顺序可证明；唤醒后错峰 catch-up，不补跑全部周期。
 - **验证：** `rtk cargo test -p next-infra-runtime`。
-- **阶段证据（2026-08-03）：** Tauri-independent Runtime 已覆盖 interactive/background、startup recovery、admission、确定性调度、sleep/wake 有界 catch-up，以及 drain Writer 后 checkpoint 的停止顺序；8 项测试与严格 Clippy 通过。独立 `luna_worker` Review 发现 crate 尚未提供把真实 Store、Writer/SyncEngine、QuerySource 和 maintenance 组合起来的 concrete backend/integration，因此必须继续执行 `RHM-G3-02-INTEGRATION`，不能仅凭 fake backend 标记完成。
+- **实现证据（2026-08-03）：** Tauri-independent Runtime 已覆盖 interactive/background、startup recovery、admission、确定性调度、sleep/wake 有界 catch-up，以及 drain Writer 后 checkpoint 的停止顺序。`SqliteRuntimeBackend` 现由真实 `SyncEngine<Store>` 持有唯一 WriterQueue/SQLite write owner，startup recovery 调用真实 interrupted recovery，stop 先 flush queue 再执行 WAL truncate checkpoint；临时 SQLite integration 验证 running→interrupted、排空真实 commit、checkpoint 与最终 succeeded 状态。Runtime 9 项测试、Store 13 项测试和严格 Clippy 通过；QueryService 仍作为 Runtime 的独立只读 handle，由 Composition 注入实际 QuerySource。
 - **风险/停止：** Runtime 不得变成第二个 daemon，也不得引入 Tauri 类型。
 
 ### `RHM-G3-03` — Desktop Host Lifecycle

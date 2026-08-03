@@ -88,7 +88,7 @@ flowchart TD
 
 ### `RHM-G3-02-INTEGRATION` — Runtime Concrete Backend（条件任务）
 
-- **状态：** `BLOCKED-CONDITIONAL`。
+- **状态：** `REVIEW`。
 - **启动条件：** `RHM-G3-02-REVIEW` 明确判定当前 Runtime 未证明 Store/Writer/Query/maintenance 组合。
 - **目标：** 在不依赖 Tauri 的前提下补足可注入 backend 和最小真实 Store/Writer/Query integration evidence。
 - **独占路径：** `crates/next-infra-runtime/**`。

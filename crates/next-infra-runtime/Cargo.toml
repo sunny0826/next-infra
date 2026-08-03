@@ -11,3 +11,7 @@ next-infra-core = { workspace = true }
 next-infra-query = { workspace = true }
 next-infra-store = { workspace = true }
 next-infra-sync = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = { workspace = true }

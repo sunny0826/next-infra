@@ -52,6 +52,25 @@ impl Store {
     pub fn integrity_check(&self) -> Result<(), StoreError> {
         verify_integrity(&self.connection)
     }
+
+    /// Checkpoint every committed WAL frame and truncate the WAL file.
+    ///
+    /// Runtime calls this only after the single writer queue has drained.
+    pub fn checkpoint_wal(&self) -> Result<(), StoreError> {
+        let (busy, _log_frames, _checkpointed_frames): (u32, u32, u32) = self
+            .connection
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .map_err(StoreError::Sqlite)?;
+        if busy == 0 {
+            Ok(())
+        } else {
+            Err(StoreError::Contract(
+                "WAL checkpoint remained busy after writer drain".into(),
+            ))
+        }
+    }
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
@@ -168,6 +187,7 @@ mod tests {
         assert!(store.foreign_keys_enabled().unwrap());
         assert_eq!(store.busy_timeout_ms().unwrap(), 5_000);
         store.integrity_check().unwrap();
+        store.checkpoint_wal().unwrap();
     }
 
     #[test]

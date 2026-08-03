@@ -6,6 +6,8 @@
 
 use next_infra_core::{ConnectionId, Timestamp};
 use next_infra_query::service::QueryService;
+use next_infra_store::{Store, StoreError};
+use next_infra_sync::SyncEngine;
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -74,6 +76,51 @@ pub trait RuntimeBackend {
 
     /// Checkpoint the store after the writer has drained.
     fn checkpoint_store(&mut self) -> Result<(), Self::Error>;
+}
+
+/// Concrete single-owner backend used by the Desktop composition.
+///
+/// The SyncEngine owns the only WriterQueue and SQLite write connection.
+/// QueryService remains a separate Runtime handle so Desktop and MCP adapters
+/// consume the same bounded query semantics without gaining write access.
+pub struct SqliteRuntimeBackend {
+    sync_engine: SyncEngine<Store>,
+}
+
+impl SqliteRuntimeBackend {
+    pub fn new(store: Store) -> Self {
+        Self {
+            sync_engine: SyncEngine::new(store),
+        }
+    }
+
+    pub fn sync_engine(&self) -> &SyncEngine<Store> {
+        &self.sync_engine
+    }
+
+    pub fn sync_engine_mut(&mut self) -> &mut SyncEngine<Store> {
+        &mut self.sync_engine
+    }
+}
+
+impl RuntimeBackend for SqliteRuntimeBackend {
+    type Error = StoreError;
+
+    fn recover_startup(&mut self, at: Timestamp) -> Result<usize, Self::Error> {
+        use next_infra_core::StoreWriter;
+        self.sync_engine
+            .writer_mut()
+            .store_mut()
+            .mark_running_syncs_interrupted(at)
+    }
+
+    fn drain_writer(&mut self) -> Result<(), Self::Error> {
+        self.sync_engine.writer_mut().flush().map(|_| ())
+    }
+
+    fn checkpoint_store(&mut self) -> Result<(), Self::Error> {
+        self.sync_engine.writer().store().checkpoint_wal()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -340,7 +387,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use next_infra_core::{
+        Connection, ConnectorHealth, ConnectorType, DOMAIN_SCHEMA_VERSION, Scope, StoreReader,
+        StoreWriter, SyncCommit, SyncCoverage, SyncMode, SyncRun, SyncRunCounts, SyncRunId,
+        SyncRunStatus, SyncTrigger,
+    };
     use next_infra_query::service::QueryService;
+    use serde_json::json;
 
     #[derive(Default)]
     struct FakeBackend {
@@ -563,5 +616,95 @@ mod tests {
             scheduler.register(connection_id("fixture"), 0, timestamp(1)),
             Err(SchedulerError::InvalidInterval)
         );
+    }
+
+    fn fixture_connection() -> Connection {
+        Connection {
+            connection_id: connection_id("fixture-runtime-connection"),
+            connector_type: ConnectorType::new("fixture").unwrap(),
+            display_name: "Fixture Runtime Connection".into(),
+            enabled: true,
+            config: json!({}),
+            secret_ref: None,
+            health: ConnectorHealth::Healthy,
+            last_success_at: None,
+            last_attempt_at: None,
+            config_schema_version: DOMAIN_SCHEMA_VERSION,
+            deleted_at: None,
+        }
+    }
+
+    fn fixture_run(status: SyncRunStatus, finished_at: Option<Timestamp>) -> SyncRun {
+        SyncRun {
+            sync_run_id: SyncRunId::new("fixture-runtime-run").unwrap(),
+            connection_id: connection_id("fixture-runtime-connection"),
+            mode: SyncMode::Full,
+            trigger: SyncTrigger::User,
+            started_at: timestamp(1),
+            finished_at,
+            status,
+            coverage: SyncCoverage::AuthoritativeFull {
+                scope: Scope::new("fixture-runtime-scope").unwrap(),
+            },
+            cursor_before: None,
+            cursor_after: None,
+            counts: SyncRunCounts::default(),
+            errors: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn sqlite_backend_recovers_drains_and_checkpoints_the_real_single_writer() {
+        let directory = tempfile::TempDir::new().unwrap();
+        let database = directory.path().join("data").join("runtime.db");
+        let mut store = Store::open(&database).unwrap();
+        store.upsert_connection(fixture_connection()).unwrap();
+        store
+            .start_sync_run(fixture_run(SyncRunStatus::Running, None))
+            .unwrap();
+
+        let backend = SqliteRuntimeBackend::new(store);
+        let mut runtime = Runtime::new(backend, QueryService::new(()), Scheduler::default());
+        let startup = runtime.start_background(timestamp(2)).unwrap();
+        assert_eq!(startup.interrupted_runs, 1);
+
+        let recovered = runtime
+            .backend()
+            .sync_engine()
+            .writer()
+            .store()
+            .get_sync_run(&SyncRunId::new("fixture-runtime-run").unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(recovered.status, SyncRunStatus::Interrupted);
+
+        runtime
+            .backend_mut()
+            .sync_engine_mut()
+            .writer_mut()
+            .enqueue(SyncCommit {
+                sync_run: fixture_run(SyncRunStatus::Succeeded, Some(timestamp(3))),
+                resources: Vec::new(),
+                resource_versions: Vec::new(),
+                relations: Vec::new(),
+                relation_versions: Vec::new(),
+                changes: Vec::new(),
+                cursor_after: None,
+                missing_evidence: None,
+            });
+
+        let report = runtime.stop().unwrap();
+        assert!(report.writer_drained);
+        assert!(report.store_checkpointed);
+        assert_eq!(runtime.backend().sync_engine().writer().pending_len(), 0);
+        let committed = runtime
+            .backend()
+            .sync_engine()
+            .writer()
+            .store()
+            .get_sync_run(&SyncRunId::new("fixture-runtime-run").unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(committed.status, SyncRunStatus::Succeeded);
     }
 }
