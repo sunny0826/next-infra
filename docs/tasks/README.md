@@ -311,6 +311,6 @@ Gate Captain 必须：
 
 - 已完成：Git 初始化、Goal 0、`DEC-G1-01..06`、Goal 1 工程任务与 `GATE-G1`。
 - 已完成：Goal 2 的 Core、Store、Sync、Normalizer、Fixture、Contract/Catalog、两条真实 SQLite integration suite、UI Fixture Catalog 与 `GATE-G2`。
-- 当前可派发：Goal 3 的 `RHM-G3-01` Query Service/QDTO v1；共享 Query 契约冻结后按 Goal 3 波次并行 Runtime、Host、Adapter 与 UI。
+- 当前可派发：Goal 3 的 Query Service/QDTO v1 已进入 `REVIEW`；可按独占路径并行 `RHM-G3-02` Runtime、`RHM-G3-03` Host、`RHM-G3-04` Keychain、`UI-G3-01` Adapter 与 `UI-G3-02` Evidence Spine。
 - 当前等待：Goal 4 以后继续等待前序 Gate。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。

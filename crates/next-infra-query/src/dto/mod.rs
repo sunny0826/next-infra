@@ -107,6 +107,7 @@ pub struct ResourceDto {
     pub connection_id: String,
     pub kind: String,
     pub display_name: String,
+    pub scope: String,
     pub lifecycle: Lifecycle,
     pub health: ResourceHealth,
     pub freshness: Freshness,
@@ -123,6 +124,26 @@ pub enum EvidenceType {
     Inferred,
 }
 
+/// Evidence details needed by the shared inspector without exposing provider payloads.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub enum RelationEvidenceDto {
+    Provider {
+        connection_id: String,
+        sync_run_id: String,
+        field_path: String,
+    },
+    Configured {
+        binding_id: String,
+    },
+    Inferred {
+        rule_version: String,
+        input_resource_version_ids: Vec<String>,
+        confidence_basis_points: u16,
+    },
+}
+
 /// Minimal current relation projection for query consumers.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
@@ -131,7 +152,9 @@ pub struct RelationDto {
     pub source_resource_id: String,
     pub target_resource_id: String,
     pub kind: String,
+    pub lifecycle: Lifecycle,
     pub evidence_type: EvidenceType,
+    pub evidence: RelationEvidenceDto,
     pub last_seen_at: String,
 }
 
@@ -328,4 +351,125 @@ pub struct ChangeDto {
     pub observed_at: String,
     pub fields: Vec<FieldChangeDto>,
     pub origin: ChangeOriginDto,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ResourcePageDto {
+    pub metadata: SnapshotMetadata,
+    pub items: Vec<ResourceDto>,
+    pub page_info: PageInfo,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ResourceDetailDto {
+    pub metadata: SnapshotMetadata,
+    pub resource: ResourceDto,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "unknown"))]
+    pub attributes: Value,
+    pub relations: Vec<RelationDto>,
+    pub recent_changes: Vec<ChangeDto>,
+    pub connector_coverage: Vec<ConnectorCoverageDto>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub enum FrontierDirectionDto {
+    Incoming,
+    Outgoing,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct TopologyFrontierDto {
+    pub resource_id: String,
+    pub direction: FrontierDirectionDto,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct TopologyDto {
+    pub metadata: SnapshotMetadata,
+    pub focus_resource_id: String,
+    pub depth: u8,
+    pub nodes: Vec<ResourceDto>,
+    pub edges: Vec<RelationDto>,
+    pub frontier: Vec<TopologyFrontierDto>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ResourceHealthCountsDto {
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub healthy: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub degraded: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub unhealthy: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub unknown: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct FreshnessCountsDto {
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub fresh: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub stale: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub expired: u64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ConnectorHealthCountsDto {
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub healthy: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub degraded: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub auth_failed: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub rate_limited: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub unreachable: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub disabled: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct HealthSummaryDto {
+    pub metadata: SnapshotMetadata,
+    pub resource_health: ResourceHealthCountsDto,
+    pub freshness: FreshnessCountsDto,
+    pub connector_health: ConnectorHealthCountsDto,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ChangePageDto {
+    pub metadata: SnapshotMetadata,
+    pub items: Vec<ChangeDto>,
+    pub page_info: PageInfo,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct SyncStatusDto {
+    pub metadata: SnapshotMetadata,
+    pub connection: ConnectionDto,
+    pub recent_runs: Vec<SyncRunDto>,
+    pub next_scheduled_at: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ConnectorCoverageSnapshotDto {
+    pub metadata: SnapshotMetadata,
+    pub items: Vec<ConnectorCoverageDto>,
 }

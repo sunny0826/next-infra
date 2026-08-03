@@ -140,6 +140,7 @@ rtk cargo clippy --workspace --all-targets -- -D warnings
 
 ## Goal 3：Tauri 生命周期、Query Adapter 与 UI 纵切
 
+**状态：** Authorized / In progress  
 **依赖：** Goal 2
 
 ### 范围

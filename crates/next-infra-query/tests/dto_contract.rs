@@ -150,6 +150,7 @@ fn dto_shapes_are_stable_and_clean() {
         connection_id: "connection-1".to_owned(),
         kind: "github.repository".to_owned(),
         display_name: "Example repository".to_owned(),
+        scope: "example-scope".to_owned(),
         lifecycle: Lifecycle::Active,
         health: ResourceHealth::Healthy,
         freshness: Freshness::Fresh,
@@ -160,7 +161,13 @@ fn dto_shapes_are_stable_and_clean() {
         source_resource_id: "resource-1".to_owned(),
         target_resource_id: "resource-2".to_owned(),
         kind: "defines".to_owned(),
+        lifecycle: Lifecycle::Active,
         evidence_type: EvidenceType::Provider,
+        evidence: next_infra_query::dto::RelationEvidenceDto::Provider {
+            connection_id: "connection-1".to_owned(),
+            sync_run_id: "sync-run-1".to_owned(),
+            field_path: "attributes.target".to_owned(),
+        },
         last_seen_at: "2026-08-02T00:00:00Z".to_owned(),
     };
     let connection = ConnectionDto {
@@ -192,14 +199,17 @@ fn dto_shapes_are_stable_and_clean() {
             "lifecycle",
             "observed_at",
             "resource_id",
+            "scope",
         ]
     );
     assert_eq!(
         field_names(&relation),
         [
+            "evidence",
             "evidence_type",
             "kind",
             "last_seen_at",
+            "lifecycle",
             "relation_id",
             "source_resource_id",
             "target_resource_id",

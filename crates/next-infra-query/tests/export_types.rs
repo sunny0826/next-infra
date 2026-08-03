@@ -5,32 +5,45 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use next_infra_query::dto::{
-    ChangeDto, ChangeOriginDto, ChangeSubjectDto, ConnectionDto, ConnectorCoverageDto,
-    ConnectorCoverageLevelDto, ConnectorHealth, ErrorEnvelope, EvidenceType, FieldChangeDto,
-    Freshness, Lifecycle, PageInfo, QueryViewState, RelationDto, ResourceDto, ResourceHealth,
-    SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto,
-    SyncRunErrorDto, SyncRunStatusDto, SyncTriggerDto,
+    ChangeDto, ChangeOriginDto, ChangePageDto, ChangeSubjectDto, ConnectionDto,
+    ConnectorCoverageDto, ConnectorCoverageLevelDto, ConnectorCoverageSnapshotDto, ConnectorHealth,
+    ConnectorHealthCountsDto, ErrorEnvelope, EvidenceType, FieldChangeDto, Freshness,
+    FreshnessCountsDto, FrontierDirectionDto, HealthSummaryDto, Lifecycle, PageInfo,
+    QueryViewState, RelationDto, RelationEvidenceDto, ResourceDetailDto, ResourceDto,
+    ResourceHealth, ResourceHealthCountsDto, ResourcePageDto, SchemaVersion, SnapshotMetadata,
+    SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto, SyncRunErrorDto, SyncRunStatusDto,
+    SyncStatusDto, SyncTriggerDto, TopologyDto, TopologyFrontierDto,
 };
 use ts_rs::{Config, TS};
 
-const EXPECTED_BINDINGS: [&str; 26] = [
+const EXPECTED_BINDINGS: [&str; 39] = [
     "ChangeDto.ts",
     "ChangeOriginDto.ts",
+    "ChangePageDto.ts",
     "ChangeSubjectDto.ts",
     "ConnectionDto.ts",
     "ConnectorCoverageDto.ts",
     "ConnectorCoverageLevelDto.ts",
+    "ConnectorCoverageSnapshotDto.ts",
     "ConnectorHealth.ts",
+    "ConnectorHealthCountsDto.ts",
     "ErrorEnvelope.ts",
     "EvidenceType.ts",
     "FieldChangeDto.ts",
     "Freshness.ts",
+    "FreshnessCountsDto.ts",
+    "FrontierDirectionDto.ts",
+    "HealthSummaryDto.ts",
     "Lifecycle.ts",
     "PageInfo.ts",
     "QueryViewState.ts",
     "RelationDto.ts",
+    "RelationEvidenceDto.ts",
+    "ResourceDetailDto.ts",
     "ResourceDto.ts",
     "ResourceHealth.ts",
+    "ResourceHealthCountsDto.ts",
+    "ResourcePageDto.ts",
     "SchemaVersion.ts",
     "SnapshotMetadata.ts",
     "SyncCoverageDto.ts",
@@ -39,7 +52,10 @@ const EXPECTED_BINDINGS: [&str; 26] = [
     "SyncRunDto.ts",
     "SyncRunErrorDto.ts",
     "SyncRunStatusDto.ts",
+    "SyncStatusDto.ts",
     "SyncTriggerDto.ts",
+    "TopologyDto.ts",
+    "TopologyFrontierDto.ts",
 ];
 
 fn output_directory() -> PathBuf {
@@ -95,6 +111,22 @@ fn export_types() {
     FieldChangeDto::export_all(&config).expect("failed to export field change binding");
     ChangeOriginDto::export_all(&config).expect("failed to export change origin binding");
     ChangeDto::export_all(&config).expect("failed to export change binding");
+    RelationEvidenceDto::export_all(&config).expect("failed to export relation evidence binding");
+    ResourcePageDto::export_all(&config).expect("failed to export resource page binding");
+    ResourceDetailDto::export_all(&config).expect("failed to export resource detail binding");
+    FrontierDirectionDto::export_all(&config).expect("failed to export frontier direction binding");
+    TopologyFrontierDto::export_all(&config).expect("failed to export topology frontier binding");
+    TopologyDto::export_all(&config).expect("failed to export topology binding");
+    ResourceHealthCountsDto::export_all(&config)
+        .expect("failed to export resource health counts binding");
+    FreshnessCountsDto::export_all(&config).expect("failed to export freshness counts binding");
+    ConnectorHealthCountsDto::export_all(&config)
+        .expect("failed to export connector health counts binding");
+    HealthSummaryDto::export_all(&config).expect("failed to export health summary binding");
+    ChangePageDto::export_all(&config).expect("failed to export change page binding");
+    SyncStatusDto::export_all(&config).expect("failed to export sync status binding");
+    ConnectorCoverageSnapshotDto::export_all(&config)
+        .expect("failed to export connector coverage snapshot binding");
 
     let mut generated = BTreeSet::new();
     for entry in fs::read_dir(&output).expect("failed to read generated query bindings") {

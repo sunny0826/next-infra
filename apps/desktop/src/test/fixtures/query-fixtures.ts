@@ -49,6 +49,7 @@ function resource(
     connection_id: connectionId,
     kind,
     display_name: displayName,
+    scope: "fixture-scope",
     lifecycle,
     health,
     freshness,
@@ -62,12 +63,30 @@ function relation(
   sourceResourceId = "fixture-resource-alpha",
   targetResourceId = "fixture-resource-beta",
 ): RelationDto {
+  const evidence: RelationDto["evidence"] =
+    evidenceType === "provider"
+      ? {
+          type: "provider",
+          connection_id: "fixture-connection-alpha",
+          sync_run_id: "fixture-sync-run-complete",
+          field_path: "attributes.target",
+        }
+      : evidenceType === "configured"
+        ? { type: "configured", binding_id: "fixture-binding-alpha-beta" }
+        : {
+            type: "inferred",
+            rule_version: "fixture-rule-v1",
+            input_resource_version_ids: ["fixture-resource-version-alpha"],
+            confidence_basis_points: 9200,
+          };
   return {
     relation_id: relationId,
     source_resource_id: sourceResourceId,
     target_resource_id: targetResourceId,
     kind: "fixture.depends_on",
+    lifecycle: "active",
     evidence_type: evidenceType,
+    evidence,
     last_seen_at: FIXTURE_OBSERVED_AT,
   };
 }

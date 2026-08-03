@@ -95,6 +95,7 @@
 
 ### `RHM-G3-01` — Query Service 与 QDTO v1 冻结
 
+- **状态：** `REVIEW`。
 - **目标：** 建立 Desktop 与 MCP 共用的唯一查询语义。
 - **依赖：** `GATE-G2` 通过；Goal 1 的最小 binding pipeline 可用。
 - **独占路径：** `crates/next-infra-query/**`、权威 QDTO schema/生成器、`apps/desktop/src/generated/query/**`。
@@ -103,6 +104,7 @@
 - **输入/输出：** Store read port → 版本化 Query DTO、Service、generated bindings 和 tests。
 - **验收：** Health/Freshness/Connector Health 分离；Topology 默认与硬上限生效；cursor opaque 且稳定；Secret 不进入 DTO。
 - **验证：** `rtk cargo test -p next-infra-query`、binding drift check、Desktop TypeScript build。
+- **实现证据（2026-08-03）：** Query crate 已冻结 Desktop/MCP 共用的七个入口：resource search/detail、bounded topology、health summary、recent changes、sync status 与 connector coverage。`QuerySource` 是唯一读端口；Service 统一 snapshot metadata、include/filter plan、默认/硬上限、`niq1:` opaque cursor、not-found/source/contract error 清洗。Topology 固定默认 depth 1、100 nodes/200 edges，硬上限 depth 3、200/400，并保留 frontier/truncated。QDTO 扩展到 39 个确定性 TypeScript bindings，Relation evidence、三类 health 计数、Detail/Page/Topology DTO 均不含 Secret。12 项 Query tests、严格 Clippy、binding export、Desktop lint/test/build 和 workspace 回归通过。
 - **风险/停止：** Desktop/MCP 可有不同 transport projection，但不得重定义 Query 语义。
 
 ### `RHM-G3-02` — Control Plane Runtime

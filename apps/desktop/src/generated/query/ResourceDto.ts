@@ -6,4 +6,4 @@ import type { ResourceHealth } from "./ResourceHealth";
 /**
  * Minimal current resource projection for query consumers.
  */
-export type ResourceDto = { resource_id: string, connection_id: string, kind: string, display_name: string, lifecycle: Lifecycle, health: ResourceHealth, freshness: Freshness, observed_at: string, };
+export type ResourceDto = { resource_id: string, connection_id: string, kind: string, display_name: string, scope: string, lifecycle: Lifecycle, health: ResourceHealth, freshness: Freshness, observed_at: string, };
