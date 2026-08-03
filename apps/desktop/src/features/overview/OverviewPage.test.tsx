@@ -1,10 +1,12 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { DesktopAdapterProvider } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { MockDesktopAdapter } from "../../platform/desktop-adapter/mock-desktop-adapter";
 import { createQueryEvidenceLifecycleSnapshotFixture } from "../../test/fixtures/query-fixtures";
 import { OverviewPage } from "./OverviewPage";
+
+afterEach(cleanup);
 
 function renderPage() {
   render(

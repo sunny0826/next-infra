@@ -155,7 +155,7 @@ flowchart TD
 | Task ID | 独占路径 | 唯一结果 | 关键验收 |
 | --- | --- | --- | --- |
 | `UI-G3-03` (`REVIEW`) | `apps/desktop/src/features/overview/**` | Attention → Observation → Critical Path → Changes | 区分 Resource Health、Freshness、Connector failure；显示来源和观察时间 |
-| `UI-G3-04A` | `apps/desktop/src/features/inventory/**` | 有界 Inventory、filter/sort/cursor/selection | 单页最多 100；三类状态分离；opaque cursor 不可编辑 |
+| `UI-G3-04A` (`REVIEW`) | `apps/desktop/src/features/inventory/**` | 有界 Inventory、filter/sort/cursor/selection | 单页最多 100；三类状态分离；opaque cursor 不可编辑 |
 | `UI-G3-04B` | `apps/desktop/src/features/resource-detail/**` | 资源身份、状态、证据、关系、属性、Change、Coverage | 不显示 raw Provider JSON；expired/tombstoned/orphaned/partial 可核实 |
 | `UI-G3-05` | `apps/desktop/src/features/topology/**` | focus-first depth 1 bounded topology | 默认 100/200、硬上限 200/400；Frontier/truncated；三类 evidence 不只靠颜色 |
 | `UI-G3-06A` | `apps/desktop/src/features/connectors/**` | Connection health、sync/backoff、coverage、manual sync | Manual Sync 与 UI refresh 分离；Secret/SecretRef 不进入 DOM |

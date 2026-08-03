@@ -161,6 +161,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G3-04` — Inventory 与 Resource Detail
 
+- **状态：** `RUNNING`；Inventory 已进入 Review，Resource Detail 尚未完成。
 - **目标：** 完成资源发现和单资源核实路径。
 - **依赖：** `UI-G2-01`、`UI-G3-01/02`；可与其他页面并行。
 - **独占路径：** `features/inventory/**`、`features/resource-detail/**`。
@@ -168,6 +169,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **非目标：** 不显示 raw Provider JSON，不一次渲染全部数据。
 - **验收：** 单次最多 100；Health/Freshness/Lifecycle 分离；empty/error/partial 状态不混合。
 - **验证：** `V-UI + V-VIEWPORT`。
+- **阶段证据（2026-08-03）：** Inventory 已实现 bounded search、attention filter、stable name sort、opaque cursor 分页、键盘 Enter/Space 行选择和内部横向滚动；固定列分别展示 Health、Freshness、Lifecycle、Connection 与 observed_at，默认请求 25 且 UI 明示单次上限 100。3 项 Inventory 测试及 Desktop 全部 50 项测试、lint/build 通过。Resource Detail 与 Evidence Spine 纵切仍需完成后才能将本任务整体标为 `REVIEW`。
 - **风险/停止：** 前端不重算 Freshness；opaque cursor 不可编辑。
 
 ### `UI-G3-05` — Minimum Bounded Topology
