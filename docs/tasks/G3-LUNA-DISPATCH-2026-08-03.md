@@ -170,7 +170,7 @@ flowchart TD
 
 ### `UI-G3-07` — Shell Integration
 
-- **状态：** `BLOCKED`，等待 `UI-G3-02..06` 全部进入 `REVIEW`。
+- **状态：** `REVIEW`。
 - **目标：** 由唯一 Shell Owner 接入所有页面、global bounded search、current scope、Inspector 和 restore re-query。
 - **独占路径：** `apps/desktop/src/main.tsx`、`apps/desktop/src/app/**`、`apps/desktop/src/styles/**`、`apps/desktop/src/ui/**` 及 Shell tests。
 - **非目标：** 不修改 feature 内部实现；Timeline 明确标注 Goal 7 未完成，不能伪装为空。
@@ -192,7 +192,7 @@ flowchart TD
 
 ### `UI-G3-08` — Responsive 与 Accessibility QA
 
-- **状态：** `BLOCKED`，等待 `UI-G3-07`。
+- **状态：** `READY`，`UI-G3-07` 已进入 `REVIEW`。
 - **独占路径：** `apps/desktop/tests/responsive/**`、`apps/desktop/tests/accessibility/**`。
 - **目标：** 验证 1600×1000、900×800、390×844；focus、Cmd/Ctrl+K、Escape、Enter/Space、reduced motion、container scroll 和文本状态。
 - **限制：** QA 不修改生产文件；缺陷回派原 owner；Topology arrow navigation 留 Goal 7。

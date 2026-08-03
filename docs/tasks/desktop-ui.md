@@ -200,6 +200,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G3-07` — Shell Integration
 
+- **状态：** `REVIEW`。
 - **目标：** 由唯一 Shell Owner 接入所有已完成 feature。
 - **依赖：** `UI-G3-02..06` 通过各自 tests。
 - **独占路径：** Shell Owner route registry、context/search/inspector host。
@@ -207,6 +208,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **非目标：** 不修改 feature 内部实现。
 - **验收：** Overview、Inventory、Resource Detail、Topology 可核实；Timeline 明确标为 Goal 7 未完成，而非伪装 empty。
 - **验证：** `V-UI`。
+- **实现证据（2026-08-03）：** Shell 已接入六个 route、bounded global search、route-scoped selection/detail/topology state、Resource/Relation Inspector、window focus/invalidation re-query 和 Tauri-only Real Adapter composition。Search/Inventory 选择可进入 Detail 并成为可达的 bounded Topology focus；Inspector 按对象身份、Current Facts、Evidence 展示实际 provider/configured/inferred provenance；Timeline 显式标为 Goal 7 unavailable。异步 subscription cleanup 可处理 unmount 后晚到的 unsubscribe。Shell CSS 补齐 dropdown、feature wrapper、Inspector facts、1180/820/560 drawer/overflow 规则，未引入新色、阴影或渐变。Desktop 14 个测试文件共 63 项测试、lint/build、binding drift、Desktop Rust 23 项测试与严格 Clippy、Rust workspace 104 项测试与严格 Clippy全部通过；真实三 viewport 留 `UI-G3-08`。
 - **风险/停止：** 页面 worker 不与本任务同时编辑 registry/global shell。
 
 ### `UI-G3-08` — Responsive 与 Accessibility QA
