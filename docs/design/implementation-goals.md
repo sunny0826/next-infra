@@ -60,7 +60,7 @@ rtk proxy find . -maxdepth 3 -type f -print
 
 ## Goal 1：Tauri 工程骨架与发布边界
 
-**状态：** Authorized / In progress  
+**状态：** Completed / `GATE-G1 PASS`（2026-08-03）  
 **依赖：** Goal 0 获得用户批准
 
 ### 开始前必须冻结
@@ -109,6 +109,7 @@ rtk pnpm --dir apps/desktop tauri build
 
 ## Goal 2：领域模型与 SQLite 投影
 
+**状态：** Authorized / Ready  
 **依赖：** Goal 1
 
 ### 范围

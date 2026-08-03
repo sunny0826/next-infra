@@ -217,6 +217,7 @@ Gate Captain 必须：
 
 ### `GATE-G1` — 工程骨架验收门
 
+- **状态：** `PASSED`（2026-08-03，见 [`GATE-G1-2026-08-03.md`](./GATE-G1-2026-08-03.md)）。
 - **目标：** 证明 Goal 1 骨架、target 边界和生成契约整体可用，并给出是否允许进入 Goal 2 的唯一结论。
 - **依赖：** `RHM-G1-01`、`UI-G1-01..04` 均处于 `REVIEW`。
 - **独占路径：** Goal 1 shared manifests/lockfiles、Desktop/MCP target wiring、`tests/gates/goal-1/**` 和验收报告。
@@ -307,7 +308,7 @@ Gate Captain 必须：
 
 ## 8. 当前可执行边界
 
-- 已完成：Git 初始化、Goal 0、`DEC-G1-01..05` 和任务拆解。
-- 当前可派发：`RHM-G1-01` Workspace Bootstrap 与空发布目标。
-- 当前等待：Goal 1 其余 UI/Host 任务等待 Bootstrap。Goal 2 以后全部等待前序 Gate。
+- 已完成：Git 初始化、Goal 0、`DEC-G1-01..06`、Goal 1 工程任务与 `GATE-G1`。
+- 当前可派发：Goal 2 的串行入口 `RHM-G2-01` Domain Contract。
+- 当前等待：Goal 2 其余任务按波次等待 `RHM-G2-01` 及各自依赖；Goal 3 以后继续等待前序 Gate。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。

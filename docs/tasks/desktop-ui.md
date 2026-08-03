@@ -1,6 +1,6 @@
 # Desktop UI 任务包
 
-本文件覆盖 React/TypeScript Shell、Desktop Adapter、Evidence Spine、六个主页面、响应式与真实 Tauri smoke。视觉和交互权威输入为 [`visualization-and-interaction.md`](../design/visualization-and-interaction.md)、[Interface System](../../.interface-design/system.md) 与 [HTML 原型](../../prototype/README.md)。通用调度规则见[总调度手册](./README.md)。Goal 1 已获授权；UI 工程任务等待 `RHM-G1-01` Bootstrap 与各自契约依赖。
+本文件覆盖 React/TypeScript Shell、Desktop Adapter、Evidence Spine、六个主页面、响应式与真实 Tauri smoke。视觉和交互权威输入为 [`visualization-and-interaction.md`](../design/visualization-and-interaction.md)、[Interface System](../../.interface-design/system.md) 与 [HTML 原型](../../prototype/README.md)。通用调度规则见[总调度手册](./README.md)。`GATE-G1` 已通过；Goal 1 UI 任务处于复核完成状态，`UI-G2-01` 继续等待 Goal 2 Domain/QDTO 契约。
 
 ## 1. UI 所有权与验证矩阵
 

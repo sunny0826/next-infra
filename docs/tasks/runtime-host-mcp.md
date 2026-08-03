@@ -1,6 +1,6 @@
 # Runtime、Host 与 MCP 任务包
 
-本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。Goal 1 已获授权；`RHM-G1-01` 已进入复核，其余任务等待各自依赖与 Gate。
+本文件覆盖 Rust Domain/Store/Sync/Query/Runtime、Tauri Desktop Host、Keychain、Local RPC 和 STDIO MCP。通用状态、角色、派发格式及 Gate 规则见[总调度手册](./README.md)。`GATE-G1` 已通过，当前串行入口为 `RHM-G2-01`；其余任务继续等待各自依赖与 Gate。
 
 ## Goal 1：工程与发布骨架
 
@@ -23,6 +23,7 @@
 
 ### `RHM-G2-01` — Domain Contract 冻结
 
+- **状态：** `READY`。
 - **目标：** 冻结所有下游共享的领域类型和 ports。
 - **依赖：** `GATE-G1` 通过。
 - **独占路径：** `crates/next-infra-core/**`。

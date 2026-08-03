@@ -1,6 +1,6 @@
 # Connector 与 Provider 任务包
 
-本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。当前任务均为 `WAITING`，只有在 Goal 1 Gate 通过并进入对应 Goal 后才能派发。
+本文件覆盖共享只读 Connector 契约、Normalizer、Fixture、GitHub、SSH、Dokploy、Cloudflare、Supabase、阿里云和腾讯云。通用调度规则见[总调度手册](./README.md)。`GATE-G1` 已通过；`CON-G2-01` 等待 `RHM-G2-01` 冻结 Domain Contract，其余任务继续等待各自 Goal 与依赖。
 
 ## 1. 所有 Connector 的硬边界
 
