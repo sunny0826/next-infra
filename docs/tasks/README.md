@@ -113,6 +113,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 7. [UI-G3-01 Thin Desktop Adapter 验收记录](./UI-G3-01-2026-08-03.md)
 8. [UI-G3-03 Overview 验收记录](./UI-G3-03-2026-08-03.md)
 9. [UI-G3-04A Inventory 阶段验收](./UI-G3-04A-2026-08-03.md)
+10. [UI-G3-04B Resource Detail 阶段验收](./UI-G3-04B-2026-08-03.md)
 
 ## 6. 设计决策包
 
