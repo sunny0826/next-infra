@@ -150,7 +150,7 @@ rtk git diff --check
 ### `RHM-G3-05P` — SQLite QuerySource 前置决策
 
 - **状态：** `REVIEW`，见 `DEC-G3-01`；Query `P0` 与 Store `P1` 可并行，Runtime `P2` 必须等待两者。
-- **阶段证据：** `P0/P1` 已进入 `REVIEW`；`P2A` SharedStore/`SyncEngine<SharedStore>` 已进入 `REVIEW`，`P2B` CommittedQuerySource 尚待完成。
+- **阶段证据：** `P0/P1/P2` 已进入 `REVIEW`；Runtime 已完成 SharedStore ownership、CommittedQuerySource、immutable QueryContext、QDTO mapping、bounded Topology 与真实 SQLite integration tests。
 - **唯一目标：** 冻结 Composition 如何获得 SQLite-backed bounded `QuerySource`，同时保持唯一 Store/Writer/SQLite owner。
 - **必须回答：**
   - QuerySource 由 Store 暴露只读 adapter，还是由 Query crate 提供基于 StoreReader 的 concrete source？
@@ -162,7 +162,7 @@ rtk git diff --check
 
 ### `RHM-G3-05A` — Composition State 与 Command Registration
 
-- **状态：** `WAITING`，等待 `RHM-G3-05P` 与 `UI-G3-07R`。
+- **状态：** `READY`；`RHM-G3-05P` 与 `UI-G3-07R` 均已进入 `REVIEW`。
 - **唯一目标：** 建立唯一 AppState，组合 Store/Writer/Runtime/Query/Adapter/Keychain ports，并注册已有 command/event 名称。
 - **建议独占路径：** `apps/desktop/src-tauri/src/composition/**`、`src-tauri/src/lib.rs`；shared manifest/lockfile 只由 Composition Captain 修改。
 - **必须保持：** 一个 Runtime、一个 WriterQueue、一个 SQLite owner；event 只做 invalidation；Manual Sync 只 enqueue 并返回 `sync_run_id`；错误不泄漏 Secret/SQL/provider payload。

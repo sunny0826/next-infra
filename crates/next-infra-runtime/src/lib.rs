@@ -16,6 +16,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+mod query_source;
+pub use query_source::*;
+
 const MAX_TIMESTAMP_MILLIS: u64 = i64::MAX as u64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
