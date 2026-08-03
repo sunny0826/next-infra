@@ -104,6 +104,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G2-01` — UI Fixture Catalog
 
+- **状态：** `REVIEW`。
 - **目标：** 为 Goal 3 页面提供与 QDTO/Domain 一致的确定性 Query snapshots。
 - **依赖：** Goal 2 domain/DTO 枚举冻结；与 `CON-G2-03` 的 Observation Fixture 分层。
 - **独占路径：** UI Fixture Owner paths。
@@ -112,6 +113,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输入/输出：** generated DTO → schema-valid query snapshot catalog。
 - **验收：** 包含三种 Evidence、healthy-but-expired、partial、tombstoned、orphaned、unresolved、empty/error/loading；无真实 hostname/repo/IP。
 - **验证：** Fixture schema/serialization/determinism tests。
+- **实现证据（2026-08-03）：** Rust 权威 QDTO 已增加 Change、Connector Coverage、四类 Sync Coverage、SyncRun、错误、计数和 loading/ready/empty/partial/error 视图状态，并确定性生成 14 个新增 TypeScript binding。UI fixture catalog 覆盖三类 Relation evidence、healthy-but-expired、tombstoned、orphaned、unresolved endpoint、三档 Connector Coverage、完整/增量/targeted/partial SyncRun、failed/interrupted、empty/error/loading；全部使用合成 ID，无真实 hostname/repo/IP/Secret。6 项 fixture 测试、QDTO contract/export、TypeScript lint 与 Desktop 全部测试通过。
 - **风险/停止：** Query snapshot 与 Store/Query 语义漂移时回派 QDTO/Query owner。
 
 ## 5. Goal 3：Desktop UI 纵切

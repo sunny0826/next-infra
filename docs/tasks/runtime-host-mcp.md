@@ -60,12 +60,12 @@
 - **输入/输出：** Store ports/schema → SQLite adapter 与集成测试。
 - **验收：** 事务失败不前移 cursor；读者看不到半批次；未变化事实不新增版本。
 - **验证：** `rtk cargo test -p next-infra-store`。
-- **实现证据（2026-08-03）：** Store 已实现 Connection/SyncRun/Resource/Relation/Version/Change/cursor 读写与单事务 `SyncCommit`，提交前校验 cursor 和 provenance，稳定身份不可静默变化；外键失败测试证明投影、版本和 cursor 全部回滚，未变化批次不新增 ResourceVersion，启动恢复只把 running run 转为 interrupted。9 项 Store 测试、专属 Clippy 和全 workspace 回归通过。
+- **实现证据（2026-08-03）：** Store 已实现 Connection/SyncRun/Resource/Relation/Version/Change/cursor 与按 scope missing evidence 的读写和单事务 `SyncCommit`，提交前校验 cursor 与 provenance，稳定身份不可静默变化；外键失败测试证明投影、版本、cursor 和 missing state 全部回滚。Store 还能确定性读取最新 RelationVersion fingerprint，支持关系版本去重。12 项 Store 测试、专属 Clippy 和全 workspace 回归通过。
 - **风险/停止：** Sync Coverage 和 tombstone 规则不能下沉为隐蔽 SQL 特例。
 
 ### `RHM-G2-04` — Writer 与 Sync Engine
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 将已验证 ObservationBatch 通过唯一 Writer 原子提交。
 - **依赖：** `RHM-G2-01`、`CON-G2-01` Connector API；使用 fake Store 时可与 `RHM-G2-02/03` 并行；真实集成还依赖 `CON-G2-02` Normalizer。
 - **独占路径：** `crates/next-infra-sync/**`。
@@ -74,10 +74,12 @@
 - **输入/输出：** `ValidatedBatch`、Store port → 可由 Fixture 重放的 Sync Engine。
 - **验收：** 相同批次不新增 Version；partial/incremental/targeted/failed 不增加缺失计数；仅同 scope 连续两次成功 authoritative full 可 tombstone；遗留 running 恢复为 interrupted。
 - **验证：** `rtk cargo test -p next-infra-sync`。
+- **实现证据（2026-08-03）：** 已实现 FIFO 单 Writer、`SyncRunStart`/生命周期、Coverage 校验、cursor、资源与关系 diff/version、按 scope missing evidence、两次权威缺失 tombstone、重现恢复 active 和启动 interrupted 恢复。相同 Resource/Relation fingerprint 不新增版本；Writer 事务失败时保留队首任务供重试；partial/incremental/targeted/failed 不增加缺失计数。10 项 Sync 测试、严格 Clippy 与 workspace 回归通过。
 - **风险/停止：** Connector 不得取得 Store 写连接；需要改变 `ValidatedBatch` 时回派 Normalizer owner。
 
 ### `RHM-G2-05` — 原子性与恢复集成证据
 
+- **状态：** `REVIEW`。
 - **目标：** 用真实临时 SQLite 串联 Fixture、Normalizer、Writer 与 Store，向 `GATE-G2` 提供自动化证据。
 - **依赖：** `RHM-G2-03/04`、`CON-G2-02/03/04`。
 - **独占路径：** `tests/integration/store_sync/**`；共享 manifest 由 `GATE-G2` Captain 修改。
@@ -86,6 +88,7 @@
 - **输出：** 可重复的 Goal 2 gate suite 和失败归属表。
 - **验收：** [`implementation-goals.md`](../design/implementation-goals.md) 的 Goal 2 行为均有证据。
 - **验证：** Core、Store、Sync 和 connector pipeline tests。
+- **实现证据（2026-08-03）：** `next-infra-store-sync-integration` 使用真实临时 SQLite 覆盖外键失败原子回滚、相同批次不新增 ResourceVersion、连续两次 authoritative missing 后 tombstone、重现恢复 active、partial/incremental/targeted/failed 的 missing/cursor 语义，以及 running run 恢复为 interrupted。5 项集成测试和专属 Clippy 通过。
 - **风险/停止：** 失败回派对应 owner，不在集成测试中绕过契约。
 
 ## Goal 3：Query、Runtime 与 Desktop Host

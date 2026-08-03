@@ -5,24 +5,41 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use next_infra_query::dto::{
-    ConnectionDto, ConnectorHealth, ErrorEnvelope, EvidenceType, Freshness, Lifecycle, PageInfo,
-    RelationDto, ResourceDto, ResourceHealth, SchemaVersion, SnapshotMetadata,
+    ChangeDto, ChangeOriginDto, ChangeSubjectDto, ConnectionDto, ConnectorCoverageDto,
+    ConnectorCoverageLevelDto, ConnectorHealth, ErrorEnvelope, EvidenceType, FieldChangeDto,
+    Freshness, Lifecycle, PageInfo, QueryViewState, RelationDto, ResourceDto, ResourceHealth,
+    SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto,
+    SyncRunErrorDto, SyncRunStatusDto, SyncTriggerDto,
 };
 use ts_rs::{Config, TS};
 
-const EXPECTED_BINDINGS: [&str; 12] = [
+const EXPECTED_BINDINGS: [&str; 26] = [
+    "ChangeDto.ts",
+    "ChangeOriginDto.ts",
+    "ChangeSubjectDto.ts",
     "ConnectionDto.ts",
+    "ConnectorCoverageDto.ts",
+    "ConnectorCoverageLevelDto.ts",
     "ConnectorHealth.ts",
     "ErrorEnvelope.ts",
     "EvidenceType.ts",
+    "FieldChangeDto.ts",
     "Freshness.ts",
     "Lifecycle.ts",
     "PageInfo.ts",
+    "QueryViewState.ts",
     "RelationDto.ts",
     "ResourceDto.ts",
     "ResourceHealth.ts",
     "SchemaVersion.ts",
     "SnapshotMetadata.ts",
+    "SyncCoverageDto.ts",
+    "SyncModeDto.ts",
+    "SyncRunCountsDto.ts",
+    "SyncRunDto.ts",
+    "SyncRunErrorDto.ts",
+    "SyncRunStatusDto.ts",
+    "SyncTriggerDto.ts",
 ];
 
 fn output_directory() -> PathBuf {
@@ -63,6 +80,21 @@ fn export_types() {
     RelationDto::export_all(&config).expect("failed to export relation binding");
     ConnectorHealth::export_all(&config).expect("failed to export connector health binding");
     ConnectionDto::export_all(&config).expect("failed to export connection binding");
+    QueryViewState::export_all(&config).expect("failed to export query view state binding");
+    SyncModeDto::export_all(&config).expect("failed to export sync mode binding");
+    SyncTriggerDto::export_all(&config).expect("failed to export sync trigger binding");
+    SyncRunStatusDto::export_all(&config).expect("failed to export sync status binding");
+    SyncCoverageDto::export_all(&config).expect("failed to export sync coverage binding");
+    ConnectorCoverageLevelDto::export_all(&config)
+        .expect("failed to export connector coverage level binding");
+    ConnectorCoverageDto::export_all(&config).expect("failed to export connector coverage binding");
+    SyncRunCountsDto::export_all(&config).expect("failed to export sync counts binding");
+    SyncRunErrorDto::export_all(&config).expect("failed to export sync error binding");
+    SyncRunDto::export_all(&config).expect("failed to export sync run binding");
+    ChangeSubjectDto::export_all(&config).expect("failed to export change subject binding");
+    FieldChangeDto::export_all(&config).expect("failed to export field change binding");
+    ChangeOriginDto::export_all(&config).expect("failed to export change origin binding");
+    ChangeDto::export_all(&config).expect("failed to export change binding");
 
     let mut generated = BTreeSet::new();
     for entry in fs::read_dir(&output).expect("failed to read generated query bindings") {

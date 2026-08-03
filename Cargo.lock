@@ -2195,6 +2195,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "next-infra-connector-pipeline-integration"
+version = "0.1.0"
+dependencies = [
+ "next-infra-connector-api",
+ "next-infra-connector-catalog",
+ "next-infra-connector-contract-tests",
+ "next-infra-connector-fixture",
+ "next-infra-core",
+ "next-infra-normalizer",
+ "next-infra-store",
+ "next-infra-sync",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "next-infra-core"
 version = "0.1.0"
 dependencies = [
@@ -2280,12 +2296,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "next-infra-store-sync-integration"
+version = "0.1.0"
+dependencies = [
+ "next-infra-connector-api",
+ "next-infra-connector-fixture",
+ "next-infra-core",
+ "next-infra-normalizer",
+ "next-infra-store",
+ "next-infra-sync",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "next-infra-sync"
 version = "0.1.0"
 dependencies = [
  "next-infra-connector-api",
  "next-infra-core",
  "next-infra-normalizer",
+ "serde_json",
 ]
 
 [[package]]

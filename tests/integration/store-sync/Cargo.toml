@@ -1,5 +1,5 @@
 [package]
-name = "next-infra-sync"
+name = "next-infra-store-sync-integration"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,6 +7,10 @@ publish.workspace = true
 
 [dependencies]
 next-infra-connector-api = { workspace = true }
+next-infra-connector-fixture = { workspace = true }
 next-infra-core = { workspace = true }
 next-infra-normalizer = { workspace = true }
+next-infra-store = { workspace = true }
+next-infra-sync = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }

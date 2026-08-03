@@ -2,6 +2,7 @@ use crate::{Store, StoreError};
 use next_infra_core::*;
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use serde::{Serialize, de::DeserializeOwned};
+use std::collections::BTreeMap;
 
 impl StoreReader for Store {
     type Error = StoreError;
@@ -39,6 +40,25 @@ impl StoreReader for Store {
             .map_err(StoreError::Sqlite)
     }
 
+    fn latest_relation_version_fingerprint(
+        &self,
+        id: &RelationId,
+    ) -> Result<Option<Fingerprint>, Self::Error> {
+        let fingerprint = self
+            .connection
+            .query_row(
+                "SELECT fingerprint FROM relation_versions WHERE relation_id = ?1 ORDER BY observed_at DESC, relation_version_id DESC LIMIT 1",
+                params![id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(StoreError::Sqlite)?;
+        fingerprint
+            .map(Fingerprint::new)
+            .transpose()
+            .map_err(domain_error)
+    }
+
     fn get_sync_run(&self, id: &SyncRunId) -> Result<Option<SyncRun>, Self::Error> {
         self.connection
             .query_row(
@@ -65,6 +85,26 @@ impl StoreReader for Store {
             .map(SyncCursor::new)
             .transpose()
             .map_err(domain_error)
+    }
+
+    fn missing_evidence_state(
+        &self,
+        connection_id: &ConnectionId,
+        scope: &Scope,
+    ) -> Result<Option<MissingEvidenceState>, Self::Error> {
+        let persisted = self
+            .connection
+            .query_row(
+                "SELECT consecutive_missing_json FROM connector_state WHERE connection_id = ?1",
+                params![connection_id.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(StoreError::Sqlite)?;
+        persisted
+            .map(|value| read_missing_evidence_state(&value, scope))
+            .transpose()
+            .map(|state| state.flatten())
     }
 
     fn list_resources_for_scope(
@@ -154,13 +194,15 @@ impl StoreWriter for Store {
             result.changes_written += insert_change(&transaction, change)?;
         }
 
+        let missing_evidence_json = missing_evidence_json(&transaction, &commit)?;
         transaction
             .execute(
-                "INSERT INTO connector_state(connection_id, sync_cursor) VALUES (?1, ?2)
-                 ON CONFLICT(connection_id) DO UPDATE SET sync_cursor=excluded.sync_cursor",
+                "INSERT INTO connector_state(connection_id, sync_cursor, consecutive_missing_json) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(connection_id) DO UPDATE SET sync_cursor=excluded.sync_cursor, consecutive_missing_json=excluded.consecutive_missing_json",
                 params![
                     commit.sync_run.connection_id.as_str(),
                     commit.cursor_after.as_ref().map(SyncCursor::as_str),
+                    missing_evidence_json,
                 ],
             )
             .map_err(StoreError::Sqlite)?;
@@ -371,6 +413,60 @@ fn json_text(value: &impl Serialize) -> Result<String, StoreError> {
     serde_json::to_string(value).map_err(StoreError::Json)
 }
 
+type PersistedMissingEvidence = BTreeMap<String, BTreeMap<String, u8>>;
+
+fn read_missing_evidence_state(
+    value: &str,
+    scope: &Scope,
+) -> Result<Option<MissingEvidenceState>, StoreError> {
+    let persisted: PersistedMissingEvidence =
+        serde_json::from_str(value).map_err(StoreError::Json)?;
+    let Some(counts) = persisted.get(scope.as_str()) else {
+        return Ok(None);
+    };
+    let counts = counts
+        .iter()
+        .map(|(resource_id, count)| {
+            ResourceId::new(resource_id.clone())
+                .map(|resource_id| (resource_id, *count))
+                .map_err(domain_error)
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    Ok(Some(MissingEvidenceState::with_counts(
+        scope.clone(),
+        counts,
+    )))
+}
+
+fn missing_evidence_json(
+    transaction: &Transaction<'_>,
+    commit: &SyncCommit,
+) -> Result<String, StoreError> {
+    let existing = transaction
+        .query_row(
+            "SELECT consecutive_missing_json FROM connector_state WHERE connection_id = ?1",
+            params![commit.sync_run.connection_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(StoreError::Sqlite)?;
+    let mut persisted: PersistedMissingEvidence = existing
+        .map(|value| serde_json::from_str(&value).map_err(StoreError::Json))
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(state) = &commit.missing_evidence {
+        persisted.insert(
+            state.scope.as_str().to_owned(),
+            state
+                .counts
+                .iter()
+                .map(|(resource_id, count)| (resource_id.as_str().to_owned(), *count))
+                .collect(),
+        );
+    }
+    serde_json::to_string(&persisted).map_err(StoreError::Json)
+}
+
 fn enum_text(value: &impl Serialize) -> Result<String, StoreError> {
     let value = serde_json::to_value(value).map_err(StoreError::Json)?;
     value
@@ -550,10 +646,148 @@ mod tests {
         }
     }
 
+    fn relation(sync_run_id: &str) -> Relation {
+        Relation {
+            relation_id: id("fixture-relation", RelationId::new),
+            source_resource_id: id("fixture-resource", ResourceId::new),
+            target_resource_id: id("fixture-resource", ResourceId::new),
+            kind: RelationKind::new("fixture.depends_on").unwrap(),
+            evidence_key: id("fixture-evidence", EvidenceKey::new),
+            evidence: RelationEvidence::Provider {
+                connection_id: id("fixture-connection", ConnectionId::new),
+                sync_run_id: id(sync_run_id, SyncRunId::new),
+                field_path: id("attributes.target", FieldPath::new),
+            },
+            first_seen_at: timestamp_at(2),
+            last_seen_at: timestamp_at(2),
+            lifecycle: Lifecycle::Active,
+        }
+    }
+
+    fn relation_version(
+        version_id: &str,
+        fingerprint: &str,
+        sync_run_id: &str,
+        observed_at: i64,
+    ) -> RelationVersion {
+        RelationVersion {
+            relation_version_id: id(version_id, RelationVersionId::new),
+            relation_id: id("fixture-relation", RelationId::new),
+            observed_at: timestamp_at(observed_at),
+            normalized_snapshot: json!({"relation": "fixture"}),
+            fingerprint: id(fingerprint, Fingerprint::new),
+            schema_version: SchemaVersion::new(1).unwrap(),
+            origin: OriginRef::SyncRun {
+                sync_run_id: id(sync_run_id, SyncRunId::new),
+            },
+        }
+    }
+
     fn store() -> (TempDir, Store) {
         let directory = TempDir::new().unwrap();
         let store = Store::open(&directory.path().join("data/next-infra.db")).unwrap();
         (directory, store)
+    }
+
+    fn missing_state(scope: &str, resource_id: &str, count: u8) -> MissingEvidenceState {
+        MissingEvidenceState::with_counts(
+            id(scope, Scope::new),
+            BTreeMap::from([(id(resource_id, ResourceId::new), count)]),
+        )
+    }
+
+    #[test]
+    fn missing_evidence_is_absent_before_first_commit() {
+        let (_directory, mut store) = store();
+        store.upsert_connection(connection()).unwrap();
+
+        assert_eq!(
+            store
+                .missing_evidence_state(
+                    &id("fixture-connection", ConnectionId::new),
+                    &id("fixture-scope", Scope::new),
+                )
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn missing_evidence_round_trips_and_isolated_by_scope() {
+        let (_directory, mut store) = store();
+        let connection_id = id("fixture-connection", ConnectionId::new);
+        let scope_one = id("fixture-scope", Scope::new);
+        let scope_two = id("fixture-scope-two", Scope::new);
+        store.upsert_connection(connection()).unwrap();
+        store
+            .start_sync_run(run(SyncRunStatus::Running, None))
+            .unwrap();
+
+        store
+            .commit_sync(SyncCommit {
+                sync_run: run(SyncRunStatus::Succeeded, Some(timestamp_at(3))),
+                resources: Vec::new(),
+                resource_versions: Vec::new(),
+                relations: Vec::new(),
+                relation_versions: Vec::new(),
+                changes: Vec::new(),
+                cursor_after: Some(id("cursor-after", SyncCursor::new)),
+                missing_evidence: Some(missing_state(scope_one.as_str(), "fixture-resource", 1)),
+            })
+            .unwrap();
+
+        assert_eq!(
+            store
+                .missing_evidence_state(&connection_id, &scope_one)
+                .unwrap(),
+            Some(missing_state(scope_one.as_str(), "fixture-resource", 1,))
+        );
+        assert_eq!(
+            store
+                .missing_evidence_state(&connection_id, &scope_two)
+                .unwrap(),
+            None
+        );
+
+        let second_run_id = id("fixture-run-2", SyncRunId::new);
+        let mut second_running = run(SyncRunStatus::Running, None);
+        second_running.sync_run_id = second_run_id.clone();
+        second_running.cursor_before = Some(id("cursor-after", SyncCursor::new));
+        second_running.cursor_after = Some(id("cursor-second", SyncCursor::new));
+        store.start_sync_run(second_running).unwrap();
+
+        let mut second_finished = run(SyncRunStatus::Succeeded, Some(timestamp_at(5)));
+        second_finished.sync_run_id = second_run_id;
+        second_finished.cursor_before = Some(id("cursor-after", SyncCursor::new));
+        second_finished.cursor_after = Some(id("cursor-second", SyncCursor::new));
+        second_finished.coverage = SyncCoverage::AuthoritativeFull {
+            scope: scope_two.clone(),
+        };
+        store
+            .commit_sync(SyncCommit {
+                sync_run: second_finished,
+                resources: Vec::new(),
+                resource_versions: Vec::new(),
+                relations: Vec::new(),
+                relation_versions: Vec::new(),
+                changes: Vec::new(),
+                cursor_after: Some(id("cursor-second", SyncCursor::new)),
+                missing_evidence: Some(missing_state(scope_two.as_str(), "fixture-resource-2", 2)),
+            })
+            .unwrap();
+
+        assert_eq!(
+            store
+                .missing_evidence_state(&connection_id, &scope_one)
+                .unwrap(),
+            Some(missing_state(scope_one.as_str(), "fixture-resource", 1,))
+        );
+        assert_eq!(
+            store
+                .missing_evidence_state(&connection_id, &scope_two)
+                .unwrap(),
+            Some(missing_state(scope_two.as_str(), "fixture-resource-2", 2,))
+        );
     }
 
     #[test]
@@ -572,6 +806,7 @@ mod tests {
                 relation_versions: Vec::new(),
                 changes: Vec::new(),
                 cursor_after: Some(id("cursor-after", SyncCursor::new)),
+                missing_evidence: None,
             })
             .unwrap();
 
@@ -621,6 +856,7 @@ mod tests {
                 relation_versions: Vec::new(),
                 changes: Vec::new(),
                 cursor_after: Some(id("cursor-second", SyncCursor::new)),
+                missing_evidence: None,
             })
             .unwrap();
 
@@ -634,6 +870,79 @@ mod tests {
     }
 
     #[test]
+    fn latest_relation_version_fingerprint_is_deterministic() {
+        let (_directory, mut store) = store();
+        store.upsert_connection(connection()).unwrap();
+        store
+            .start_sync_run(run(SyncRunStatus::Running, None))
+            .unwrap();
+        store
+            .commit_sync(SyncCommit {
+                sync_run: run(SyncRunStatus::Succeeded, Some(timestamp_at(3))),
+                resources: vec![resource()],
+                resource_versions: vec![version()],
+                relations: vec![relation("fixture-run")],
+                relation_versions: vec![relation_version(
+                    "fixture-relation-version-1",
+                    "relation-fingerprint-1",
+                    "fixture-run",
+                    3,
+                )],
+                changes: Vec::new(),
+                cursor_after: Some(id("cursor-after", SyncCursor::new)),
+                missing_evidence: None,
+            })
+            .unwrap();
+
+        let relation_id = id("fixture-relation", RelationId::new);
+        assert_eq!(
+            store
+                .latest_relation_version_fingerprint(&relation_id)
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "relation-fingerprint-1"
+        );
+
+        let second_run_id = id("fixture-run-2", SyncRunId::new);
+        let mut second_running = run(SyncRunStatus::Running, None);
+        second_running.sync_run_id = second_run_id.clone();
+        second_running.cursor_before = Some(id("cursor-after", SyncCursor::new));
+        second_running.cursor_after = Some(id("cursor-second", SyncCursor::new));
+        store.start_sync_run(second_running).unwrap();
+        let mut second_finished = run(SyncRunStatus::Succeeded, Some(timestamp_at(5)));
+        second_finished.sync_run_id = second_run_id;
+        second_finished.cursor_before = Some(id("cursor-after", SyncCursor::new));
+        second_finished.cursor_after = Some(id("cursor-second", SyncCursor::new));
+        store
+            .commit_sync(SyncCommit {
+                sync_run: second_finished,
+                resources: Vec::new(),
+                resource_versions: Vec::new(),
+                relations: vec![relation("fixture-run-2")],
+                relation_versions: vec![relation_version(
+                    "fixture-relation-version-2",
+                    "relation-fingerprint-2",
+                    "fixture-run-2",
+                    5,
+                )],
+                changes: Vec::new(),
+                cursor_after: Some(id("cursor-second", SyncCursor::new)),
+                missing_evidence: None,
+            })
+            .unwrap();
+
+        assert_eq!(
+            store
+                .latest_relation_version_fingerprint(&relation_id)
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "relation-fingerprint-2"
+        );
+    }
+
+    #[test]
     fn failed_transaction_does_not_advance_cursor_or_expose_resource() {
         let (_directory, mut store) = store();
         store.upsert_connection(connection()).unwrap();
@@ -643,8 +952,12 @@ mod tests {
         store
             .connection
             .execute(
-                "INSERT INTO connector_state(connection_id, sync_cursor) VALUES (?1, ?2)",
-                params!["fixture-connection", "cursor-before"],
+                "INSERT INTO connector_state(connection_id, sync_cursor, consecutive_missing_json) VALUES (?1, ?2, ?3)",
+                params![
+                    "fixture-connection",
+                    "cursor-before",
+                    r#"{"fixture-scope":{"fixture-resource":1}}"#,
+                ],
             )
             .unwrap();
 
@@ -671,6 +984,7 @@ mod tests {
             relation_versions: Vec::new(),
             changes: Vec::new(),
             cursor_after: Some(id("cursor-after", SyncCursor::new)),
+            missing_evidence: Some(missing_state("fixture-scope", "fixture-resource", 2)),
         });
 
         assert!(result.is_err());
@@ -687,6 +1001,15 @@ mod tests {
                 .unwrap()
                 .as_str(),
             "cursor-before"
+        );
+        assert_eq!(
+            store
+                .missing_evidence_state(
+                    &id("fixture-connection", ConnectionId::new),
+                    &id("fixture-scope", Scope::new),
+                )
+                .unwrap(),
+            Some(missing_state("fixture-scope", "fixture-resource", 1,))
         );
     }
 

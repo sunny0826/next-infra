@@ -87,12 +87,14 @@ rtk cargo fmt --all --check
 
 ### `CON-G2-05` — Connector Pipeline 集成证据
 
+- **状态：** `REVIEW`。
 - **目标：** 注册 Fixture 并与 Normalizer/Sync/Store 证明 Coverage 和删除语义。
 - **依赖：** `CON-G2-01..04`、`RHM-G2-03/04`。
 - **独占路径：** `tests/integration/connector_pipeline/**`；registry/manifests 由 `GATE-G2` Captain 修改。
 - **非目标：** 不实现 Provider。
 - **验收：** partial/incremental/targeted/failed 不 tombstone；只有同 scope 连续两次成功 authoritative full 产生 tombstone；事务失败不前移 cursor。
 - **验证：** Connector conformance + store/sync pipeline tests。
+- **实现证据（2026-08-03）：** `next-infra-connector-pipeline-integration` 以标准 Fixture 串联 replay、Normalizer、SyncEngine 和真实临时 SQLite，覆盖 full/incremental/targeted、partial→recovery、连续两次 authoritative missing、fatal→failed、descriptor conformance 和稳定 Coverage Catalog。5 项集成测试及专属 Clippy 通过；合法 Fixture 不承担 SQLite 故障注入，该原子回滚证据由 `RHM-G2-05` 提供。
 - **风险/停止：** 集成失败回派 API、Normalizer、Store 或 Sync owner。
 
 并行波次：

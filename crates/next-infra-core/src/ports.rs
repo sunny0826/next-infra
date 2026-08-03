@@ -10,6 +10,7 @@ pub struct SyncCommit {
     pub relation_versions: Vec<RelationVersion>,
     pub changes: Vec<Change>,
     pub cursor_after: Option<SyncCursor>,
+    pub missing_evidence: Option<MissingEvidenceState>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -27,6 +28,17 @@ pub trait StoreReader {
     fn get_connection(&self, id: &ConnectionId) -> Result<Option<Connection>, Self::Error>;
     fn get_resource(&self, id: &ResourceId) -> Result<Option<Resource>, Self::Error>;
     fn get_relation(&self, id: &RelationId) -> Result<Option<Relation>, Self::Error>;
+    /// Return the newest persisted fingerprint for one relation, if any.
+    ///
+    /// Implementations order by observation time and use a deterministic
+    /// version-id tie breaker. The default keeps lightweight readers source
+    /// compatible while the projection store adopts the port.
+    fn latest_relation_version_fingerprint(
+        &self,
+        _id: &RelationId,
+    ) -> Result<Option<Fingerprint>, Self::Error> {
+        Ok(None)
+    }
     fn get_sync_run(&self, id: &SyncRunId) -> Result<Option<SyncRun>, Self::Error>;
     fn sync_cursor(&self, connection_id: &ConnectionId) -> Result<Option<SyncCursor>, Self::Error>;
     fn list_resources_for_scope(
@@ -34,6 +46,19 @@ pub trait StoreReader {
         connection_id: &ConnectionId,
         scope: &Scope,
     ) -> Result<Vec<Resource>, Self::Error>;
+
+    /// Read the state for one `(connection, scope)` pair.
+    ///
+    /// Implementations may return `None` when no state has been persisted yet;
+    /// callers treat that as an empty state. The default keeps existing store
+    /// implementations source-compatible while the port is adopted.
+    fn missing_evidence_state(
+        &self,
+        _connection_id: &ConnectionId,
+        _scope: &Scope,
+    ) -> Result<Option<MissingEvidenceState>, Self::Error> {
+        Ok(None)
+    }
 }
 
 pub trait StoreWriter {

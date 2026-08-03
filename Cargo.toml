@@ -14,6 +14,8 @@ members = [
   "crates/next-infra-mcp",
   "apps/desktop/src-tauri",
   "apps/mcp-bridge",
+  "tests/integration/store-sync",
+  "tests/integration/connector-pipeline",
 ]
 resolver = "3"
 

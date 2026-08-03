@@ -38,8 +38,17 @@ const allowedNormal = new Map([
   ["next-infra-connector-api", ["next-infra-core"]],
   ["next-infra-normalizer", ["next-infra-connector-api", "next-infra-core"]],
   ["next-infra-connector-fixture", ["next-infra-connector-api", "next-infra-core"]],
-  ["next-infra-connector-contract-tests", []],
-  ["next-infra-connector-catalog", ["next-infra-connector-api"]],
+  [
+    "next-infra-connector-contract-tests",
+    [
+      "next-infra-connector-api",
+      "next-infra-connector-catalog",
+      "next-infra-connector-fixture",
+      "next-infra-core",
+      "next-infra-normalizer",
+    ],
+  ],
+  ["next-infra-connector-catalog", ["next-infra-connector-api", "next-infra-core"]],
   ["next-infra-sync", ["next-infra-connector-api", "next-infra-core", "next-infra-normalizer"]],
   ["next-infra-query", ["next-infra-core"]],
   ["next-infra-runtime", ["next-infra-connector-catalog", "next-infra-query", "next-infra-store", "next-infra-sync"]],
@@ -47,14 +56,33 @@ const allowedNormal = new Map([
   ["next-infra-mcp", ["next-infra-local-rpc"]],
   ["next-infra-desktop-adapter", ["next-infra-local-rpc", "next-infra-query", "next-infra-runtime"]],
   ["next-infra-mcp-bridge", ["next-infra-mcp"]],
-]);
-
-const allowedDev = new Map([
   [
-    "next-infra-connector-contract-tests",
-    ["next-infra-connector-api", "next-infra-connector-fixture", "next-infra-normalizer"],
+    "next-infra-store-sync-integration",
+    [
+      "next-infra-connector-api",
+      "next-infra-connector-fixture",
+      "next-infra-core",
+      "next-infra-normalizer",
+      "next-infra-store",
+      "next-infra-sync",
+    ],
+  ],
+  [
+    "next-infra-connector-pipeline-integration",
+    [
+      "next-infra-connector-api",
+      "next-infra-connector-catalog",
+      "next-infra-connector-contract-tests",
+      "next-infra-connector-fixture",
+      "next-infra-core",
+      "next-infra-normalizer",
+      "next-infra-store",
+      "next-infra-sync",
+    ],
   ],
 ]);
+
+const allowedDev = new Map();
 
 function internalDependencies(item, kind) {
   return [
@@ -122,8 +150,8 @@ for (const item of packages) {
   }
 }
 
-if (packages.length !== 14) {
-  failures.push(`workspace package count ${packages.length} != 14`);
+if (packages.length !== 16) {
+  failures.push(`workspace package count ${packages.length} != 16`);
 }
 
 if (failures.length > 0) {

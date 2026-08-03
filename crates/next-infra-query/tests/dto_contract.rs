@@ -1,7 +1,9 @@
 use next_infra_query::dto::{
-    ConnectionDto, ConnectorHealth, ErrorEnvelope, EvidenceType, Freshness, Lifecycle, PageInfo,
-    QUERY_DTO_SCHEMA_VERSION, RelationDto, ResourceDto, ResourceHealth, SchemaVersion,
-    SnapshotMetadata,
+    ChangeDto, ChangeOriginDto, ChangeSubjectDto, ConnectionDto, ConnectorCoverageDto,
+    ConnectorCoverageLevelDto, ConnectorHealth, ErrorEnvelope, EvidenceType, FieldChangeDto,
+    Freshness, Lifecycle, PageInfo, QUERY_DTO_SCHEMA_VERSION, QueryViewState, RelationDto,
+    ResourceDto, ResourceHealth, SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto,
+    SyncRunCountsDto, SyncRunDto, SyncRunStatusDto, SyncTriggerDto,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -222,4 +224,84 @@ fn dto_shapes_are_stable_and_clean() {
     assert_clean(&resource);
     assert_clean(&relation);
     assert_clean(&connection);
+}
+
+#[test]
+fn goal_two_history_and_coverage_dtos_are_tagged_and_clean() {
+    let sync_run = SyncRunDto {
+        sync_run_id: "fixture-run".into(),
+        connection_id: "fixture-connection".into(),
+        mode: SyncModeDto::Full,
+        trigger: SyncTriggerDto::Schedule,
+        status: SyncRunStatusDto::Partial,
+        coverage: SyncCoverageDto::Partial {
+            scope: Some("fixture-scope".into()),
+            reason: "rate_limited".into(),
+        },
+        started_at: "2000-01-01T00:00:00Z".into(),
+        finished_at: Some("2000-01-01T00:00:01Z".into()),
+        cursor_before: Some("fixture-cursor-before".into()),
+        cursor_after: Some("fixture-cursor-after".into()),
+        counts: SyncRunCountsDto {
+            read: 1,
+            warnings: 1,
+            ..SyncRunCountsDto::default()
+        },
+        errors: Vec::new(),
+    };
+    let coverage = ConnectorCoverageDto {
+        connector_type: "fixture".into(),
+        connector_version: "1.0.0".into(),
+        module: "fixture.compute".into(),
+        level: ConnectorCoverageLevelDto::Partial,
+        reason: Some("fixture limitation".into()),
+    };
+    let change = ChangeDto {
+        change_id: "fixture-change".into(),
+        subject: ChangeSubjectDto::Resource {
+            resource_id: "fixture-resource".into(),
+        },
+        observed_at: "2000-01-01T00:00:01Z".into(),
+        fields: vec![FieldChangeDto {
+            path: "attributes.state".into(),
+            before: Some(json!("pending")),
+            after: Some(json!("ready")),
+        }],
+        origin: ChangeOriginDto::SyncRun {
+            sync_run_id: "fixture-run".into(),
+        },
+    };
+
+    assert_eq!(
+        serde_json::to_value(QueryViewState::Loading).unwrap(),
+        json!("loading")
+    );
+    assert_eq!(
+        serde_json::to_value(&sync_run.coverage).unwrap(),
+        json!({
+            "type": "partial",
+            "scope": "fixture-scope",
+            "reason": "rate_limited",
+        })
+    );
+    assert_eq!(
+        field_names(&sync_run),
+        [
+            "connection_id",
+            "counts",
+            "coverage",
+            "cursor_after",
+            "cursor_before",
+            "errors",
+            "finished_at",
+            "mode",
+            "started_at",
+            "status",
+            "sync_run_id",
+            "trigger",
+        ]
+    );
+    assert_clean(&sync_run);
+    assert_clean(&coverage);
+    assert_clean(&change);
 }
