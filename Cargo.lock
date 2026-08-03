@@ -2209,6 +2209,8 @@ version = "0.1.0"
 dependencies = [
  "next-infra-core",
  "rusqlite",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 

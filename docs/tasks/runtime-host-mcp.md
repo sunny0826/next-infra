@@ -51,7 +51,7 @@
 
 ### `RHM-G2-03` — SQLite Projection Store
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 实现当前投影、有限历史和原子批次提交。
 - **依赖：** `RHM-G2-01/02`。
 - **独占路径：** `crates/next-infra-store/**`，排除 migration owner 的冻结文件。
@@ -60,6 +60,7 @@
 - **输入/输出：** Store ports/schema → SQLite adapter 与集成测试。
 - **验收：** 事务失败不前移 cursor；读者看不到半批次；未变化事实不新增版本。
 - **验证：** `rtk cargo test -p next-infra-store`。
+- **实现证据（2026-08-03）：** Store 已实现 Connection/SyncRun/Resource/Relation/Version/Change/cursor 读写与单事务 `SyncCommit`，提交前校验 cursor 和 provenance，稳定身份不可静默变化；外键失败测试证明投影、版本和 cursor 全部回滚，未变化批次不新增 ResourceVersion，启动恢复只把 running run 转为 interrupted。9 项 Store 测试、专属 Clippy 和全 workspace 回归通过。
 - **风险/停止：** Sync Coverage 和 tombstone 规则不能下沉为隐蔽 SQL 特例。
 
 ### `RHM-G2-04` — Writer 与 Sync Engine

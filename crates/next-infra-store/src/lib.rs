@@ -1,6 +1,7 @@
 //! SQLite storage adapter boundary for Next Infra.
 
 mod migrations;
+mod projection;
 
 use rusqlite::Connection;
 use std::{fmt, fs, path::Path, time::Duration};
@@ -124,6 +125,8 @@ pub enum StoreError {
     Integrity(String),
     UnsupportedSchema { found: u32, supported: u32 },
     UnsafePath(String),
+    Contract(String),
+    Json(serde_json::Error),
 }
 
 impl fmt::Display for StoreError {
@@ -137,6 +140,8 @@ impl fmt::Display for StoreError {
                 "store schema version {found} is newer than supported version {supported}"
             ),
             Self::UnsafePath(message) => write!(formatter, "unsafe store path: {message}"),
+            Self::Contract(message) => write!(formatter, "store contract error: {message}"),
+            Self::Json(error) => write!(formatter, "store JSON error: {error}"),
         }
     }
 }
