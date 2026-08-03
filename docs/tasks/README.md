@@ -125,6 +125,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 19. [RHM-G3-05P0B Connection Snapshot Contract 验收记录](./RHM-G3-05P0B-2026-08-03.md)
 20. [RHM-G3-05P2A SharedStore Ownership 验收记录](./RHM-G3-05P2A-2026-08-03.md)
 21. [RHM-G3-05P2B Committed QuerySource 验收记录](./RHM-G3-05P2B-2026-08-03.md)
+22. [RHM-G3-05A Composition State 与 Command Registration 任务冻结](./RHM-G3-05A-TASK-FREEZE-2026-08-03.md)
 
 ## 6. 设计决策包
 

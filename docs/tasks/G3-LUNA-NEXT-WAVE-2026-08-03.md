@@ -162,12 +162,13 @@ rtk git diff --check
 
 ### `RHM-G3-05A` — Composition State 与 Command Registration
 
-- **状态：** `READY`；`RHM-G3-05P` 与 `UI-G3-07R` 均已进入 `REVIEW`。
+- **状态：** `DECISION REQUIRED`；任务冻结见 [`RHM-G3-05A-TASK-FREEZE`](./RHM-G3-05A-TASK-FREEZE-2026-08-03.md)。`RHM-G3-05P` 与 `UI-G3-07R` 虽已进入 `REVIEW`，但 `SharedStore::open(path)` ownership wording 与 Manual Sync admission queue 尚未关闭。
 - **唯一目标：** 建立唯一 AppState，组合 Store/Writer/Runtime/Query/Adapter/Keychain ports，并注册已有 command/event 名称。
 - **建议独占路径：** `apps/desktop/src-tauri/src/composition/**`、`src-tauri/src/lib.rs`；shared manifest/lockfile 只由 Composition Captain 修改。
 - **必须保持：** 一个 Runtime、一个 WriterQueue、一个 SQLite owner；event 只做 invalidation；Manual Sync 只 enqueue 并返回 `sync_run_id`；错误不泄漏 Secret/SQL/provider payload。
 - **非目标：** 不实现 native tray/window effects，不修改页面、Query 语义或 Provider。
 - **串行要求：** 该任务不能与任何其他修改 `src-tauri/src/lib.rs`、manifest 或 lockfile 的 worker 并行。
+- **派发前置：** 若未选择真实 Runtime admission queue/consumer，则 `runtime_capabilities.manual_sync=false`，`runtime_manual_sync` 必须安全返回 unavailable，不得伪造 `sync_run_id`。
 
 ### `RHM-G3-05B` — Native Host Effects 与 Lifecycle Wiring
 
