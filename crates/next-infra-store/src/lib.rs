@@ -4,7 +4,7 @@ mod migrations;
 mod projection;
 mod query_projection;
 
-pub use query_projection::ProjectionMetadata;
+pub use query_projection::*;
 
 use rusqlite::Connection;
 use std::{fmt, fs, path::Path, time::Duration};

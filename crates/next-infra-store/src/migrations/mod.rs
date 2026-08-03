@@ -194,3 +194,39 @@ pub fn apply(connection: &mut Connection) -> Result<(), StoreError> {
     }
     transaction.commit().map_err(StoreError::Sqlite)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schema_one_upgrades_to_projection_metadata_atomically() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(MIGRATION_1).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (1, 1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 1_u32)
+            .unwrap();
+
+        apply(&mut connection).unwrap();
+
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let metadata: (i64, i64) = connection
+            .query_row(
+                "SELECT committed_revision, committed_at FROM projection_metadata WHERE singleton_id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(version, 2);
+        assert_eq!(metadata.0, 0);
+        assert!(metadata.1 > 0);
+    }
+}

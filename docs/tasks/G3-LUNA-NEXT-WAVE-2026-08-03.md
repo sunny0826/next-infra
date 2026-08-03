@@ -150,7 +150,7 @@ rtk git diff --check
 ### `RHM-G3-05P` — SQLite QuerySource 前置决策
 
 - **状态：** `REVIEW`，见 `DEC-G3-01`；Query `P0` 与 Store `P1` 可并行，Runtime `P2` 必须等待两者。
-- **阶段证据：** `P0` 已进入 `REVIEW`；`P1A` migration/revision 已进入 `REVIEW`，`P1B` bounded projection 尚待完成；`P2` 仍不可开始。
+- **阶段证据：** `P0/P1` 已进入 `REVIEW`；Store migration/revision、bounded projection 与 atomic QuerySource envelope 均通过全 workspace 回归。`P2` 现在可开始。
 - **唯一目标：** 冻结 Composition 如何获得 SQLite-backed bounded `QuerySource`，同时保持唯一 Store/Writer/SQLite owner。
 - **必须回答：**
   - QuerySource 由 Store 暴露只读 adapter，还是由 Query crate 提供基于 StoreReader 的 concrete source？

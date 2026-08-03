@@ -371,7 +371,7 @@ fn insert_change(transaction: &Transaction<'_>, change: &Change) -> Result<usize
     ).map_err(StoreError::Sqlite)
 }
 
-fn read_connection(row: &Row<'_>) -> rusqlite::Result<Connection> {
+pub(crate) fn read_connection(row: &Row<'_>) -> rusqlite::Result<Connection> {
     Ok(Connection {
         connection_id: wrapped(row.get(0)?)?,
         connector_type: wrapped(row.get(1)?)?,
@@ -387,7 +387,7 @@ fn read_connection(row: &Row<'_>) -> rusqlite::Result<Connection> {
     })
 }
 
-fn read_resource(row: &Row<'_>) -> rusqlite::Result<Resource> {
+pub(crate) fn read_resource(row: &Row<'_>) -> rusqlite::Result<Resource> {
     Ok(Resource {
         resource_id: wrapped(row.get(0)?)?,
         connection_id: wrapped(row.get(1)?)?,
@@ -409,7 +409,7 @@ fn read_resource(row: &Row<'_>) -> rusqlite::Result<Resource> {
     })
 }
 
-fn read_relation(row: &Row<'_>) -> rusqlite::Result<Relation> {
+pub(crate) fn read_relation(row: &Row<'_>) -> rusqlite::Result<Relation> {
     Ok(Relation {
         relation_id: wrapped(row.get(0)?)?,
         source_resource_id: wrapped(row.get(1)?)?,
@@ -423,7 +423,7 @@ fn read_relation(row: &Row<'_>) -> rusqlite::Result<Relation> {
     })
 }
 
-fn read_sync_run(row: &Row<'_>) -> rusqlite::Result<SyncRun> {
+pub(crate) fn read_sync_run(row: &Row<'_>) -> rusqlite::Result<SyncRun> {
     Ok(SyncRun {
         sync_run_id: wrapped(row.get(0)?)?,
         connection_id: wrapped(row.get(1)?)?,
@@ -437,6 +437,33 @@ fn read_sync_run(row: &Row<'_>) -> rusqlite::Result<SyncRun> {
         cursor_after: optional_wrapped(row.get(9)?)?,
         counts: json(row.get(10)?)?,
         errors: json(row.get(11)?)?,
+    })
+}
+
+pub(crate) fn read_change(row: &Row<'_>) -> rusqlite::Result<Change> {
+    let subject_type: String = row.get(1)?;
+    let subject_id: String = row.get(2)?;
+    let subject = match subject_type.as_str() {
+        "resource" => ChangeSubject::Resource {
+            resource_id: wrapped(subject_id)?,
+        },
+        "relation" => ChangeSubject::Relation {
+            relation_id: wrapped(subject_id)?,
+        },
+        _ => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                1,
+                rusqlite::types::Type::Text,
+                "unknown change subject type".into(),
+            ));
+        }
+    };
+    Ok(Change {
+        change_id: wrapped(row.get(0)?)?,
+        subject,
+        observed_at: timestamp(row.get(3)?)?,
+        fields: json(row.get(4)?)?,
+        origin: json(row.get(5)?)?,
     })
 }
 
@@ -518,7 +545,7 @@ fn json_value(value: String) -> rusqlite::Result<serde_json::Value> {
     json(value)
 }
 
-fn wrapped<T: DeserializeOwned>(value: String) -> rusqlite::Result<T> {
+pub(crate) fn wrapped<T: DeserializeOwned>(value: String) -> rusqlite::Result<T> {
     serde_json::from_value(serde_json::Value::String(value)).map_err(conversion_error)
 }
 
@@ -599,8 +626,9 @@ fn validate_commit(commit: &SyncCommit) -> Result<(), StoreError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{FreshnessCutoffs, RecentChangesProjectionPlan, ResourceProjectionPlan};
     use serde_json::json;
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use tempfile::TempDir;
 
     fn id<T>(value: &str, constructor: impl FnOnce(String) -> Result<T, DomainError>) -> T {
@@ -744,6 +772,104 @@ mod tests {
             id(scope, Scope::new),
             BTreeMap::from([(id(resource_id, ResourceId::new), count)]),
         )
+    }
+
+    fn projection_cutoffs() -> BTreeMap<ConnectionId, FreshnessCutoffs> {
+        BTreeMap::from([(
+            id("fixture-connection", ConnectionId::new),
+            FreshnessCutoffs {
+                fresh_after_millis: 3,
+                expired_after_millis: 2,
+            },
+        )])
+    }
+
+    fn query_projection_store() -> (TempDir, Store) {
+        let (directory, mut store) = store();
+        let mut query_connection = connection();
+        query_connection.secret_ref = Some(secret_ref());
+        store.upsert_connection(query_connection).unwrap();
+        store
+            .start_sync_run(run(SyncRunStatus::Running, None))
+            .unwrap();
+
+        let mut alpha = resource();
+        alpha.resource_id = id("fixture-resource-alpha", ResourceId::new);
+        alpha.external_id = id("external-alpha", ExternalId::new);
+        alpha.name = "alpha".into();
+        alpha.display_name = "Fixture Compute Alpha".into();
+        alpha.kind = ResourceKind::new("fixture.compute").unwrap();
+        alpha.last_seen_at = timestamp_at(4);
+        alpha.labels = BTreeMap::from([(LabelKey::new("fixture.tier").unwrap(), "compute".into())]);
+
+        let mut beta = resource();
+        beta.resource_id = id("fixture-resource-beta", ResourceId::new);
+        beta.external_id = id("external-beta", ExternalId::new);
+        beta.name = "beta".into();
+        beta.display_name = "Fixture Database Beta".into();
+        beta.kind = ResourceKind::new("fixture.database").unwrap();
+        beta.last_seen_at = timestamp_at(2);
+        beta.labels = BTreeMap::from([(LabelKey::new("fixture.tier").unwrap(), "database".into())]);
+
+        let mut gamma = resource();
+        gamma.resource_id = id("fixture-resource-gamma", ResourceId::new);
+        gamma.external_id = id("external-gamma", ExternalId::new);
+        gamma.name = "gamma".into();
+        gamma.display_name = "Fixture Worker Gamma".into();
+        gamma.kind = ResourceKind::new("fixture.worker").unwrap();
+        gamma.last_seen_at = timestamp_at(1);
+        gamma.health = ResourceHealth::Degraded;
+        gamma.labels = BTreeMap::from([(LabelKey::new("fixture.tier").unwrap(), "worker".into())]);
+
+        let relation_id = id("fixture-relation-alpha-beta", RelationId::new);
+        let mut alpha_beta = relation("fixture-run");
+        alpha_beta.relation_id = relation_id.clone();
+        alpha_beta.source_resource_id = alpha.resource_id.clone();
+        alpha_beta.target_resource_id = beta.resource_id.clone();
+        alpha_beta.evidence_key = id("fixture-evidence-alpha-beta", EvidenceKey::new);
+
+        let resource_change = Change {
+            change_id: id("fixture-change-resource", ChangeId::new),
+            subject: ChangeSubject::Resource {
+                resource_id: alpha.resource_id.clone(),
+            },
+            observed_at: timestamp_at(4),
+            fields: vec![FieldChange {
+                path: FieldPath::new("attributes.state").unwrap(),
+                before: Some(json!("pending")),
+                after: Some(json!("ready")),
+            }],
+            origin: OriginRef::SyncRun {
+                sync_run_id: id("fixture-run", SyncRunId::new),
+            },
+        };
+        let relation_change = Change {
+            change_id: id("fixture-change-relation", ChangeId::new),
+            subject: ChangeSubject::Relation { relation_id },
+            observed_at: timestamp_at(3),
+            fields: vec![FieldChange {
+                path: FieldPath::new("lifecycle").unwrap(),
+                before: None,
+                after: Some(json!("active")),
+            }],
+            origin: OriginRef::SyncRun {
+                sync_run_id: id("fixture-run", SyncRunId::new),
+            },
+        };
+
+        store
+            .commit_sync(SyncCommit {
+                sync_run: run(SyncRunStatus::Succeeded, Some(timestamp_at(5))),
+                resources: vec![alpha, beta, gamma],
+                resource_versions: Vec::new(),
+                relations: vec![alpha_beta],
+                relation_versions: Vec::new(),
+                changes: vec![resource_change, relation_change],
+                cursor_after: Some(id("cursor-after", SyncCursor::new)),
+                missing_evidence: None,
+            })
+            .unwrap();
+        (directory, store)
     }
 
     #[test]
@@ -1141,7 +1267,12 @@ mod tests {
             .unwrap();
         assert_eq!(store.projection_metadata().unwrap().committed_revision, 3);
 
-        assert_eq!(store.mark_running_syncs_interrupted(timestamp_at(4)).unwrap(), 0);
+        assert_eq!(
+            store
+                .mark_running_syncs_interrupted(timestamp_at(4))
+                .unwrap(),
+            0
+        );
         assert_eq!(store.projection_metadata().unwrap().committed_revision, 3);
 
         let mut second_run = run(SyncRunStatus::Running, None);
@@ -1149,7 +1280,153 @@ mod tests {
         store.start_sync_run(second_run).unwrap();
         assert_eq!(store.projection_metadata().unwrap().committed_revision, 4);
 
-        assert_eq!(store.mark_running_syncs_interrupted(timestamp_at(5)).unwrap(), 1);
+        assert_eq!(
+            store
+                .mark_running_syncs_interrupted(timestamp_at(5))
+                .unwrap(),
+            1
+        );
         assert_eq!(store.projection_metadata().unwrap().committed_revision, 5);
+    }
+
+    #[test]
+    fn bounded_resource_projection_filters_and_pages_stably() {
+        let (_directory, store) = query_projection_store();
+        let mut plan = ResourceProjectionPlan {
+            query: None,
+            kinds: BTreeSet::new(),
+            connector_types: BTreeSet::new(),
+            health: Vec::new(),
+            freshness: Vec::new(),
+            labels: BTreeMap::new(),
+            cutoffs: projection_cutoffs(),
+            limit: 2,
+            after: None,
+        };
+
+        let first = store.query_resources(&plan).unwrap();
+        assert_eq!(first.metadata, store.projection_metadata().unwrap());
+        assert_eq!(first.body.items.len(), 2);
+        assert_eq!(first.body.items[0].freshness, Freshness::Fresh);
+        assert_eq!(first.body.items[1].freshness, Freshness::Stale);
+        assert_eq!(
+            first.body.next_after.as_deref(),
+            Some("fixture-resource-beta")
+        );
+
+        plan.after = first.body.next_after;
+        let second = store.query_resources(&plan).unwrap();
+        assert_eq!(second.body.items.len(), 1);
+        assert_eq!(second.body.items[0].freshness, Freshness::Expired);
+        assert_eq!(second.body.next_after, None);
+
+        plan.after = None;
+        plan.limit = 10;
+        plan.query = Some("database".into());
+        plan.labels = BTreeMap::from([("fixture.tier".into(), "database".into())]);
+        plan.freshness = vec![Freshness::Stale];
+        let filtered = store.query_resources(&plan).unwrap();
+        assert_eq!(filtered.body.items.len(), 1);
+        assert_eq!(
+            filtered.body.items[0].resource.resource_id.as_str(),
+            "fixture-resource-beta"
+        );
+    }
+
+    #[test]
+    fn detail_frontier_change_sync_and_health_projections_share_revision() {
+        let (_directory, store) = query_projection_store();
+        let alpha = id("fixture-resource-alpha", ResourceId::new);
+        let metadata = store.projection_metadata().unwrap();
+
+        let detail = store.query_resource_detail(&alpha).unwrap();
+        assert_eq!(detail.metadata, metadata);
+        let detail = detail.body.unwrap();
+        assert_eq!(detail.relations.len(), 1);
+        assert_eq!(detail.recent_changes.len(), 2);
+        assert!(!detail.relations_truncated);
+        assert!(!detail.recent_changes_truncated);
+
+        let frontier = store
+            .query_relations_for_resources(&BTreeSet::from([alpha.clone()]), 10, None)
+            .unwrap();
+        assert_eq!(frontier.metadata, metadata);
+        assert_eq!(frontier.body.items.len(), 1);
+
+        let resources = store
+            .query_resources_by_ids(&BTreeSet::from([
+                alpha.clone(),
+                id("fixture-resource-beta", ResourceId::new),
+            ]))
+            .unwrap();
+        assert_eq!(resources.body.len(), 2);
+
+        let mut changes_plan = RecentChangesProjectionPlan {
+            since_millis: None,
+            resource_id: Some(alpha),
+            kinds: BTreeSet::new(),
+            limit: 1,
+            after: None,
+        };
+        let first_change = store.query_recent_changes(&changes_plan).unwrap();
+        assert_eq!(first_change.body.items.len(), 1);
+        assert!(first_change.body.next_after.is_some());
+        changes_plan.after = first_change.body.next_after;
+        let second_change = store.query_recent_changes(&changes_plan).unwrap();
+        assert_eq!(second_change.body.items.len(), 1);
+        assert_eq!(second_change.body.next_after, None);
+
+        let sync = store
+            .query_sync_status(&id("fixture-connection", ConnectionId::new), 10)
+            .unwrap();
+        assert_eq!(sync.metadata, metadata);
+        assert_eq!(sync.body.unwrap().recent_runs.len(), 1);
+
+        let health = store.query_health_summary(&projection_cutoffs()).unwrap();
+        assert_eq!(health.metadata, metadata);
+        assert_eq!(
+            health.body.freshness,
+            vec![
+                (Freshness::Fresh, 1),
+                (Freshness::Stale, 1),
+                (Freshness::Expired, 1),
+            ]
+        );
+        let connections = store.query_connections().unwrap().body;
+        assert_eq!(connections.len(), 1);
+        assert!(!format!("{connections:?}").contains("generation"));
+    }
+
+    #[test]
+    fn projection_rejects_missing_freshness_context_and_invalid_bounds() {
+        let (_directory, store) = query_projection_store();
+        let base = ResourceProjectionPlan {
+            query: None,
+            kinds: BTreeSet::new(),
+            connector_types: BTreeSet::new(),
+            health: Vec::new(),
+            freshness: Vec::new(),
+            labels: BTreeMap::new(),
+            cutoffs: projection_cutoffs(),
+            limit: 10,
+            after: None,
+        };
+
+        let mut missing_context = base.clone();
+        missing_context.cutoffs.clear();
+        assert!(store.query_resources(&missing_context).is_err());
+
+        let mut invalid_limit = base;
+        invalid_limit.limit = 0;
+        assert!(store.query_resources(&invalid_limit).is_err());
+
+        let invalid_cursor = RecentChangesProjectionPlan {
+            since_millis: None,
+            resource_id: None,
+            kinds: BTreeSet::new(),
+            limit: 10,
+            after: Some("not-a-change-cursor".into()),
+        };
+        assert!(store.query_recent_changes(&invalid_cursor).is_err());
     }
 }
