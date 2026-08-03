@@ -174,6 +174,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G3-05` — Minimum Bounded Topology
 
+- **状态：** `REVIEW`。
 - **目标：** 交付 Fixture 驱动的 focus-first topology。
 - **依赖：** `UI-G2-01`、`UI-G3-01/02`；可与其他页面并行。
 - **独占路径：** `features/topology/**`。
@@ -181,6 +182,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **非目标：** 无 global graph、Binding edit 或最终布局优化。
 - **验收：** 不提供 load-all；truncated/frontier 清晰；三种 evidence 不只靠颜色区分。
 - **验证：** `V-UI + V-VIEWPORT`。
+- **实现证据（2026-08-03）：** Topology feature 已固定 focus-first depth 1、请求默认 100 nodes/200 edges 并在 toolbar 明示 200/400 hard limits；节点为 136×64，画布与窄屏只在自身容器滚动。provider/configured/inferred 分别使用实线、中心间距 4px 双线、6/5 虚线，并始终显示文字 legend/edge label；node/edge 可键盘聚焦并交给 Inspector callback。Frontier 提供按 resource 继续 bounded query 的入口，不存在 load-all。3 项页面测试及 Desktop 全部 55 项测试、lint/build 通过；最终 viewport/layout smoke 留 `UI-G3-07/08`。
 - **风险/停止：** 客户端不能绕过 server hard limits；大图 layout 不阻塞主线程。
 
 ### `UI-G3-06` — Connectors 与 Settings 最小页
