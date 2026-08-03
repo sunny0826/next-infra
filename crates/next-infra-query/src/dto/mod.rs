@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Compatibility version for the query DTO contract.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
 #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
@@ -79,7 +79,7 @@ pub enum Lifecycle {
 }
 
 /// Health reported by a resource at its last observation.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
 pub enum ResourceHealth {
@@ -90,7 +90,7 @@ pub enum ResourceHealth {
 }
 
 /// Whether the saved resource observation is current enough for use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
 pub enum Freshness {

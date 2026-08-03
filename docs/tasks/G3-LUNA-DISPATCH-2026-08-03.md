@@ -129,7 +129,7 @@ flowchart TD
 
 ### `UI-G3-01` — Thin Tauri Desktop Adapter
 
-- **状态：** `READY`。
+- **状态：** `REVIEW`。
 - **目标：** 将 React 请求映射到 bounded Query/local-config Commands；Manual Sync 返回 `sync_run_id`；Event 只做 invalidation 并触发 re-query。
 - **独占路径：** `apps/desktop/src/platform/desktop-adapter/**`、`apps/desktop/src-tauri/src/adapter/**`。
 - **只读输入：** generated QDTO、Query Service、Runtime/Host registration contracts。

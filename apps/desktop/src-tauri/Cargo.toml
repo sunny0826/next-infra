@@ -18,6 +18,7 @@ next-infra-core = { workspace = true }
 next-infra-local-rpc = { workspace = true }
 next-infra-query = { workspace = true }
 next-infra-runtime = { workspace = true }
+serde = { workspace = true }
 tauri = { workspace = true }
 tauri-plugin-autostart = { workspace = true }
 tauri-plugin-opener = { workspace = true }
