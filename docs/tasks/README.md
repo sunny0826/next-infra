@@ -228,6 +228,7 @@ Gate Captain 必须：
 
 ### `GATE-G2` — Domain、Connector 与 SQLite 验收门
 
+- **状态：** `PASSED`（2026-08-03，见 [`GATE-G2-2026-08-03.md`](./GATE-G2-2026-08-03.md)）。
 - **目标：** 证明领域、Connector、Normalizer、Writer 与 SQLite 在原子性和恢复语义上形成一个闭环。
 - **依赖：** `RHM-G2-01..05`、`CON-G2-01..05`、`UI-G2-01` 均处于 `REVIEW`。
 - **独占路径：** Goal 2 registry/manifests/lockfile、`tests/gates/goal-2/**` 和验收报告。
@@ -309,6 +310,7 @@ Gate Captain 必须：
 ## 8. 当前可执行边界
 
 - 已完成：Git 初始化、Goal 0、`DEC-G1-01..06`、Goal 1 工程任务与 `GATE-G1`。
-- 当前汇合：Goal 2 的 Core、Store、Sync、Normalizer、Fixture、Contract/Catalog、两条真实 SQLite integration suite 与 UI Fixture Catalog 均处于 `REVIEW`，可执行 `GATE-G2`。
-- 当前等待：Goal 3 以后继续等待 `GATE-G2` 的唯一结论。
+- 已完成：Goal 2 的 Core、Store、Sync、Normalizer、Fixture、Contract/Catalog、两条真实 SQLite integration suite、UI Fixture Catalog 与 `GATE-G2`。
+- 当前可派发：Goal 3 的 `RHM-G3-01` Query Service/QDTO v1；共享 Query 契约冻结后按 Goal 3 波次并行 Runtime、Host、Adapter 与 UI。
+- 当前等待：Goal 4 以后继续等待前序 Gate。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。
