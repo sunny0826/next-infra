@@ -1,5 +1,6 @@
 use crate::{
-    BindingId, Confidence, ConnectionId, FieldPath, ResourceVersionId, RuleVersion, SyncRunId,
+    BindingId, Confidence, ConnectionId, FieldPath, RelationVersionId, ResourceVersionId,
+    RuleVersion, SyncRunId,
 };
 use serde::{Deserialize, Serialize};
 
@@ -25,6 +26,8 @@ pub enum RelationEvidence {
     Inferred {
         rule_version: RuleVersion,
         input_resource_version_ids: Vec<ResourceVersionId>,
+        #[serde(default)]
+        input_relation_version_ids: Vec<RelationVersionId>,
         confidence: Confidence,
     },
 }

@@ -4,9 +4,9 @@ use crate::projection::{
 use crate::{Store, StoreError};
 use next_infra_core::{
     Change, Connection, ConnectionId, ConnectorHealth, ConnectorType, Freshness, Relation,
-    Resource, ResourceHealth, ResourceId, SyncRun,
+    Resource, ResourceHealth, ResourceId, SyncRun, Timestamp,
 };
-use rusqlite::types::Value;
+use rusqlite::types::{Type, Value};
 use rusqlite::{Connection as SqliteConnection, OptionalExtension, params, params_from_iter};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -15,7 +15,7 @@ pub const MAX_DETAIL_RELATIONS: usize = 400;
 pub const MAX_DETAIL_CHANGES: usize = 100;
 
 const RESOURCE_COLUMNS: &str = "r.resource_id, r.connection_id, r.kind, r.external_id, r.name, r.display_name, r.scope, r.labels_json, r.lifecycle, r.health, r.attributes_json, r.attribute_schema_version, r.fingerprint, r.first_seen_at, r.last_seen_at, r.last_changed_at, r.last_sync_run_id";
-const RELATION_COLUMNS: &str = "relation_id, source_resource_id, target_resource_id, kind, evidence_key, evidence_json, first_seen_at, last_seen_at, lifecycle";
+const PROJECTED_RELATION_COLUMNS: &str = "r.relation_id, r.source_resource_id, r.target_resource_id, r.kind, r.evidence_key, r.evidence_json, r.first_seen_at, r.last_seen_at, r.lifecycle";
 const CHANGE_COLUMNS: &str =
     "change_id, subject_type, subject_id, observed_at, fields_json, origin_json";
 const CONNECTION_COLUMNS: &str = "connection_id, connector_type, display_name, enabled, config_json, secret_ref, health, last_success_at, last_attempt_at, config_schema_version, deleted_at";
@@ -66,9 +66,16 @@ pub struct ProjectedResource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectedRelation {
+    pub relation: Relation,
+    pub provider_connector_type: Option<ConnectorType>,
+    pub configured_created_at: Option<Timestamp>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceDetailProjection {
     pub resource: Resource,
-    pub relations: Vec<Relation>,
+    pub relations: Vec<ProjectedRelation>,
     pub recent_changes: Vec<Change>,
     pub relations_truncated: bool,
     pub recent_changes_truncated: bool,
@@ -131,7 +138,7 @@ impl Store {
         resource_ids: &BTreeSet<ResourceId>,
         limit: usize,
         after: Option<&str>,
-    ) -> Result<ProjectionSnapshot<ProjectionPage<Relation>>, StoreError> {
+    ) -> Result<ProjectionSnapshot<ProjectionPage<ProjectedRelation>>, StoreError> {
         validate_limit(limit)?;
         if resource_ids.len() > MAX_PROJECTION_PAGE_LIMIT {
             return Err(StoreError::Contract(
@@ -354,13 +361,13 @@ fn read_resource_detail(
 
     let mut relation_statement = connection
         .prepare(&format!(
-            "SELECT {RELATION_COLUMNS} FROM relations WHERE source_resource_id = ?1 OR target_resource_id = ?1 ORDER BY relation_id LIMIT ?2"
+            "SELECT {PROJECTED_RELATION_COLUMNS}, provider_connection.connector_type, configured_binding.created_at FROM relations r LEFT JOIN connections provider_connection ON r.evidence_type = 'provider' AND json_extract(r.evidence_json, '$.connection_id') = provider_connection.connection_id LEFT JOIN bindings configured_binding ON r.evidence_type = 'configured' AND json_extract(r.evidence_json, '$.binding_id') = configured_binding.binding_id WHERE r.source_resource_id = ?1 OR r.target_resource_id = ?1 ORDER BY r.relation_id LIMIT ?2"
         ))
         .map_err(StoreError::Sqlite)?;
     let relation_rows = relation_statement
         .query_map(
             params![resource_id.as_str(), (MAX_DETAIL_RELATIONS + 1) as i64],
-            read_relation,
+            read_projected_relation,
         )
         .map_err(StoreError::Sqlite)?;
     let mut relations = relation_rows
@@ -400,7 +407,7 @@ fn read_relations_for_resources(
     resource_ids: &BTreeSet<ResourceId>,
     limit: usize,
     after: Option<&str>,
-) -> Result<ProjectionPage<Relation>, StoreError> {
+) -> Result<ProjectionPage<ProjectedRelation>, StoreError> {
     if resource_ids.is_empty() {
         return Ok(ProjectionPage {
             items: Vec::new(),
@@ -409,7 +416,7 @@ fn read_relations_for_resources(
     }
     let placeholders = placeholders(resource_ids.len());
     let mut sql = format!(
-        "SELECT {RELATION_COLUMNS} FROM relations WHERE (source_resource_id IN ({placeholders}) OR target_resource_id IN ({placeholders}))"
+        "SELECT {PROJECTED_RELATION_COLUMNS}, provider_connection.connector_type, configured_binding.created_at FROM relations r LEFT JOIN connections provider_connection ON r.evidence_type = 'provider' AND json_extract(r.evidence_json, '$.connection_id') = provider_connection.connection_id LEFT JOIN bindings configured_binding ON r.evidence_type = 'configured' AND json_extract(r.evidence_json, '$.binding_id') = configured_binding.binding_id WHERE (r.source_resource_id IN ({placeholders}) OR r.target_resource_id IN ({placeholders}))"
     );
     let mut values = resource_ids
         .iter()
@@ -421,14 +428,14 @@ fn read_relations_for_resources(
         )
         .collect::<Vec<_>>();
     if let Some(after) = after {
-        sql.push_str(" AND relation_id > ?");
+        sql.push_str(" AND r.relation_id > ?");
         values.push(Value::Text(after.to_owned()));
     }
-    sql.push_str(" ORDER BY relation_id LIMIT ?");
+    sql.push_str(" ORDER BY r.relation_id LIMIT ?");
     values.push(Value::Integer((limit + 1) as i64));
     let mut statement = connection.prepare(&sql).map_err(StoreError::Sqlite)?;
     let rows = statement
-        .query_map(params_from_iter(values.iter()), read_relation)
+        .query_map(params_from_iter(values.iter()), read_projected_relation)
         .map_err(StoreError::Sqlite)?;
     let mut items = rows
         .collect::<Result<Vec<_>, _>>()
@@ -441,10 +448,28 @@ fn read_relations_for_resources(
         .then(|| {
             items
                 .last()
-                .map(|item| item.relation_id.as_str().to_owned())
+                .map(|item| item.relation.relation_id.as_str().to_owned())
         })
         .flatten();
     Ok(ProjectionPage { items, next_after })
+}
+
+fn read_projected_relation(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectedRelation> {
+    let relation = read_relation(row)?;
+    let provider_connector_type = row.get::<_, Option<String>>(9)?.map(wrapped).transpose()?;
+    let configured_created_at = row
+        .get::<_, Option<i64>>(10)?
+        .map(|value| {
+            Timestamp::from_unix_millis(value).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(10, Type::Integer, Box::new(error))
+            })
+        })
+        .transpose()?;
+    Ok(ProjectedRelation {
+        relation,
+        provider_connector_type,
+        configured_created_at,
+    })
 }
 
 fn read_resources_by_ids(

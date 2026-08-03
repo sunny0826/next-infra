@@ -1,8 +1,8 @@
 use next_infra_core::{
     BindingId, Confidence, ConnectionId, ConnectorHealth, ConnectorType, EvidenceType, FieldPath,
-    Freshness, Lifecycle, RelationEvidence, RelationKind, ResourceHealth, ResourceId, ResourceKind,
-    ResourceVersionId, RuleVersion, Scope, SecretBackend, SecretKind, SecretRef, SecretRefInput,
-    SecretValue, SyncCoverage, SyncCursor, SyncRunId, Timestamp,
+    Freshness, Lifecycle, RelationEvidence, RelationKind, RelationVersionId, ResourceHealth,
+    ResourceId, ResourceKind, ResourceVersionId, RuleVersion, Scope, SecretBackend, SecretKind,
+    SecretRef, SecretRefInput, SecretValue, SyncCoverage, SyncCursor, SyncRunId, Timestamp,
 };
 use std::any::TypeId;
 
@@ -77,6 +77,7 @@ fn relation_evidence_keeps_provenance_and_confidence_distinct() {
     let inferred = RelationEvidence::Inferred {
         rule_version: id("fixture-rule-v1", RuleVersion::new),
         input_resource_version_ids: vec![id("fixture-resource-version", ResourceVersionId::new)],
+        input_relation_version_ids: vec![id("fixture-relation-version", RelationVersionId::new)],
         confidence,
     };
 
@@ -91,6 +92,38 @@ fn relation_evidence_keeps_provenance_and_confidence_distinct() {
     assert_eq!(provider.confidence(), None);
     assert_eq!(configured.confidence(), None);
     assert_eq!(inferred.confidence(), Some(confidence));
+
+    let serialized = serde_json::to_value(&inferred).unwrap();
+    assert_eq!(
+        serialized["input_relation_version_ids"],
+        serde_json::json!(["fixture-relation-version"])
+    );
+}
+
+#[test]
+fn inferred_relation_evidence_defaults_relation_inputs_for_legacy_payloads() {
+    let legacy = serde_json::json!({
+        "type": "inferred",
+        "rule_version": "fixture-rule-v1",
+        "input_resource_version_ids": ["fixture-resource-version"],
+        "confidence": 8500,
+    });
+
+    let evidence: RelationEvidence = serde_json::from_value(legacy).unwrap();
+    match evidence {
+        RelationEvidence::Inferred {
+            input_resource_version_ids,
+            input_relation_version_ids,
+            ..
+        } => {
+            assert_eq!(
+                input_resource_version_ids,
+                vec![id("fixture-resource-version", ResourceVersionId::new)]
+            );
+            assert!(input_relation_version_ids.is_empty());
+        }
+        other => panic!("expected inferred evidence, got {other:?}"),
+    }
 }
 
 #[test]

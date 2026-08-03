@@ -1398,6 +1398,139 @@ mod tests {
     }
 
     #[test]
+    fn relation_projections_enrich_authoritative_metadata_without_inventing_values() {
+        let (_directory, mut store) = store();
+        store.upsert_connection(connection()).unwrap();
+        store
+            .start_sync_run(run(SyncRunStatus::Running, None))
+            .unwrap();
+
+        let mut source = resource();
+        source.resource_id = id("fixture-resource-source", ResourceId::new);
+        source.external_id = id("external-source", ExternalId::new);
+        let mut target = resource();
+        target.resource_id = id("fixture-resource-target", ResourceId::new);
+        target.external_id = id("external-target", ExternalId::new);
+
+        let mut provider = relation("fixture-run");
+        provider.relation_id = id("fixture-relation-provider", RelationId::new);
+        provider.source_resource_id = source.resource_id.clone();
+        provider.target_resource_id = target.resource_id.clone();
+        provider.evidence_key = id("fixture-evidence-provider", EvidenceKey::new);
+
+        let mut configured = provider.clone();
+        configured.relation_id = id("fixture-relation-configured", RelationId::new);
+        configured.evidence_key = id("fixture-evidence-configured", EvidenceKey::new);
+        configured.evidence = RelationEvidence::Configured {
+            binding_id: id("fixture-binding", BindingId::new),
+        };
+
+        let mut inferred = provider.clone();
+        inferred.relation_id = id("fixture-relation-inferred", RelationId::new);
+        inferred.evidence_key = id("fixture-evidence-inferred", EvidenceKey::new);
+        inferred.evidence = RelationEvidence::Inferred {
+            rule_version: id("fixture-rule-v1", RuleVersion::new),
+            input_resource_version_ids: Vec::new(),
+            input_relation_version_ids: vec![id(
+                "fixture-input-relation-version",
+                RelationVersionId::new,
+            )],
+            confidence: Confidence::from_basis_points(8_500).unwrap(),
+        };
+
+        store
+            .commit_sync(SyncCommit {
+                sync_run: run(SyncRunStatus::Succeeded, Some(timestamp_at(3))),
+                resources: vec![source.clone(), target],
+                resource_versions: Vec::new(),
+                relations: vec![provider, configured, inferred],
+                relation_versions: Vec::new(),
+                changes: Vec::new(),
+                cursor_after: Some(id("cursor-after", SyncCursor::new)),
+                missing_evidence: None,
+            })
+            .unwrap();
+        store
+            .connection
+            .execute(
+                "INSERT INTO bindings(binding_id, source_resource_id, target_resource_id, kind, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    "fixture-binding",
+                    source.resource_id.as_str(),
+                    "fixture-resource-target",
+                    "fixture.depends_on",
+                    "active",
+                    17_i64,
+                    18_i64,
+                ],
+            )
+            .unwrap();
+
+        let detail = store
+            .query_resource_detail(&source.resource_id)
+            .unwrap()
+            .body
+            .unwrap();
+        assert_eq!(detail.relations.len(), 3);
+
+        let provider = detail
+            .relations
+            .iter()
+            .find(|projected| {
+                matches!(
+                    projected.relation.evidence,
+                    RelationEvidence::Provider { .. }
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            provider.provider_connector_type,
+            Some(ConnectorType::new("fixture").unwrap())
+        );
+        assert_eq!(provider.configured_created_at, None);
+
+        let configured = detail
+            .relations
+            .iter()
+            .find(|projected| {
+                matches!(
+                    projected.relation.evidence,
+                    RelationEvidence::Configured { .. }
+                )
+            })
+            .unwrap();
+        assert_eq!(configured.provider_connector_type, None);
+        assert_eq!(configured.configured_created_at, Some(timestamp_at(17)));
+
+        let inferred = detail
+            .relations
+            .iter()
+            .find(|projected| {
+                matches!(
+                    projected.relation.evidence,
+                    RelationEvidence::Inferred { .. }
+                )
+            })
+            .unwrap();
+        assert_eq!(inferred.provider_connector_type, None);
+        assert_eq!(inferred.configured_created_at, None);
+
+        let frontier = store
+            .query_relations_for_resources(&BTreeSet::from([source.resource_id]), 10, None)
+            .unwrap();
+        assert_eq!(frontier.body.items.len(), 3);
+        assert_eq!(
+            frontier
+                .body
+                .items
+                .iter()
+                .filter(|projected| projected.provider_connector_type.is_some())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn projection_rejects_missing_freshness_context_and_invalid_bounds() {
         let (_directory, store) = query_projection_store();
         let base = ResourceProjectionPlan {
