@@ -138,6 +138,7 @@ fn relation() -> RelationDto {
         lifecycle: Lifecycle::Active,
         evidence_type: EvidenceType::Provider,
         evidence: RelationEvidenceDto::Provider {
+            connector_type: "fixture".into(),
             connection_id: "fixture-connection".into(),
             sync_run_id: "fixture-run".into(),
             field_path: "attributes.target".into(),

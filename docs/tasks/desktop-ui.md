@@ -132,6 +132,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 
 ### `UI-G3-02` — Evidence Spine
 
+- **状态：** `REVIEW`。
 - **目标：** 实现全页面共用的 Current Facts + Evidence Path Inspector。
 - **依赖：** QDTO、Mock Adapter；可与 Adapter wiring 并行使用 mock。
 - **独占路径：** Evidence Owner paths。
@@ -140,6 +141,7 @@ Goal 1 冻结实际 script 名后，用确定命令替换这些验证组；不�
 - **输入/输出：** Evidence DTO/view model → composable Inspector。
 - **验收：** configured 不伪造 SyncRun；inferred 显示 rule/input versions/confidence；相同 endpoints 的多 evidence 不丢失。
 - **验证：** `V-UI + V-VIEWPORT`。
+- **实现证据（2026-08-03）：** 已实现 Current Facts 与垂直 Evidence Path；Current Facts 分别显示 Health/Freshness/Lifecycle，provider evidence 显示 connector type/connection/sync run/field path，configured evidence 显示 Binding 与 created_at 且不伪造 SyncRun，inferred evidence 显示 rule、ResourceVersion/RelationVersion inputs 与 confidence；相同 endpoints 的多条 evidence 保留。4 项 focused component tests、Desktop 全部 40 项测试、lint 与 build 通过；最终三 viewport drawer 回归留给 `UI-G3-08`。
 - **风险/停止：** 页面不得复制 Spine；provenance 缺失时不在展示层猜测。
 
 ### `UI-G3-03` — Overview

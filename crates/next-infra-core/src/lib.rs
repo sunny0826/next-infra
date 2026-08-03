@@ -7,6 +7,7 @@ mod ids;
 mod missing_evidence;
 mod model;
 mod ports;
+mod secret;
 mod status;
 
 pub use coverage::*;
@@ -16,4 +17,5 @@ pub use ids::*;
 pub use missing_evidence::*;
 pub use model::*;
 pub use ports::*;
+pub use secret::*;
 pub use status::*;

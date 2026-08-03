@@ -132,6 +132,7 @@ impl StoreWriter for Store {
 
     fn upsert_connection(&mut self, connection: Connection) -> Result<(), Self::Error> {
         let config = serde_json::to_string(&connection.config).map_err(StoreError::Json)?;
+        let secret_ref = connection.secret_ref.as_ref().map(json_text).transpose()?;
         self.connection
             .execute(
                 "INSERT INTO connections(connection_id, connector_type, display_name, enabled, config_json, secret_ref, health, last_success_at, last_attempt_at, config_schema_version, deleted_at)
@@ -143,7 +144,7 @@ impl StoreWriter for Store {
                     connection.display_name,
                     connection.enabled,
                     config,
-                    connection.secret_ref.as_ref().map(SecretRef::as_str),
+                    secret_ref,
                     enum_text(&connection.health)?,
                     timestamp_option(connection.last_success_at),
                     timestamp_option(connection.last_attempt_at),
@@ -347,7 +348,7 @@ fn read_connection(row: &Row<'_>) -> rusqlite::Result<Connection> {
         display_name: row.get(2)?,
         enabled: row.get(3)?,
         config: json_value(row.get(4)?)?,
-        secret_ref: optional_wrapped(row.get(5)?)?,
+        secret_ref: optional_json(row.get(5)?)?,
         health: enum_value(row.get(6)?)?,
         last_success_at: optional_timestamp(row.get(7)?)?,
         last_attempt_at: optional_timestamp(row.get(8)?)?,
@@ -495,6 +496,10 @@ fn optional_wrapped<T: DeserializeOwned>(value: Option<String>) -> rusqlite::Res
     value.map(wrapped).transpose()
 }
 
+fn optional_json<T: DeserializeOwned>(value: Option<String>) -> rusqlite::Result<Option<T>> {
+    value.map(json).transpose()
+}
+
 fn enum_value<T: DeserializeOwned>(value: String) -> rusqlite::Result<T> {
     wrapped(value)
 }
@@ -590,6 +595,21 @@ mod tests {
             config_schema_version: SchemaVersion::new(1).unwrap(),
             deleted_at: None,
         }
+    }
+
+    fn secret_ref() -> SecretRef {
+        SecretRef::new(SecretRefInput {
+            backend: SecretBackend::MacosDataProtectionKeychainV1,
+            service: "dev.example.next-infra.provider-secret.v1".into(),
+            account: "connection/fixture-connection/kind/api-token/generation/fixture-generation"
+                .into(),
+            secret_kind: SecretKind::ApiToken,
+            generation_id: "fixture-generation".into(),
+            created_at: timestamp_at(1),
+            last_verified_at: timestamp_at(2),
+            permission_scope_summary: "fixture read-only scope".into(),
+        })
+        .unwrap()
     }
 
     fn run(status: SyncRunStatus, finished_at: Option<Timestamp>) -> SyncRun {
@@ -694,6 +714,30 @@ mod tests {
             id(scope, Scope::new),
             BTreeMap::from([(id(resource_id, ResourceId::new), count)]),
         )
+    }
+
+    #[test]
+    fn connection_round_trips_structured_secret_reference_without_secret_value() {
+        let (_directory, mut store) = store();
+        let mut connection = connection();
+        connection.secret_ref = Some(secret_ref());
+        store.upsert_connection(connection.clone()).unwrap();
+
+        let persisted = store
+            .get_connection(&connection.connection_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.secret_ref, connection.secret_ref);
+        let raw: String = store
+            .connection
+            .query_row(
+                "SELECT secret_ref FROM connections WHERE connection_id = ?1",
+                params![connection.connection_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(raw.contains("macos_data_protection_keychain_v1"));
+        assert!(!raw.contains("secret_value"));
     }
 
     #[test]

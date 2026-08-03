@@ -1,8 +1,8 @@
 use next_infra_core::{
     BindingId, Confidence, ConnectionId, ConnectorHealth, ConnectorType, EvidenceType, FieldPath,
     Freshness, Lifecycle, RelationEvidence, RelationKind, ResourceHealth, ResourceId, ResourceKind,
-    ResourceVersionId, RuleVersion, Scope, SecretRef, SecretValue, SyncCoverage, SyncCursor,
-    SyncRunId,
+    ResourceVersionId, RuleVersion, Scope, SecretBackend, SecretKind, SecretRef, SecretRefInput,
+    SecretValue, SyncCoverage, SyncCursor, SyncRunId, Timestamp,
 };
 use std::any::TypeId;
 
@@ -107,16 +107,29 @@ fn confidence_is_bounded_to_basis_points() {
 
 #[test]
 fn secret_values_are_redacted_and_separate_from_serializable_references() {
-    let secret_ref = SecretRef::new("fixture-keychain-reference").unwrap();
+    let secret_ref = SecretRef::new(SecretRefInput {
+        backend: SecretBackend::MacosDataProtectionKeychainV1,
+        service: "dev.example.next-infra.provider-secret.v1".into(),
+        account: "connection/fixture-connection/kind/api-token/generation/fixture-generation"
+            .into(),
+        secret_kind: SecretKind::ApiToken,
+        generation_id: "fixture-generation".into(),
+        created_at: Timestamp::from_unix_millis(1).unwrap(),
+        last_verified_at: Timestamp::from_unix_millis(2).unwrap(),
+        permission_scope_summary: "fixture read-only scope".into(),
+    })
+    .unwrap();
     let secret_value = SecretValue::new(b"fixture-sensitive-value".to_vec());
 
     assert_eq!(
         serde_json::to_string(&secret_ref).unwrap(),
-        r#""fixture-keychain-reference""#
+        r#"{"backend":"macos_data_protection_keychain_v1","service":"dev.example.next-infra.provider-secret.v1","account":"connection/fixture-connection/kind/api-token/generation/fixture-generation","secret_kind":"api_token","generation_id":"fixture-generation","created_at":1,"last_verified_at":2,"permission_scope_summary":"fixture read-only scope"}"#
     );
     assert_eq!(secret_value.expose(), b"fixture-sensitive-value");
     assert_eq!(format!("{secret_value:?}"), "SecretValue([REDACTED])");
     assert!(!format!("{secret_value:?}").contains("fixture-sensitive-value"));
+    assert!(!format!("{secret_ref:?}").contains("dev.example.next-infra"));
+    assert!(!format!("{secret_ref:?}").contains("fixture read-only scope"));
     assert_ne!(TypeId::of::<SecretRef>(), TypeId::of::<SecretValue>());
 }
 

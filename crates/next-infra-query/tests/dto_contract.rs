@@ -164,6 +164,7 @@ fn dto_shapes_are_stable_and_clean() {
         lifecycle: Lifecycle::Active,
         evidence_type: EvidenceType::Provider,
         evidence: next_infra_query::dto::RelationEvidenceDto::Provider {
+            connector_type: "github".to_owned(),
             connection_id: "connection-1".to_owned(),
             sync_run_id: "sync-run-1".to_owned(),
             field_path: "attributes.target".to_owned(),

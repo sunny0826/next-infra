@@ -108,6 +108,8 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 2. [Connector 与 Provider](./connectors.md)
 3. [Desktop UI](./desktop-ui.md)
 4. [独立 Review 报告](./REVIEW-2026-08-02.md)
+5. [Goal 3 Luna Worker 并行调度计划](./G3-LUNA-DISPATCH-2026-08-03.md)
+6. [Goal 3 波次 A 阶段报告](./G3-WAVE-A-2026-08-03.md)
 
 ## 6. 设计决策包
 

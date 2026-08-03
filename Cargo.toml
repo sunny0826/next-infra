@@ -50,3 +50,8 @@ async-trait = { version = "=0.1.91" }
 rusqlite = { version = "=0.39.0", features = ["bundled"] }
 tempfile = { version = "=3.27.0" }
 sha2 = { version = "=0.11.0" }
+core-foundation = { version = "=0.10.1" }
+objc2 = { version = "=0.6.4" }
+objc2-local-authentication = { version = "=0.3.2", default-features = false, features = ["std", "LAContext"] }
+security-framework = { version = "=3.7.0", features = ["OSX_10_15"] }
+security-framework-sys = { version = "=2.17.0", features = ["OSX_10_15"] }

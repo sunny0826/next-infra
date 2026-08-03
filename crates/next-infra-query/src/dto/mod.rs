@@ -130,16 +130,19 @@ pub enum EvidenceType {
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
 pub enum RelationEvidenceDto {
     Provider {
+        connector_type: String,
         connection_id: String,
         sync_run_id: String,
         field_path: String,
     },
     Configured {
         binding_id: String,
+        created_at: String,
     },
     Inferred {
         rule_version: String,
         input_resource_version_ids: Vec<String>,
+        input_relation_version_ids: Vec<String>,
         confidence_basis_points: u16,
     },
 }

@@ -3,4 +3,4 @@
 /**
  * Evidence details needed by the shared inspector without exposing provider payloads.
  */
-export type RelationEvidenceDto = { "type": "provider", connection_id: string, sync_run_id: string, field_path: string, } | { "type": "configured", binding_id: string, } | { "type": "inferred", rule_version: string, input_resource_version_ids: Array<string>, confidence_basis_points: number, };
+export type RelationEvidenceDto = { "type": "provider", connector_type: string, connection_id: string, sync_run_id: string, field_path: string, } | { "type": "configured", binding_id: string, created_at: string, } | { "type": "inferred", rule_version: string, input_resource_version_ids: Array<string>, input_relation_version_ids: Array<string>, confidence_basis_points: number, };

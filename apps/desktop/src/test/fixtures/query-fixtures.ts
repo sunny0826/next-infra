@@ -67,16 +67,22 @@ function relation(
     evidenceType === "provider"
       ? {
           type: "provider",
+          connector_type: "fixture",
           connection_id: "fixture-connection-alpha",
           sync_run_id: "fixture-sync-run-complete",
           field_path: "attributes.target",
         }
       : evidenceType === "configured"
-        ? { type: "configured", binding_id: "fixture-binding-alpha-beta" }
+        ? {
+            type: "configured",
+            binding_id: "fixture-binding-alpha-beta",
+            created_at: "1999-12-31T23:58:00Z",
+          }
         : {
             type: "inferred",
             rule_version: "fixture-rule-v1",
             input_resource_version_ids: ["fixture-resource-version-alpha"],
+            input_relation_version_ids: ["fixture-relation-version-alpha"],
             confidence_basis_points: 9200,
           };
   return {

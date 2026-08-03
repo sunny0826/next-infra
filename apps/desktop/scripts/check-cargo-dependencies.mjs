@@ -51,10 +51,10 @@ const allowedNormal = new Map([
   ["next-infra-connector-catalog", ["next-infra-connector-api", "next-infra-core"]],
   ["next-infra-sync", ["next-infra-connector-api", "next-infra-core", "next-infra-normalizer"]],
   ["next-infra-query", ["next-infra-core"]],
-  ["next-infra-runtime", ["next-infra-connector-catalog", "next-infra-query", "next-infra-store", "next-infra-sync"]],
+  ["next-infra-runtime", ["next-infra-connector-catalog", "next-infra-core", "next-infra-query", "next-infra-store", "next-infra-sync"]],
   ["next-infra-local-rpc", ["next-infra-query"]],
   ["next-infra-mcp", ["next-infra-local-rpc"]],
-  ["next-infra-desktop-adapter", ["next-infra-local-rpc", "next-infra-query", "next-infra-runtime"]],
+  ["next-infra-desktop-adapter", ["next-infra-core", "next-infra-local-rpc", "next-infra-query", "next-infra-runtime"]],
   ["next-infra-mcp-bridge", ["next-infra-mcp"]],
   [
     "next-infra-store-sync-integration",

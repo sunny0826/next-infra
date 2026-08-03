@@ -41,6 +41,7 @@ export function createDesktopAdapterSnapshotFixture(): DesktopAdapterSnapshot {
         evidence_type: "provider",
         evidence: {
           type: "provider",
+          connector_type: "fixture",
           connection_id: "fixture-connection-alpha",
           sync_run_id: "fixture-sync-run-alpha",
           field_path: "attributes.target",

@@ -53,7 +53,6 @@ string_value!(RelationVersionId);
 string_value!(BindingId);
 string_value!(SyncRunId);
 string_value!(ChangeId);
-string_value!(SecretRef);
 string_value!(ExternalId);
 string_value!(Scope);
 string_value!(Fingerprint);
