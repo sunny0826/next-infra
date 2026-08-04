@@ -7,7 +7,7 @@ import {
   rm,
   stat,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -24,6 +24,11 @@ const appBundle = path.join(
   "target/release/bundle/macos/Next Infra.app",
 );
 const requestedExecutable = process.env.NEXT_INFRA_SMOKE_EXECUTABLE;
+const verifyExplicitQuit = process.env.NEXT_INFRA_SMOKE_EXPLICIT_QUIT === "1";
+const userQuitMarker = path.join(
+  homedir(),
+  "Library/Application Support/dev.guoxudong.next-infra.dev/state/user-quit-v1.json",
+);
 const appExecutable = requestedExecutable
   ? path.resolve(requestedExecutable)
   : path.join(appBundle, "Contents/MacOS/next-infra");
@@ -177,6 +182,30 @@ async function launchSecondInstanceAndWaitForExit() {
       resolve();
     });
   });
+}
+
+async function verifyTrayQuit(pid) {
+  if (await pathExists(userQuitMarker)) {
+    throw new Error(`refusing to overwrite preexisting user_quit marker: ${userQuitMarker}`);
+  }
+  await run("/usr/bin/osascript", [
+    "-e",
+    'tell application "System Events" to tell process "next-infra" to click menu bar item 1 of menu bar 2',
+    "-e",
+    "delay 0.2",
+    "-e",
+    'tell application "System Events" to tell process "next-infra" to click menu item "Quit Next Infra" of menu 1 of menu bar item 1 of menu bar 2',
+  ]);
+  const deadline = performance.now() + pollTimeoutMs;
+  while (performance.now() < deadline && (await exactCommandForPid(pid))) {
+    await delay(pollIntervalMs);
+  }
+  if (await exactCommandForPid(pid)) throw new Error(`PID ${pid} did not exit after tray Quit`);
+  const marker = JSON.parse(await readFile(userQuitMarker, "utf8"));
+  if (marker.schema_version !== 1 || marker.user_quit !== true) {
+    throw new Error("tray Quit wrote an invalid user_quit marker");
+  }
+  await rm(userQuitMarker);
 }
 
 async function validatePng(candidate, windowBounds) {
@@ -396,6 +425,12 @@ async function smoke() {
       performance.now() + pollTimeoutMs,
     );
     console.log("[lifecycle] second instance exited and restored the first window");
+
+    if (verifyExplicitQuit) {
+      await verifyTrayQuit(launchedPid);
+      console.log("[lifecycle] tray Quit wrote the marker, stopped Runtime, and exited");
+      launchedPid = null;
+    }
   }
   console.log(
     "[visual] OCR is intentionally not asserted; inspect the retained screenshot for Next Infra, Overview, and Goal 1 placeholder",
