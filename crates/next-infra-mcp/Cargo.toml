@@ -7,3 +7,11 @@ publish.workspace = true
 
 [dependencies]
 next-infra-local-rpc = { workspace = true }
+rmcp = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

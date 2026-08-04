@@ -46,6 +46,9 @@ tauri-plugin-opener = { version = "=2.5.4" }
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = { version = "=1.0.151" }
 libc = { version = "=0.2.189" }
+rmcp = { version = "=3.1.0", default-features = false, features = ["server", "macros", "transport-io"] }
+schemars = { version = "=1.2.2" }
+tokio = { version = "=1.53.1", features = ["rt", "macros", "io-std", "sync"] }
 ts-rs = { version = "=12.0.1" }
 async-trait = { version = "=0.1.91" }
 rusqlite = { version = "=0.39.0", features = ["bundled"] }

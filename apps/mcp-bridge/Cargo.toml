@@ -11,3 +11,4 @@ path = "src/main.rs"
 
 [dependencies]
 next-infra-mcp = { workspace = true }
+tokio = { workspace = true }

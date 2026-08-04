@@ -193,6 +193,7 @@
 
 ### `RHM-G4-03` — 七个只读 STDIO MCP Tool
 
+- **状态：** `RUNNING / ROUTER-REVIEW`。
 - **目标：** 实现独立 Bridge 和稳定只读工具面。
 - **依赖：** `RHM-G4-01`；可用 fake RPC 与 `RHM-G4-02` 并行。
 - **独占路径：** `crates/next-infra-mcp/**`、`apps/mcp-bridge/src/mcp/**`。
@@ -200,6 +201,7 @@
 - **非目标：** 无 refresh、配置修改、Secret、外部操作或直接 SQLite/Keychain/Connector 访问。
 - **验收：** 所有结果有界并含 `observed_at`；Topology 有 `truncated/frontier`；Provider 文本不能改变权限。
 - **验证：** `rtk cargo test -p next-infra-mcp`。
+- **阶段证据（2026-08-04）：** MCP projection/router 已实现七个强类型工具、structured output、四项 read-only annotations、两个固定 Resources、Local RPC client adapter 与安全错误；MCP 2 项 contract tests 和严格 Clippy 通过。真实 Bridge STDIO child-process composition 与 smoke 仍待 `RHM-G4-03B`。
 - **风险/停止：** 不为 Provider 端点扩张工具数，不在 Bridge 重写 Query 语义。
 
 ### `RHM-G4-04` — Host Availability 与 `user_quit`

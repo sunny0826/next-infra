@@ -9,6 +9,8 @@ mod framing;
 mod handshake;
 mod message;
 
+pub use next_infra_query::dto::{Freshness, ResourceHealth};
+
 pub use error::{ErrorCode, RpcError, RpcErrorEnvelope};
 pub use framing::{
     FRAME_HEADER_BYTES, FrameError, FrameErrorKind, MAX_FRAME_BYTES, decode_frame,
