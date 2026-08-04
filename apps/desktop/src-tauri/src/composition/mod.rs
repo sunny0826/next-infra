@@ -28,6 +28,7 @@ pub struct AppState {
     query: DesktopQueryAdapter<CommittedQuerySource>,
     settings: Mutex<LocalSettings>,
     settings_path: PathBuf,
+    user_quit_path: PathBuf,
 }
 
 impl AppState {
@@ -53,11 +54,30 @@ impl AppState {
             query,
             settings: Mutex::new(settings),
             settings_path,
+            user_quit_path: data_directory.join("state").join("user-quit-v1.json"),
         })
     }
 
     pub fn runtime(&self) -> &Mutex<DesktopRuntime> {
         &self.runtime
+    }
+
+    pub fn persist_user_quit_and_stop(&self) -> Result<(), String> {
+        let parent = self
+            .user_quit_path
+            .parent()
+            .ok_or("user quit path unavailable")?;
+        fs::create_dir_all(parent).map_err(|_| "user quit marker unavailable")?;
+        let temporary = self.user_quit_path.with_extension("json.tmp");
+        fs::write(&temporary, br#"{"schema_version":1,"user_quit":true}"#)
+            .and_then(|_| fs::rename(&temporary, &self.user_quit_path))
+            .map_err(|_| "user quit marker unavailable")?;
+        self.runtime
+            .lock()
+            .map_err(|_| "desktop runtime unavailable")?
+            .stop()
+            .map_err(|_| "desktop runtime unavailable")?;
+        Ok(())
     }
 }
 
@@ -240,5 +260,11 @@ mod tests {
         };
         persist_settings(&state.settings_path, &updated).unwrap();
         assert_eq!(load_settings(&state.settings_path).unwrap(), updated);
+        state.persist_user_quit_and_stop().unwrap();
+        assert!(state.user_quit_path.exists());
+        assert_eq!(
+            state.runtime().lock().unwrap().state(),
+            next_infra_runtime::RuntimeState::Stopped
+        );
     }
 }
