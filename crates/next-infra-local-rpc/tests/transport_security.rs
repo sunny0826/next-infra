@@ -6,8 +6,9 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 
 use next_infra_local_rpc::transport::{
-    LOCK_FILE_MODE, RUN_DIR_MODE, SOCKET_MODE, SecureUnixListener, TransportPaths, connect_unix,
-    current_euid, read_frame, read_json_frame, verify_peer_uid, verify_peer_uid_with, write_frame,
+    LOCK_FILE_MODE, RUN_DIR_MODE, SOCKET_MODE, SecureUnixListener, TransportPaths, connect_secure,
+    connect_unix, current_euid, read_frame, read_json_frame, verify_peer_uid, verify_peer_uid_with,
+    write_frame,
 };
 use serde_json::{Value, json};
 use tempfile::tempdir;
@@ -176,6 +177,8 @@ fn client_connect_revalidates_owner_only_socket_path() {
     let stream = connect_unix(&paths).unwrap();
     verify_peer_uid(&stream).unwrap();
     drop(stream);
+
+    drop(connect_secure(&paths).unwrap());
 
     fs::set_permissions(paths.socket_path(), fs::Permissions::from_mode(0o666)).unwrap();
     assert!(connect_unix(&paths).is_err());

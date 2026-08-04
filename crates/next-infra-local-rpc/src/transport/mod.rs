@@ -5,6 +5,9 @@
 //! stream framing used by the frozen protocol codec.  Session negotiation and
 //! query dispatch live above this module.
 
+use std::borrow::Borrow;
+use std::os::unix::net::UnixStream;
+
 mod framed;
 mod path;
 mod peer;
@@ -63,4 +66,11 @@ impl From<FramedError> for TransportError {
     fn from(error: FramedError) -> Self {
         Self::Frame(error)
     }
+}
+
+/// Connect to the validated endpoint and verify the server's peer uid.
+pub fn connect_secure(paths: impl Borrow<TransportPaths>) -> Result<UnixStream, TransportError> {
+    let stream = connect_unix(paths).map_err(TransportError::Socket)?;
+    verify_peer_uid(&stream).map_err(TransportError::Peer)?;
+    Ok(stream)
 }
