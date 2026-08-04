@@ -1,4 +1,5 @@
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -6,6 +7,7 @@ use next_infra_local_rpc::protocol::{
     Caller, QueryRequest, QueryResponse, RequestEnvelope, ResponseBody,
 };
 use next_infra_local_rpc::session::RpcClient;
+use next_infra_local_rpc::transport::TransportPaths;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpBridgeError {
@@ -57,6 +59,34 @@ impl LocalRpcMcpClient {
             caller: Caller::bridge(bridge_version, release_id),
             next_request_id: AtomicU64::new(1),
         }
+    }
+
+    pub fn connect_run_dir(
+        run_dir: impl Into<PathBuf>,
+        bridge_version: impl Into<String>,
+        release_id: impl Into<String>,
+    ) -> Result<Self, McpBridgeError> {
+        let bridge_version = bridge_version.into();
+        let release_id = release_id.into();
+        let paths = TransportPaths::existing(run_dir).map_err(|_| {
+            McpBridgeError::new(
+                "host_unavailable",
+                "Next Infra is not running or its local endpoint is unavailable.",
+                true,
+            )
+        })?;
+        let hello = next_infra_local_rpc::protocol::ClientHello::initial(
+            bridge_version.clone(),
+            release_id.clone(),
+        );
+        let client = RpcClient::connect(&paths, &hello).map_err(|_| {
+            McpBridgeError::new(
+                "host_unavailable",
+                "Next Infra did not accept the local read-only session.",
+                true,
+            )
+        })?;
+        Ok(Self::new(client, bridge_version, release_id))
     }
 }
 

@@ -82,7 +82,9 @@ const allowedNormal = new Map([
   ],
 ]);
 
-const allowedDev = new Map();
+const allowedDev = new Map([
+  ["next-infra-mcp-bridge", ["next-infra-local-rpc"]],
+]);
 
 function internalDependencies(item, kind) {
   return [

@@ -251,6 +251,18 @@ impl TransportPaths {
         Self::new(root.as_ref().join("run"))
     }
 
+    /// Open an already provisioned run directory without creating filesystem
+    /// state. This is the Bridge/client path; only the Host may provision it.
+    pub fn existing(run_dir: impl Into<PathBuf>) -> Result<Self, TransportPathError> {
+        let run_dir = run_dir.into();
+        validate_existing_run_dir(&run_dir)?;
+        Ok(Self::from_validated_run_dir(run_dir))
+    }
+
+    pub fn from_existing_root(root: impl AsRef<Path>) -> Result<Self, TransportPathError> {
+        Self::existing(root.as_ref().join("run"))
+    }
+
     pub fn run_dir(&self) -> &Path {
         &self.run_dir
     }
@@ -530,6 +542,22 @@ fn ensure_run_dir(path: &Path) -> Result<(), TransportPathError> {
         != FileIdentity::from_metadata(&metadata)
     {
         return Err(TransportPathError::invalid(path, PathViolation::Replaced));
+    }
+    validate_metadata(path, &metadata, ExpectedType::Directory, RUN_DIR_MODE)
+}
+
+fn validate_existing_run_dir(path: &Path) -> Result<(), TransportPathError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(TransportPathError::Missing {
+                path: path.to_path_buf(),
+            });
+        }
+        Err(error) => return Err(TransportPathError::io(path, error)),
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(TransportPathError::invalid(path, PathViolation::Symlink));
     }
     validate_metadata(path, &metadata, ExpectedType::Directory, RUN_DIR_MODE)
 }

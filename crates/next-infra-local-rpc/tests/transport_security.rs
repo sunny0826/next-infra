@@ -43,6 +43,20 @@ fn paths_lock_and_socket_have_owner_only_permissions() {
 }
 
 #[test]
+fn client_existing_paths_never_create_missing_run_directory() {
+    let root = tempdir().unwrap();
+    let run_dir = root.path().join("run");
+    assert!(TransportPaths::from_existing_root(root.path()).is_err());
+    assert!(!run_dir.exists());
+
+    let provisioned = TransportPaths::from_root(root.path()).unwrap();
+    assert_eq!(
+        TransportPaths::from_existing_root(root.path()).unwrap(),
+        provisioned
+    );
+}
+
+#[test]
 fn stale_socket_is_removed_only_after_refused_connect() {
     let root = tempdir().unwrap();
     let paths = TransportPaths::from_root(root.path()).unwrap();

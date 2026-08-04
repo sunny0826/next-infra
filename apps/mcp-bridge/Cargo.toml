@@ -12,3 +12,8 @@ path = "src/main.rs"
 [dependencies]
 next-infra-mcp = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+next-infra-local-rpc = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
