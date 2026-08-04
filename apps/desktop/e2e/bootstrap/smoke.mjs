@@ -1,4 +1,4 @@
-import { execFile as execFileCallback } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import {
   access,
   lstat,
@@ -23,7 +23,10 @@ const appBundle = path.join(
   repositoryRoot,
   "target/release/bundle/macos/Next Infra.app",
 );
-const appExecutable = path.join(appBundle, "Contents/MacOS/next-infra");
+const requestedExecutable = process.env.NEXT_INFRA_SMOKE_EXECUTABLE;
+const appExecutable = requestedExecutable
+  ? path.resolve(requestedExecutable)
+  : path.join(appBundle, "Contents/MacOS/next-infra");
 const probeSource = path.join(scriptDirectory, "window_probe.swift");
 const requestedScreenshot = process.env.NEXT_INFRA_SMOKE_SCREENSHOT;
 const screenshotPath = requestedScreenshot
@@ -308,8 +311,14 @@ async function smoke() {
   );
 
   const deadline = performance.now() + pollTimeoutMs;
-  await run("/usr/bin/open", ["-n", appBundle]);
-  launchedPid = await waitForNewPid(preexistingPids, deadline);
+  if (requestedExecutable) {
+    const child = spawn(appExecutable, [], { detached: true, stdio: "ignore" });
+    child.unref();
+    launchedPid = child.pid;
+  } else {
+    await run("/usr/bin/open", ["-n", appBundle]);
+    launchedPid = await waitForNewPid(preexistingPids, deadline);
+  }
   console.log(`[launch] selected new bundle PID: ${launchedPid}`);
 
   const probe = await probeWindow(probeExecutable, launchedPid, deadline);
