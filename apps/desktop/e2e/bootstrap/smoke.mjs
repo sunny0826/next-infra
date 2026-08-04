@@ -152,6 +152,33 @@ async function probeWindow(probeExecutable, pid, deadline) {
   );
 }
 
+async function waitForHiddenWindow(probeExecutable, pid, deadline) {
+  while (performance.now() < deadline) {
+    if (!(await exactCommandForPid(pid))) {
+      throw new Error(`PID ${pid} exited instead of hiding its window`);
+    }
+    const { stdout } = await run(probeExecutable, [String(pid)]);
+    if (!JSON.parse(stdout).window) return;
+    await delay(pollIntervalMs);
+  }
+  throw new Error(`PID ${pid} did not hide its main window`);
+}
+
+async function launchSecondInstanceAndWaitForExit() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(appExecutable, [], { stdio: "ignore" });
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("second instance did not exit after activation request"));
+    }, pollTimeoutMs);
+    child.once("error", reject);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 async function validatePng(candidate, windowBounds) {
   const [contents, fileStats] = await Promise.all([
     readFile(candidate),
@@ -292,6 +319,8 @@ async function smoke() {
     "-framework",
     "AppKit",
     "-framework",
+    "ApplicationServices",
+    "-framework",
     "CoreGraphics",
     "-framework",
     "ImageIO",
@@ -350,6 +379,24 @@ async function smoke() {
   console.log(
     `[screenshot] mode=${captureMode} ${screenshotPath} (${png.width}x${png.height}, ${png.bytes} bytes)`,
   );
+
+  if (requestedExecutable) {
+    await run(probeExecutable, ["close", String(launchedPid)]);
+    await waitForHiddenWindow(
+      probeExecutable,
+      launchedPid,
+      performance.now() + pollTimeoutMs,
+    );
+    console.log("[lifecycle] close request hid the window and kept Runtime alive");
+
+    await launchSecondInstanceAndWaitForExit();
+    await probeWindow(
+      probeExecutable,
+      launchedPid,
+      performance.now() + pollTimeoutMs,
+    );
+    console.log("[lifecycle] second instance exited and restored the first window");
+  }
   console.log(
     "[visual] OCR is intentionally not asserted; inspect the retained screenshot for Next Infra, Overview, and Goal 1 placeholder",
   );

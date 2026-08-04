@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -18,6 +19,41 @@ private func emit(_ value: [String: Any]) {
     }
 
     print(json)
+}
+
+if CommandLine.arguments.count == 3,
+   CommandLine.arguments[1] == "close",
+   let requestedPid = Int32(CommandLine.arguments[2]),
+   requestedPid > 0
+{
+    guard AXIsProcessTrusted() else {
+        fail("Accessibility permission is required to close the app window")
+    }
+    let application = AXUIElementCreateApplication(requestedPid)
+    var windowsValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+        application,
+        kAXWindowsAttribute as CFString,
+        &windowsValue
+    ) == .success,
+    let windows = windowsValue as? [AXUIElement],
+    let window = windows.first
+    else {
+        fail("could not resolve app window through Accessibility")
+    }
+    var buttonValue: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(
+        window,
+        kAXCloseButtonAttribute as CFString,
+        &buttonValue
+    ) == .success,
+    let button = buttonValue as! AXUIElement?,
+    AXUIElementPerformAction(button, kAXPressAction as CFString) == .success
+    else {
+        fail("could not press app close button")
+    }
+    emit(["closed": true])
+    exit(0)
 }
 
 if CommandLine.arguments.count == 4,
