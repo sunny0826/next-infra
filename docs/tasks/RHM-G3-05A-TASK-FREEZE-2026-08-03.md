@@ -1,13 +1,12 @@
 # RHM-G3-05A：Composition State 与 Command Registration 任务冻结
 
 **日期：** 2026-08-03  
-**状态：** `DECISION REQUIRED`  
+**状态：** `ACCEPTED`（2026-08-04）
 **范围：** Goal 3 Desktop Composition 的只读任务冻结；本文件不代表实现已完成。
 
-本冻结基于 `RHM-G3-05P0/P1/P2A/P2B`、`UI-G3-01`、Host lifecycle review 和 Keychain review。目标是让一个 Composition Captain 能在不创建第二个 SQLite owner、不伪造 Manual Sync 成功、不扩大 Secret 边界的前提下实现唯一 `AppState`。在下列决策关闭前，不派发 05A 实现：
+本冻结基于 `RHM-G3-05P0/P1/P2A/P2B`、`UI-G3-01`、Host lifecycle review 和 Keychain review。目标是让一个 Composition Captain 能在不创建第二个 SQLite owner、不伪造 Manual Sync 成功、不扩大 Secret 边界的前提下实现唯一 `AppState`。
 
-1. `SharedStore::open(path)` 是否作为 Runtime 的小构造器落地。
-2. Manual Sync 是先安全禁用，还是先补 Runtime admission queue/consumer。
+两个决策已于 2026-08-04 关闭：Runtime 使用 `SharedStore::open(path)`；Goal 3 Manual Sync 安全禁用，capability 为 false，command 返回 unavailable，禁止伪造成功。
 
 证据入口：[`DEC-G3-01`](../design/decisions/DEC-G3-01-committed-query-source.md)、[`RHM-G3-05P2A`](./RHM-G3-05P2A-2026-08-03.md)、[`RHM-G3-05P2B`](./RHM-G3-05P2B-2026-08-03.md)、[`UI-G3-01`](./UI-G3-01-2026-08-03.md)、[`DEC-G1-02`](../design/decisions/DEC-G1-02-desktop-lifecycle.md)。
 

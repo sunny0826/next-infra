@@ -35,7 +35,7 @@ flowchart LR
 
 ### 2.1 唯一物理 Store
 
-- Composition 只调用一次 `Store::open`。
+- Composition 只调用一次 Runtime 暴露的 `SharedStore::open(path)`；该构造器内部只调用一次 `Store::open`。
 - `SharedStore` 是 Runtime crate 中的同步 wrapper，内部为 `Arc<Mutex<Store>>`；clone 只复制 handle，不创建 connection。
 - `SqliteRuntimeBackend` 改为持有 `SyncEngine<SharedStore>`。
 - `CommittedQuerySource` 持有同一个 `SharedStore` clone。
