@@ -127,6 +127,10 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 21. [RHM-G3-05P2B Committed QuerySource 验收记录](./RHM-G3-05P2B-2026-08-03.md)
 22. [RHM-G3-05A Composition State 与 Command Registration 任务冻结](./RHM-G3-05A-TASK-FREEZE-2026-08-03.md)
 23. [RHM-G3-05A Desktop Composition 验收记录](./RHM-G3-05A-2026-08-04.md)
+24. [RHM-G3-05B Native Host Effects 验收记录](./RHM-G3-05B-2026-08-04.md)
+25. [RHM-G3-05R Composition Review](./RHM-G3-05R-2026-08-04.md)
+26. [UI-G3-09 Real Desktop Lifecycle QA](./UI-G3-09-2026-08-04.md)
+27. [GATE-G3 纵切验收](./GATE-G3-2026-08-04.md)
 
 ## 6. 设计决策包
 

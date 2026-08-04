@@ -172,7 +172,7 @@ rtk git diff --check
 
 ### `RHM-G3-05B` — Native Host Effects 与 Lifecycle Wiring
 
-- **状态：** `READY`，`RHM-G3-05A` 已进入 `REVIEW`。
+- **状态：** `REVIEW`；验收见 [`RHM-G3-05B`](./RHM-G3-05B-2026-08-04.md)。
 - **唯一目标：** 将已 Review 的 Host state machine 接到真实 Tauri effects：single instance、close→hide、tray/Dock restore、window recreate/focus、autostart capability、explicit quit。
 - **建议独占路径：** `apps/desktop/src-tauri/src/host/effects/**`、`src-tauri/src/main.rs`、Tauri config/capabilities；仍由同一 Composition Captain 串行执行。
 - **必须保持：** WebView reload 不重启 Runtime；crash 不写 `user_quit`；Quit 顺序为 marker → Writer drain → WAL checkpoint → Runtime stop。
@@ -180,21 +180,21 @@ rtk git diff --check
 
 ### `RHM-G3-05R` — Composition Review
 
-- **状态：** `WAITING`。
+- **状态：** `REVIEW`；见 [`RHM-G3-05R`](./RHM-G3-05R-2026-08-04.md)。
 - **通过条件：** Rust workspace tests/strict Clippy、Desktop test/lint/build、真实 unsigned local bundle boundary，以及可观察的唯一 Runtime/Writer/DB owner。Apple Development Keychain smoke 若仍无身份，继续标记 `LIVE-SMOKE-BLOCKED-ENVIRONMENT`，不得用 ad-hoc 替代。
 
 ## 6. Wave D：真实 Desktop QA 与 Gate
 
 ### `UI-G3-09` — Real Desktop Lifecycle QA
 
-- **状态：** `WAITING`，等待 `UI-G3-08A/B` 与 `RHM-G3-05R`。
+- **状态：** `REVIEW`；见 [`UI-G3-09`](./UI-G3-09-2026-08-04.md)。
 - **独占路径：** `apps/desktop/e2e/desktop/**`。
 - **覆盖：** close→hide、后台 Runtime continue、restore re-query、second-instance activation、explicit quit、`user_quit`、WebView reload、唯一 DB owner。
 - **限制：** 浏览器/Vite smoke 不能替代真实 App；QA 不直接修 Host/Adapter/page/config。
 
 ### `GATE-G3`
 
-只有 `UI-G3-07R`、`UI-G3-08A/B`、`RHM-G3-05R`、`UI-G3-09` 全部进入 `REVIEW` 后才派 Gate Captain。Gate 未通过前，不创建任何 Goal 4 任务实现。
+`UI-G3-07R`、`UI-G3-08A/B`、`RHM-G3-05R`、`UI-G3-09` 已全部进入 `REVIEW`；`GATE-G3` 于 2026-08-04 通过。
 
 ## 7. 推荐下一次实际派发
 
