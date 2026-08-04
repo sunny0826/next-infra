@@ -90,12 +90,33 @@ impl AppState {
             .map_err(|_| "desktop runtime unavailable")?;
         Ok(())
     }
+
+    pub fn handle_sleep(&self) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            let _ = runtime.sleep();
+        }
+    }
+
+    pub fn handle_wake(&self) {
+        let Ok(at) = now() else { return };
+        if let Ok(mut runtime) = self.runtime.lock() {
+            let _ = runtime.wake(at);
+        }
+    }
+
+    pub fn handle_power_off(&self) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            let _ = runtime.stop();
+        }
+    }
 }
 
 pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let data_directory = app.path().app_data_dir()?;
     let state = AppState::open(&data_directory).map_err(std::io::Error::other)?;
     app.manage(state);
+    crate::host::effects::install_workspace_observers(app.app_handle())
+        .map_err(std::io::Error::other)?;
     let show = MenuItem::with_id(app, "show", "Show Next Infra", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Next Infra", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;

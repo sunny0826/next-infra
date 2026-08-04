@@ -2222,12 +2222,15 @@ dependencies = [
 name = "next-infra-desktop-adapter"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "core-foundation",
  "next-infra-core",
  "next-infra-local-rpc",
  "next-infra-query",
  "next-infra-runtime",
  "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "objc2-local-authentication",
  "security-framework",
  "security-framework-sys",
