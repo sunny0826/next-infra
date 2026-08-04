@@ -1,0 +1,1 @@
+{"type":"rejected","data":{"error":{"code":"capability_mismatch","message":"host does not support required capability query.get_health_summary.v1","retryable":false}}}

@@ -288,15 +288,58 @@ pub struct HandshakeResult {
     pub upgrade_recommended: bool,
 }
 
+/// The first response sent by a Host after receiving ClientHello.
+///
+/// A rejected handshake has no request ID because request envelopes are not
+/// admitted until this response is accepted.  The accepted variant carries
+/// the authoritative HostHello (whose `selected_protocol_minor` is the
+/// negotiated minor) and only the additional upgrade recommendation bit.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub enum HandshakeResponse {
+    Accepted {
+        host: HostHello,
+        upgrade_recommended: bool,
+    },
+    Rejected {
+        error: RpcError,
+    },
+}
+
+impl HandshakeResponse {
+    pub fn accepted(host: HostHello, upgrade_recommended: bool) -> Self {
+        Self::Accepted {
+            host,
+            upgrade_recommended,
+        }
+    }
+
+    pub fn rejected(error: RpcError) -> Self {
+        Self::Rejected { error }
+    }
+
+    pub fn selected_protocol_minor(&self) -> Option<u16> {
+        match self {
+            Self::Accepted { host, .. } => Some(host.selected_protocol_minor),
+            Self::Rejected { .. } => None,
+        }
+    }
+}
+
 /// Negotiate a ClientHello and HostHello according to DEC-G1-03.
 pub fn negotiate(client: &ClientHello, host: &HostHello) -> Result<HandshakeResult, RpcError> {
-    client.validate()?;
-    host.validate()?;
     if client.protocol_major != host.protocol_major {
         return Err(RpcError::protocol_mismatch(
             "client and host protocol majors differ",
         ));
     }
+    client.validate()?;
+    host.validate()?;
 
     let lower = client
         .minimum_supported_minor
@@ -338,6 +381,14 @@ pub fn negotiate(client: &ClientHello, host: &HostHello) -> Result<HandshakeResu
         selected_protocol_minor: upper,
         upgrade_recommended: client.release_id != host.release_id,
     })
+}
+
+/// Build the typed wire response for a ClientHello/HostHello exchange.
+pub fn handshake_response(client: &ClientHello, host: &HostHello) -> HandshakeResponse {
+    match negotiate(client, host) {
+        Ok(result) => HandshakeResponse::accepted(host.clone(), result.upgrade_recommended),
+        Err(error) => HandshakeResponse::rejected(error),
+    }
 }
 
 fn validate_range(major: u16, minor: u16, minimum: u16) -> Result<(), RpcError> {

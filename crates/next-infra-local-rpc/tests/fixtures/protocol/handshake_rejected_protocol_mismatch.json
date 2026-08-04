@@ -1,0 +1,1 @@
+{"type":"rejected","data":{"error":{"code":"protocol_mismatch","message":"client and host protocol majors differ","retryable":false}}}

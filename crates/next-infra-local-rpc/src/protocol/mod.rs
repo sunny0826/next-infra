@@ -15,8 +15,8 @@ pub use framing::{
     decode_frame_bytes, encode_frame,
 };
 pub use handshake::{
-    Capability, CapabilitySet, ClientHello, HandshakeResult, HostHello, MINIMUM_SUPPORTED_MINOR,
-    PROTOCOL_MAJOR, PROTOCOL_MINOR, negotiate,
+    Capability, CapabilitySet, ClientHello, HandshakeResponse, HandshakeResult, HostHello,
+    MINIMUM_SUPPORTED_MINOR, PROTOCOL_MAJOR, PROTOCOL_MINOR, handshake_response, negotiate,
 };
 pub use message::{
     Caller, GetResourceQuery, GetTopologyQuery, QueryRequest, QueryResponse, RecentChangesQuery,

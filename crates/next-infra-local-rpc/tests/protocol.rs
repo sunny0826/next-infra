@@ -10,6 +10,12 @@ use std::collections::BTreeSet;
 
 const FIXTURE_CLIENT: &str = include_str!("fixtures/protocol/client_hello_1_0.json");
 const FIXTURE_HOST: &str = include_str!("fixtures/protocol/host_hello_1_0.json");
+const FIXTURE_HANDSHAKE_ACCEPTED: &str =
+    include_str!("fixtures/protocol/handshake_accepted_release_mismatch.json");
+const FIXTURE_HANDSHAKE_PROTOCOL_MISMATCH: &str =
+    include_str!("fixtures/protocol/handshake_rejected_protocol_mismatch.json");
+const FIXTURE_HANDSHAKE_CAPABILITY_MISMATCH: &str =
+    include_str!("fixtures/protocol/handshake_rejected_capability_mismatch.json");
 
 fn all_capabilities() -> CapabilitySet {
     CapabilitySet::all_query_capabilities()
@@ -238,6 +244,58 @@ fn handshake_checks_capabilities_in_both_directions_and_release_upgrade() {
         negotiate(&client_without_required, &host)
             .unwrap()
             .upgrade_recommended
+    );
+}
+
+#[test]
+fn handshake_response_fixture_covers_acceptance_and_rejections_without_request_ids() {
+    let client = ClientHello::initial("bridge-1.0.0", "release-a");
+    let host = HostHello::initial("host-1.0.0", "release-b");
+    let accepted = handshake_response(&client, &host);
+    assert_eq!(accepted.selected_protocol_minor(), Some(0));
+    assert_eq!(
+        serde_json::to_string(&accepted).unwrap(),
+        FIXTURE_HANDSHAKE_ACCEPTED.trim_end()
+    );
+    assert_eq!(
+        serde_json::from_str::<HandshakeResponse>(FIXTURE_HANDSHAKE_ACCEPTED).unwrap(),
+        accepted
+    );
+
+    let mut major_mismatch = host.clone();
+    major_mismatch.protocol_major = 2;
+    let rejected_major = handshake_response(&client, &major_mismatch);
+    assert!(matches!(rejected_major, HandshakeResponse::Rejected { .. }));
+    assert_eq!(
+        serde_json::to_string(&rejected_major).unwrap(),
+        FIXTURE_HANDSHAKE_PROTOCOL_MISMATCH.trim_end()
+    );
+    let rejected_major_json: Value = serde_json::to_value(&rejected_major).unwrap();
+    assert!(rejected_major_json.get("request_id").is_none());
+    assert_eq!(
+        serde_json::from_str::<HandshakeResponse>(FIXTURE_HANDSHAKE_PROTOCOL_MISMATCH).unwrap(),
+        rejected_major
+    );
+
+    let host_without_capabilities = HostHello::new(
+        0,
+        0,
+        0,
+        "host-1.0.0",
+        "release-a",
+        CapabilitySet::empty(),
+        CapabilitySet::empty(),
+    );
+    let rejected_capability = handshake_response(&client, &host_without_capabilities);
+    assert_eq!(
+        serde_json::to_string(&rejected_capability).unwrap(),
+        FIXTURE_HANDSHAKE_CAPABILITY_MISMATCH.trim_end()
+    );
+    let rejected_capability_json: Value = serde_json::to_value(&rejected_capability).unwrap();
+    assert!(rejected_capability_json.get("request_id").is_none());
+    assert_eq!(
+        serde_json::from_str::<HandshakeResponse>(FIXTURE_HANDSHAKE_CAPABILITY_MISMATCH).unwrap(),
+        rejected_capability
     );
 }
 

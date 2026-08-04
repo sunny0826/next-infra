@@ -68,6 +68,15 @@ supported_capabilities
 required_capabilities
 ```
 
+Host 对 `ClientHello` 的首个 wire response 使用不带 request ID 的封闭 envelope：
+
+```text
+accepted: host + upgrade_recommended
+rejected: structured RpcError
+```
+
+`accepted.host.selected_protocol_minor` 是权威协商结果。`rejected` 用于握手阶段的 `protocol_mismatch` 或 `capability_mismatch`；Query `RequestEnvelope` 尚未被允许，因此不得伪造 request ID 或复用 Query `ResponseEnvelope`。
+
 协商规则：
 
 1. `protocol_major` 必须相等，否则 `protocol_mismatch`。
@@ -138,14 +147,15 @@ query_failed
 `RHM-G4-01` 必须提供并冻结以下 golden fixture/test：
 
 1. Client hello 与 Host hello 的 canonical JSON round-trip。
-2. 七个 request variant 与对应 response envelope round-trip。
-3. 全部错误码 round-trip。
-4. 4 字节大端长度前缀的精确 bytes。
-5. `1 MiB` 边界成功、超过一个 byte 拒绝且不进行超限分配。
-6. request ID 的 128-byte 边界以及多字节 UTF-8 byte-length 校验。
-7. major mismatch、minor 无交集和双向 capability mismatch。
-8. compatible release mismatch 成功并设置 `upgrade_recommended`。
-9. 未知/重复 capability、未知 query variant 和任意 method/params 不能进入有效 typed request。
+2. Accepted、protocol mismatch 和 capability mismatch 三种 handshake response 的 canonical JSON round-trip，且均不含 request ID。
+3. 七个 request variant 与对应 response envelope round-trip。
+4. 全部错误码 round-trip。
+5. 4 字节大端长度前缀的精确 bytes。
+6. `1 MiB` 边界成功、超过一个 byte 拒绝且不进行超限分配。
+7. request ID 的 128-byte 边界以及多字节 UTF-8 byte-length 校验。
+8. major mismatch、minor 无交集和双向 capability mismatch。
+9. compatible release mismatch 成功并设置 `upgrade_recommended`。
+10. 未知/重复 capability、未知 query variant 和任意 method/params 不能进入有效 typed request。
 
 Golden fixture 是协议兼容证据，不得包含真实 Provider 数据、用户路径、凭据或机器标识。
 
