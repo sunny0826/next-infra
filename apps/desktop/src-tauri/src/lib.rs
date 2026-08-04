@@ -8,8 +8,22 @@ pub mod keychain;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(
-            |_app, _arguments, _working_directory| {},
+            |app, _arguments, _working_directory| {
+                if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            },
         ))
+        .on_window_event(|window, event| {
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(composition::setup)
         .invoke_handler(composition::invoke_handler())
         .run(tauri::generate_context!())
