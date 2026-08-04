@@ -225,6 +225,7 @@ pub fn validate_settings_update(
             false,
         ));
     }
+    requested.start_at_login = false;
     requested.user_quit = current.user_quit;
     Ok(requested)
 }
