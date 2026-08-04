@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{App, Manager, State};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 
 type DesktopRuntime = Runtime<SqliteRuntimeBackend, CommittedQuerySource>;
 
@@ -85,6 +87,31 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let data_directory = app.path().app_data_dir()?;
     let state = AppState::open(&data_directory).map_err(std::io::Error::other)?;
     app.manage(state);
+    let show = MenuItem::with_id(app, "show", "Show Next Infra", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Next Infra", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::new().menu(&menu).tooltip("Next Infra");
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.on_menu_event(|app, event| match event.id.as_ref() {
+        "show" => {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }
+        "quit" => {
+            if let Some(state) = app.try_state::<AppState>()
+                && state.persist_user_quit_and_stop().is_ok()
+            {
+                app.exit(0);
+            }
+        }
+        _ => {}
+    })
+    .build(app)?;
     Ok(())
 }
 

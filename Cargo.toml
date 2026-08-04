@@ -38,7 +38,7 @@ next-infra-query = { path = "crates/next-infra-query", version = "=0.1.0" }
 next-infra-runtime = { path = "crates/next-infra-runtime", version = "=0.1.0" }
 next-infra-local-rpc = { path = "crates/next-infra-local-rpc", version = "=0.1.0" }
 next-infra-mcp = { path = "crates/next-infra-mcp", version = "=0.1.0" }
-tauri = { version = "=2.11.5" }
+tauri = { version = "=2.11.5", features = ["tray-icon"] }
 tauri-build = { version = "=2.6.3" }
 tauri-plugin-single-instance = { version = "=2.4.3" }
 tauri-plugin-autostart = { version = "=2.5.1" }
