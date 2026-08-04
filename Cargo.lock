@@ -2232,11 +2232,13 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tempfile",
 ]
 
 [[package]]

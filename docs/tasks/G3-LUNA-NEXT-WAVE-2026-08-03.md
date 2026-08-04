@@ -162,7 +162,7 @@ rtk git diff --check
 
 ### `RHM-G3-05A` — Composition State 与 Command Registration
 
-- **状态：** `IN PROGRESS`；任务冻结见 [`RHM-G3-05A-TASK-FREEZE`](./RHM-G3-05A-TASK-FREEZE-2026-08-03.md)。2026-08-04 已采用 `SharedStore::open(path)`，Goal 3 Manual Sync 安全禁用。
+- **状态：** `REVIEW`；验收见 [`RHM-G3-05A`](./RHM-G3-05A-2026-08-04.md)。Composition 已采用 `SharedStore::open(path)`，Goal 3 Manual Sync 安全禁用。
 - **唯一目标：** 建立唯一 AppState，组合 Store/Writer/Runtime/Query/Adapter/Keychain ports，并注册已有 command/event 名称。
 - **建议独占路径：** `apps/desktop/src-tauri/src/composition/**`、`src-tauri/src/lib.rs`；shared manifest/lockfile 只由 Composition Captain 修改。
 - **必须保持：** 一个 Runtime、一个 WriterQueue、一个 SQLite owner；event 只做 invalidation；Manual Sync 只 enqueue 并返回 `sync_run_id`；错误不泄漏 Secret/SQL/provider payload。
@@ -172,7 +172,7 @@ rtk git diff --check
 
 ### `RHM-G3-05B` — Native Host Effects 与 Lifecycle Wiring
 
-- **状态：** `WAITING`，等待 `RHM-G3-05A`。
+- **状态：** `READY`，`RHM-G3-05A` 已进入 `REVIEW`。
 - **唯一目标：** 将已 Review 的 Host state machine 接到真实 Tauri effects：single instance、close→hide、tray/Dock restore、window recreate/focus、autostart capability、explicit quit。
 - **建议独占路径：** `apps/desktop/src-tauri/src/host/effects/**`、`src-tauri/src/main.rs`、Tauri config/capabilities；仍由同一 Composition Captain 串行执行。
 - **必须保持：** WebView reload 不重启 Runtime；crash 不写 `user_quit`；Quit 顺序为 marker → Writer drain → WAL checkpoint → Runtime stop。
