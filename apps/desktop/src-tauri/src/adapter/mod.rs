@@ -178,6 +178,65 @@ pub struct ManualSyncResult {
     pub sync_run_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalSettings {
+    pub start_at_login: bool,
+    pub data_budget_mb: u64,
+    pub retention_days: u32,
+    pub user_quit: bool,
+}
+
+impl Default for LocalSettings {
+    fn default() -> Self {
+        Self {
+            start_at_login: false,
+            data_budget_mb: 512,
+            retention_days: 30,
+            user_quit: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeCapabilities {
+    pub start_at_login: bool,
+    pub manual_sync: bool,
+    pub mcp_auto_launch: bool,
+}
+
+impl RuntimeCapabilities {
+    pub const fn goal_3() -> Self {
+        Self {
+            start_at_login: false,
+            manual_sync: false,
+            mcp_auto_launch: false,
+        }
+    }
+}
+
+pub fn validate_settings_update(
+    current: &LocalSettings,
+    mut requested: LocalSettings,
+) -> Result<LocalSettings, ErrorEnvelope> {
+    if requested.data_budget_mb < 64 || requested.retention_days == 0 {
+        return Err(command_error(
+            "invalid_local_settings",
+            "Data budget must be at least 64 MB and retention must be at least one day.",
+            false,
+        ));
+    }
+    requested.user_quit = current.user_quit;
+    Ok(requested)
+}
+
+pub fn manual_sync_unavailable() -> Result<ManualSyncResult, ErrorEnvelope> {
+    Err(command_error(
+        "sync_unavailable",
+        "Manual sync is not available in this runtime.",
+        false,
+    ))
+}
+
 pub trait ManualSyncPort {
     type Error;
 
@@ -282,5 +341,55 @@ mod tests {
         .unwrap();
         assert_eq!(event.version, "fixture-version");
         assert_eq!(event.scopes, BTreeSet::from(["resources".to_owned()]));
+    }
+
+    #[test]
+    fn goal_3_capabilities_do_not_advertise_unimplemented_operations() {
+        assert_eq!(
+            RuntimeCapabilities::goal_3(),
+            RuntimeCapabilities {
+                start_at_login: false,
+                manual_sync: false,
+                mcp_auto_launch: false,
+            }
+        );
+        assert_eq!(
+            manual_sync_unavailable().unwrap_err().code,
+            "sync_unavailable"
+        );
+    }
+
+    #[test]
+    fn settings_update_preserves_the_host_owned_user_quit_latch() {
+        let current = LocalSettings {
+            user_quit: true,
+            ..LocalSettings::default()
+        };
+        let updated = validate_settings_update(
+            &current,
+            LocalSettings {
+                data_budget_mb: 1024,
+                retention_days: 60,
+                user_quit: false,
+                ..LocalSettings::default()
+            },
+        )
+        .unwrap();
+        assert!(updated.user_quit);
+        assert_eq!(updated.data_budget_mb, 1024);
+        assert_eq!(updated.retention_days, 60);
+    }
+
+    #[test]
+    fn settings_update_rejects_invalid_bounds() {
+        let error = validate_settings_update(
+            &LocalSettings::default(),
+            LocalSettings {
+                data_budget_mb: 63,
+                ..LocalSettings::default()
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "invalid_local_settings");
     }
 }
