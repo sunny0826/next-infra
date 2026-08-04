@@ -1,8 +1,10 @@
 use std::fmt;
+use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 
 use crate::protocol::{
     ClientHello, HandshakeResponse, HostHello, RequestEnvelope, ResponseEnvelope, RpcError,
@@ -159,13 +161,37 @@ pub struct RpcClient {
 
 impl RpcClient {
     pub fn connect(paths: &TransportPaths, client: &ClientHello) -> Result<Self, SessionError> {
-        let stream = connect_secure(paths)?;
-        Self::handshake(stream, client)
+        Self::connect_with_timeout(paths, client, DEFAULT_HANDSHAKE_TIMEOUT)
     }
 
-    pub fn handshake(mut stream: UnixStream, client: &ClientHello) -> Result<Self, SessionError> {
+    pub fn connect_with_timeout(
+        paths: &TransportPaths,
+        client: &ClientHello,
+        timeout: Duration,
+    ) -> Result<Self, SessionError> {
+        let stream = connect_secure(paths)?;
+        Self::handshake_with_timeout(stream, client, timeout)
+    }
+
+    pub fn handshake(stream: UnixStream, client: &ClientHello) -> Result<Self, SessionError> {
+        Self::handshake_with_timeout(stream, client, DEFAULT_HANDSHAKE_TIMEOUT)
+    }
+
+    pub fn handshake_with_timeout(
+        mut stream: UnixStream,
+        client: &ClientHello,
+        timeout: Duration,
+    ) -> Result<Self, SessionError> {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or_else(timeout_error)?;
+        set_stream_timeouts(&stream, timeout)?;
         verify_peer_uid(&stream).map_err(TransportError::Peer)?;
+
+        set_write_timeout(&stream, remaining_timeout(deadline)?)?;
         write_json_frame(&mut stream, client)?;
+
+        set_read_timeout(&stream, remaining_timeout(deadline)?)?;
         let response: HandshakeResponse = read_json_frame(&mut stream)?;
         match response {
             HandshakeResponse::Accepted {
@@ -178,6 +204,7 @@ impl RpcClient {
                         "Host upgrade recommendation does not match negotiated releases",
                     )));
                 }
+                clear_stream_timeouts(&stream)?;
                 Ok(Self {
                     stream,
                     host,
@@ -206,6 +233,46 @@ impl RpcClient {
     pub fn upgrade_recommended(&self) -> bool {
         self.upgrade_recommended
     }
+}
+
+const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+fn remaining_timeout(deadline: Instant) -> Result<Duration, SessionError> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|remaining| !remaining.is_zero())
+        .ok_or_else(timeout_error)
+}
+
+fn set_stream_timeouts(stream: &UnixStream, timeout: Duration) -> Result<(), SessionError> {
+    set_read_timeout(stream, timeout)?;
+    set_write_timeout(stream, timeout)
+}
+
+fn clear_stream_timeouts(stream: &UnixStream) -> Result<(), SessionError> {
+    stream
+        .set_read_timeout(None)
+        .and_then(|_| stream.set_write_timeout(None))
+        .map_err(|error| SessionError::Frame(FramedError::Io(error)))
+}
+
+fn set_read_timeout(stream: &UnixStream, timeout: Duration) -> Result<(), SessionError> {
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|error| SessionError::Frame(FramedError::Io(error)))
+}
+
+fn set_write_timeout(stream: &UnixStream, timeout: Duration) -> Result<(), SessionError> {
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|error| SessionError::Frame(FramedError::Io(error)))
+}
+
+fn timeout_error() -> SessionError {
+    SessionError::Frame(FramedError::Io(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "local RPC handshake timed out",
+    )))
 }
 
 fn selected_host(template: &HostHello, client: &ClientHello) -> HostHello {

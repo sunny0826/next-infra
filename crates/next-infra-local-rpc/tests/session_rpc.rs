@@ -1,19 +1,23 @@
 #![cfg(unix)]
 
 use std::collections::BTreeSet;
+use std::io;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, mpsc};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use next_infra_local_rpc::protocol::{
     Caller, ClientHello, ErrorCode, GetResourceQuery, GetTopologyQuery, HandshakeResponse,
     HostHello, QueryRequest, QueryResponse, RecentChangesQuery, RequestEnvelope, ResourceInclude,
     ResponseBody, RpcError, SearchResourcesQuery, SyncStatusQuery,
 };
-use next_infra_local_rpc::session::{QueryHandler, QueryServiceHandler, RpcClient, RpcServer};
+use next_infra_local_rpc::session::{
+    QueryHandler, QueryServiceHandler, RpcClient, RpcServer, SessionError,
+};
 use next_infra_local_rpc::transport::{
-    SecureUnixListener, TransportPaths, read_json_frame, write_json_frame,
+    FramedError, SecureUnixListener, TransportPaths, read_json_frame, write_json_frame,
 };
 use next_infra_query::dto::{
     ConnectionDto, ConnectorHealth, Freshness, Lifecycle, ResourceDto, ResourceHealth,
@@ -82,6 +86,39 @@ fn handshake_and_all_seven_query_service_routes_round_trip() {
 
     drop(client);
     server_thread.join().unwrap().unwrap();
+}
+
+#[test]
+fn handshake_with_timeout_rejects_a_peer_that_withholds_response() {
+    let (client_stream, server_stream) = UnixStream::pair().unwrap();
+    let (release_tx, release_rx) = mpsc::channel();
+    let server_thread = thread::spawn(move || {
+        let _server_stream = server_stream;
+        release_rx.recv().unwrap();
+    });
+
+    let hello = ClientHello::initial("bridge-1.0.0", "release-a");
+    let started_at = Instant::now();
+    let result =
+        RpcClient::handshake_with_timeout(client_stream, &hello, Duration::from_millis(50));
+    let elapsed = started_at.elapsed();
+
+    release_tx.send(()).unwrap();
+    server_thread.join().unwrap();
+
+    let error = match result {
+        Ok(_) => panic!("withholding peer must not complete handshake"),
+        Err(error) => error,
+    };
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "handshake took {elapsed:?}"
+    );
+    assert!(matches!(
+        error,
+        SessionError::Frame(FramedError::Io(error))
+            if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+    ));
 }
 
 #[test]

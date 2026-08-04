@@ -1,16 +1,19 @@
 use std::collections::BTreeSet;
-use std::sync::Mutex;
+use std::sync::{Mutex, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use next_infra_local_rpc::protocol::{
     Capability, GetResourceQuery, GetTopologyQuery, QueryRequest, QueryResponse,
     RecentChangesQuery, SearchResourcesQuery, SyncStatusQuery,
 };
+use next_infra_local_rpc::transport::{SecureUnixListener, TransportPaths};
 use next_infra_mcp::input::{
     GetResourceInput, GetTopologyInput, RecentChangesInput, SearchResourcesInput, SyncStatusInput,
 };
 use next_infra_mcp::{
-    CAPABILITIES_RESOURCE_URI, HEALTH_RESOURCE_URI, McpBridgeError, McpQueryClient, NextInfraMcp,
-    TOOL_NAMES,
+    CAPABILITIES_RESOURCE_URI, HEALTH_RESOURCE_URI, LocalRpcMcpClient, McpBridgeError,
+    McpQueryClient, NextInfraMcp, TOOL_NAMES,
 };
 use rmcp::handler::server::wrapper::Parameters;
 use serde_json::json;
@@ -91,6 +94,41 @@ async fn tools_are_exactly_seven_read_only_structured_routes() {
             .read_resource_json("next-infra://missing")
             .await
             .is_err()
+    );
+}
+
+#[test]
+fn bounded_run_dir_connect_rejects_a_peer_that_withholds_response() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = TransportPaths::from_root(root.path()).unwrap();
+    let listener = SecureUnixListener::bind(&paths).unwrap();
+    let (release_tx, release_rx) = mpsc::channel();
+    let server_thread = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let _server_stream = stream;
+        release_rx.recv().unwrap();
+    });
+
+    let started_at = Instant::now();
+    let result = LocalRpcMcpClient::connect_run_dir_with_timeout(
+        paths.run_dir().to_path_buf(),
+        "bridge-1.0.0",
+        "release-a",
+        Duration::from_millis(50),
+    );
+    let elapsed = started_at.elapsed();
+
+    release_tx.send(()).unwrap();
+    server_thread.join().unwrap();
+
+    let error = match result {
+        Ok(_) => panic!("withholding peer must not complete handshake"),
+        Err(error) => error,
+    };
+    assert_eq!(error.code, "host_unavailable");
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "handshake took {elapsed:?}"
     );
 }
 

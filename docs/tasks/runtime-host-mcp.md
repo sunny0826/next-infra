@@ -207,7 +207,7 @@
 
 ### `RHM-G4-04` — Host Availability 与 `user_quit`
 
-- **状态：** `RUNNING / RECORD-REVIEW / LIVE-SIGNATURE-BLOCKED-ENVIRONMENT`。
+- **状态：** `RUNNING / BRIDGE-STATE-REVIEW / LIVE-SIGNATURE-BLOCKED-ENVIRONMENT`。
 - **目标：** 实现可信自动拉起与跨 Bridge 抑制状态机。
 - **依赖：** `DEC-G1-02/03`、`RHM-G4-01`。
 - **独占路径：** Bridge host-availability/trusted-install 模块和 Desktop `user_quit` 模块；entrypoint wiring 留给 Gate Captain。
@@ -215,7 +215,7 @@
 - **非目标：** Agent 参数不能授权或提供任意 executable path。
 - **验收：** 未授权/超时/失败均返回 `host_unavailable`；MCP 不能清除 `user_quit`；新 Bridge 仍受抑制；只有用户启动或已启用的下一次登录启动可清除。
 - **验证：** 多进程状态机 tests 和签名 App smoke。
-- **阶段证据（2026-08-04）：** Bridge 纯文件合同已实现 strict IntegrationRecord、七 capability 顺序、stable App/Bridge/current release、euid/mode/type 和 `user_quit` fail-closed；Bridge 5 项测试与严格 Clippy 通过。codesign、launcher、bounded wait 与 Desktop 二次授权仍待后续阶段；当前无签名 identity，live smoke 未伪造通过。
+- **阶段证据（2026-08-04）：** Bridge 纯文件合同已实现 strict IntegrationRecord、七 capability 顺序、stable App/Bridge/current release、euid/mode/type 和 `user_quit` fail-closed。Bridge auto-launch 状态机现已增加强制 10 秒 monotonic deadline、真实 Local RPC handshake timeout、等待期 marker 抑制、artifact identity 前后校验、严格唯一 codesign 字段解析、App launch 前二次验签和单次固定 `/usr/bin/open` latch；withholding peer、超时截断、替换与 marker race 均有自动化证据。Bridge entrypoint、Desktop 二次授权和多进程/Tauri smoke 仍待后续阶段；当前 `0 valid identities found`，live signature smoke 未伪造通过。
 - **风险/停止：** mock 不能代替安装路径、签名和升级验收。
 
 ### `RHM-G4-05` — Agent 与安全端到端验收

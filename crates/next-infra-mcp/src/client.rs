@@ -2,6 +2,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use next_infra_local_rpc::protocol::{
     Caller, QueryRequest, QueryResponse, RequestEnvelope, ResponseBody,
@@ -66,6 +67,20 @@ impl LocalRpcMcpClient {
         bridge_version: impl Into<String>,
         release_id: impl Into<String>,
     ) -> Result<Self, McpBridgeError> {
+        Self::connect_run_dir_with_timeout(
+            run_dir,
+            bridge_version,
+            release_id,
+            DEFAULT_CONNECT_TIMEOUT,
+        )
+    }
+
+    pub fn connect_run_dir_with_timeout(
+        run_dir: impl Into<PathBuf>,
+        bridge_version: impl Into<String>,
+        release_id: impl Into<String>,
+        timeout: Duration,
+    ) -> Result<Self, McpBridgeError> {
         let bridge_version = bridge_version.into();
         let release_id = release_id.into();
         let paths = TransportPaths::existing(run_dir).map_err(|_| {
@@ -79,7 +94,7 @@ impl LocalRpcMcpClient {
             bridge_version.clone(),
             release_id.clone(),
         );
-        let client = RpcClient::connect(&paths, &hello).map_err(|_| {
+        let client = RpcClient::connect_with_timeout(&paths, &hello, timeout).map_err(|_| {
             McpBridgeError::new(
                 "host_unavailable",
                 "Next Infra did not accept the local read-only session.",
@@ -89,6 +104,8 @@ impl LocalRpcMcpClient {
         Ok(Self::new(client, bridge_version, release_id))
     }
 }
+
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl McpQueryClient for LocalRpcMcpClient {
     fn query(&self, query: QueryRequest) -> Result<QueryResponse, McpBridgeError> {
