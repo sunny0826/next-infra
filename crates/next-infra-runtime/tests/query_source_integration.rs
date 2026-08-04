@@ -15,7 +15,7 @@ use next_infra_query::service::{
 };
 use next_infra_runtime::{
     CommittedQuerySource, ConnectorCatalogSnapshot, QueryContextSnapshot, QuerySchedule,
-    SharedStore,
+    SharedStore, SqliteRuntimeBackend,
 };
 use next_infra_store::Store;
 use serde_json::json;
@@ -247,6 +247,46 @@ fn service(
         fixture_catalog(),
         context(evaluated_at, revision, evaluated_at + 500),
     ))
+}
+
+#[test]
+fn shared_store_open_creates_one_database_and_clones_share_backend_query_projection() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("data").join("runtime-query.db");
+    let shared_store = SharedStore::open(&database).unwrap();
+    assert!(database.is_file());
+
+    let source = CommittedQuerySource::new(
+        shared_store.clone(),
+        fixture_catalog(),
+        context(2_000, 1, 2_500),
+    );
+    let service = QueryService::new(source);
+    let mut backend = SqliteRuntimeBackend::from_shared_store(shared_store.clone());
+
+    backend
+        .sync_engine_mut()
+        .writer_mut()
+        .store_mut()
+        .upsert_connection(connection())
+        .unwrap();
+
+    let connections = service.list_connections().unwrap();
+    assert_eq!(connections.items.len(), 1);
+    assert_eq!(connections.items[0].connection_id, "fixture-connection");
+
+    let committed_revision = backend
+        .shared_store()
+        .read(Store::projection_metadata)
+        .unwrap()
+        .committed_revision;
+    assert!(committed_revision > 0);
+    assert!(
+        connections
+            .metadata
+            .snapshot_version
+            .starts_with(&format!("nis1:{committed_revision}:"))
+    );
 }
 
 #[test]

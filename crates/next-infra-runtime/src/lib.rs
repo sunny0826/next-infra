@@ -14,6 +14,7 @@ use next_infra_store::{Store, StoreError};
 use next_infra_sync::SyncEngine;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 mod query_source;
@@ -97,6 +98,11 @@ pub struct SharedStore {
 }
 
 impl SharedStore {
+    /// Open the single SQLite owner and wrap it in a cloneable shared handle.
+    pub fn open(path: &Path) -> Result<Self, StoreError> {
+        Store::open(path).map(Self::new)
+    }
+
     pub fn new(store: Store) -> Self {
         Self {
             inner: Arc::new(Mutex::new(store)),
