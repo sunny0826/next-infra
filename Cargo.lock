@@ -2248,9 +2248,11 @@ dependencies = [
 name = "next-infra-local-rpc"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "next-infra-query",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
