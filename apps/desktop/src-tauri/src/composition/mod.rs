@@ -34,6 +34,14 @@ pub struct AppState {
     user_quit_path: PathBuf,
 }
 
+pub fn restore_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 impl AppState {
     pub fn open(data_directory: &Path) -> Result<Self, String> {
         fs::create_dir_all(data_directory).map_err(|_| "desktop data directory unavailable")?;
@@ -97,11 +105,7 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     }
     tray.on_menu_event(|app, event| match event.id.as_ref() {
         "show" => {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.unminimize();
-                let _ = window.set_focus();
-            }
+            restore_main_window(app);
         }
         "quit" => {
             if let Some(state) = app.try_state::<AppState>()

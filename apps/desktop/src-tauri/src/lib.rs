@@ -9,11 +9,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(
             |app, _arguments, _working_directory| {
-                if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
-                    let _ = window.show();
-                    let _ = window.unminimize();
-                    let _ = window.set_focus();
-                }
+                composition::restore_main_window(app);
             },
         ))
         .plugin(tauri_plugin_autostart::init(
@@ -30,6 +26,12 @@ pub fn run() {
         })
         .setup(composition::setup)
         .invoke_handler(composition::invoke_handler())
-        .run(tauri::generate_context!())
-        .expect("failed to run Next Infra desktop host");
+        .build(tauri::generate_context!())
+        .expect("failed to build Next Infra desktop host")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                composition::restore_main_window(app);
+            }
+        });
 }
