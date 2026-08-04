@@ -19,9 +19,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{App, Manager, State};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+use tauri::{App, AppHandle, Manager, State};
+use tauri_plugin_autostart::ManagerExt;
 
 type DesktopRuntime = Runtime<SqliteRuntimeBackend, CommittedQuerySource>;
 
@@ -115,8 +116,7 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-pub fn invoke_handler<R: tauri::Runtime>()
--> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
     tauri::generate_handler![
         query_list_connections,
         query_search_resources,
@@ -202,16 +202,25 @@ fn runtime_manual_sync(
 }
 
 #[tauri::command]
-fn local_settings_get(state: State<'_, AppState>) -> Result<LocalSettings, ErrorEnvelope> {
-    state
+fn local_settings_get(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<LocalSettings, ErrorEnvelope> {
+    let mut settings = state
         .settings
         .lock()
         .map(|settings| settings.clone())
-        .map_err(|_| safe_error("settings_unavailable", "Local settings are unavailable."))
+        .map_err(|_| safe_error("settings_unavailable", "Local settings are unavailable."))?;
+    settings.start_at_login = app
+        .autolaunch()
+        .is_enabled()
+        .map_err(|_| safe_error("autostart_unavailable", "Start at login is unavailable."))?;
+    Ok(settings)
 }
 
 #[tauri::command]
 fn local_settings_update(
+    app: AppHandle,
     state: State<'_, AppState>,
     settings: LocalSettings,
 ) -> Result<LocalSettings, ErrorEnvelope> {
@@ -220,6 +229,18 @@ fn local_settings_update(
         .lock()
         .map_err(|_| safe_error("settings_unavailable", "Local settings are unavailable."))?;
     let updated = validate_settings_update(&current, settings)?;
+    let autostart = app.autolaunch();
+    if updated.start_at_login {
+        autostart.enable()
+    } else {
+        autostart.disable()
+    }
+    .map_err(|_| {
+        safe_error(
+            "autostart_unavailable",
+            "Start at login could not be changed.",
+        )
+    })?;
     persist_settings(&state.settings_path, &updated)?;
     *current = updated.clone();
     Ok(updated)
@@ -227,7 +248,11 @@ fn local_settings_update(
 
 #[tauri::command]
 fn runtime_capabilities(_state: State<'_, AppState>) -> RuntimeCapabilities {
-    RuntimeCapabilities::goal_3()
+    RuntimeCapabilities {
+        start_at_login: true,
+        manual_sync: false,
+        mcp_auto_launch: false,
+    }
 }
 
 fn load_settings(path: &Path) -> Result<LocalSettings, String> {
