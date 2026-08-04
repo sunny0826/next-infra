@@ -165,6 +165,7 @@
 
 ### `RHM-G4-01` — Local RPC v1 Contract 冻结
 
+- **状态：** `REVIEW`。
 - **目标：** 冻结 Host/Bridge 的版本化本地协议。
 - **依赖：** `GATE-G3` 通过；Query DTO v1 冻结。
 - **独占路径：** `crates/next-infra-local-rpc/src/protocol/**`、protocol golden fixtures。
@@ -173,6 +174,7 @@
 - **输出：** v1 protocol、golden round-trip/compatibility tests。
 - **验收：** 明确定义 `host_unavailable`、protocol mismatch、oversized frame；无通用 SQL/Secret/Connector 方法。
 - **验证：** Local RPC protocol golden tests。
+- **实现证据（2026-08-04）：** 已实现 4-byte BE length-prefixed UTF-8 JSON、1 MiB body/128-byte request ID/8 in-flight 上限、双向 minor/capability 协商、七个 typed read-only Query request/response、八个稳定错误码和 golden/边界测试。主线 Review 修正 `frame_too_large` wire 拼写、相邻 minor 窗口和 serde 反序列化校验；Local RPC 12 项、workspace 133 项测试及严格 Clippy 通过。
 - **风险/停止：** framed JSON 与 JSON-RPC 必须先择一，不能让并行 worker各自选择。
 
 ### `RHM-G4-02` — Unix Socket RPC

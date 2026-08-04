@@ -1,0 +1,1 @@
+{"protocol_major":1,"protocol_minor":0,"minimum_supported_minor":0,"bridge_version":"bridge-1.0.0","release_id":"release-a","supported_capabilities":[],"required_capabilities":["query.get_health_summary.v1","query.get_recent_changes.v1","query.get_resource.v1","query.get_sync_status.v1","query.get_topology.v1","query.list_connector_coverage.v1","query.search_resources.v1"]}

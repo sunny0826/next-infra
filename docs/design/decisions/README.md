@@ -12,6 +12,7 @@
 | [DEC-G1-03](./DEC-G1-03-bridge-install-and-upgrade.md) | Accepted for local development | App/Bridge 组成 Release Set；稳定路径、初始协议 `1.0` 与双向区间协商、可信拉起和整体回滚已冻结 |
 | [DEC-G1-04](./DEC-G1-04-keychain-signing.md) | Accepted technical boundary | Data Protection Keychain、开发/发布身份隔离、Developer ID 与无在线 updater 边界已冻结 |
 | [DEC-G3-01](./DEC-G3-01-committed-query-source.md) | Proposed for Review | Runtime-owned SharedStore、DTO-neutral Store projection、CommittedQuerySource 与单 SQLite owner |
+| [DEC-G4-01](./DEC-G4-01-local-rpc-v1.md) | Accepted for Goal 4 implementation | 4-byte BE framed JSON、双向版本/能力协商、七个只读 Query variant 与严格资源上限 |
 
 ## 当前就绪结论
 

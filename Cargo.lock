@@ -2249,6 +2249,8 @@ name = "next-infra-local-rpc"
 version = "0.1.0"
 dependencies = [
  "next-infra-query",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
