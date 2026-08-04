@@ -179,7 +179,7 @@
 
 ### `RHM-G4-02` — Unix Socket RPC
 
-- **状态：** `RUNNING / TRANSPORT-REVIEW`。
+- **状态：** `REVIEW`。
 - **目标：** 实现受限 UDS server/client，只适配 Query Service。
 - **依赖：** `RHM-G4-01`。
 - **独占路径：** `crates/next-infra-local-rpc/**`，排除冻结 protocol/golden 文件。
@@ -188,6 +188,7 @@
 - **验收：** parent `0700`、socket `0600`；拒绝 symlink/错误 owner/超限 frame；仅在 owner/process 校验后清理 stale socket。
 - **验证：** `rtk cargo test -p next-infra-local-rpc`。
 - **阶段证据（2026-08-04）：** Transport foundation 已实现原子 `0700` run dir、`0600` O_NOFOLLOW+flock lock、`0600` socket、active/stale/replacement-safe lifecycle、client/accept path revalidation、macOS `getpeereid` 和 header-first bounded stream framing。Local RPC 20 项测试通过，transport security 7 项连续运行 20 次稳定；handshake session、8 in-flight enforcement 与 Query adapter 仍待 `RHM-G4-02B`。
+- **完成证据（2026-08-04）：** Session 已实现 peer UID → ClientHello/typed HandshakeResponse → frozen RequestEnvelope 状态机、七个 QueryService adapter、request ID 回显、8 active worker admission 和串行 response writer；第九个请求不入 queue。真实 owner-only filesystem UDS 与 socket-pair 状态机测试共使 Local RPC 达到 25 项，session suite 多轮重复稳定。
 - **风险/停止：** 首版平台验收只承诺冻结的 macOS target；平台差异不能静默放宽安全检查。
 
 ### `RHM-G4-03` — 七个只读 STDIO MCP Tool
