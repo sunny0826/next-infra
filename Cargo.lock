@@ -2289,8 +2289,10 @@ dependencies = [
 name = "next-infra-mcp-bridge"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "next-infra-local-rpc",
  "next-infra-mcp",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
