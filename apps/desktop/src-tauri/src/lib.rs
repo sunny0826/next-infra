@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use host::authorization::{app_bundle_from_executable, authorize_launch, parse_process_arguments};
 use host::lifecycle::LaunchSource;
 use next_infra_host_integration::IntegrationPaths;
+use tauri::Manager;
 
 pub mod adapter;
 pub mod composition;
@@ -55,11 +56,29 @@ pub fn run() -> Result<(), String> {
         .invoke_handler(composition::invoke_handler())
         .build(tauri::generate_context!())
         .map_err(|_| String::from("desktop_start_failed: Desktop Host could not be built."))?;
-    app.run(|app, event| {
+    app.run(|app, event| match event {
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Reopen { .. } = event {
-            composition::restore_main_window(app);
+        tauri::RunEvent::Reopen { .. } => composition::restore_main_window(app),
+        tauri::RunEvent::ExitRequested {
+            code: None, api, ..
+        } => {
+            if let Some(state) = app.try_state::<composition::AppState>()
+                && !state.system_shutdown_requested()
+            {
+                api.prevent_exit();
+                if state.persist_user_quit_and_stop().is_ok() {
+                    app.exit(0);
+                }
+            }
         }
+        tauri::RunEvent::Exit => {
+            if let Some(state) = app.try_state::<composition::AppState>()
+                && !state.system_shutdown_requested()
+            {
+                let _ = state.persist_user_quit_and_stop();
+            }
+        }
+        _ => {}
     });
     Ok(())
 }

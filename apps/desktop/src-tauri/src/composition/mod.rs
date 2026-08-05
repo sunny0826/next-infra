@@ -27,6 +27,7 @@ use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -43,6 +44,8 @@ pub struct AppState {
     integration_paths: IntegrationPaths,
     current_app_bundle: PathBuf,
     local_rpc: Mutex<Option<LocalRpcHost>>,
+    explicit_quit: AtomicBool,
+    system_shutdown: AtomicBool,
 }
 
 pub fn restore_main_window(app: &tauri::AppHandle) {
@@ -105,6 +108,8 @@ impl AppState {
             integration_paths: paths.clone(),
             current_app_bundle: current_app_bundle.to_path_buf(),
             local_rpc: Mutex::new(Some(local_rpc)),
+            explicit_quit: AtomicBool::new(false),
+            system_shutdown: AtomicBool::new(false),
         })
     }
 
@@ -136,7 +141,13 @@ impl AppState {
     }
 
     pub fn persist_user_quit_and_stop(&self) -> Result<(), String> {
-        persist_user_quit(&self.integration_paths).map_err(|_| "user quit marker unavailable")?;
+        if self.explicit_quit.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        if persist_user_quit(&self.integration_paths).is_err() {
+            self.explicit_quit.store(false, Ordering::Release);
+            return Err("user quit marker unavailable".into());
+        }
         if let Some(local_rpc) = self
             .local_rpc
             .lock()
@@ -167,6 +178,7 @@ impl AppState {
     }
 
     pub fn handle_power_off(&self) {
+        self.system_shutdown.store(true, Ordering::Release);
         if let Ok(mut local_rpc) = self.local_rpc.lock()
             && let Some(local_rpc) = local_rpc.take()
         {
@@ -175,6 +187,10 @@ impl AppState {
         if let Ok(mut runtime) = self.runtime.lock() {
             let _ = runtime.stop();
         }
+    }
+
+    pub fn system_shutdown_requested(&self) -> bool {
+        self.system_shutdown.load(Ordering::Acquire)
     }
 }
 
@@ -447,6 +463,7 @@ mod tests {
         persist_settings(&state.settings_path, &updated).unwrap();
         assert_eq!(load_settings(&state.settings_path).unwrap(), updated);
         state.persist_user_quit_and_stop().unwrap();
+        state.persist_user_quit_and_stop().unwrap();
         assert!(state.integration_paths.user_quit.exists());
         assert_eq!(
             state.runtime().lock().unwrap().state(),
@@ -482,6 +499,21 @@ mod tests {
         assert!(!suppressed.mcp_auto_launch);
         assert!(suppressed.mcp_auto_launch_reason.contains("Explicit Quit"));
         assert!(state.user_quit_latched());
+    }
+
+    #[test]
+    fn system_power_off_stops_without_latching_user_quit() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        state.handle_power_off();
+        assert!(state.system_shutdown_requested());
+        assert!(!paths.user_quit.exists());
+        assert_eq!(
+            state.runtime().lock().unwrap().state(),
+            next_infra_runtime::RuntimeState::Stopped
+        );
     }
 
     fn test_home() -> TempDir {
