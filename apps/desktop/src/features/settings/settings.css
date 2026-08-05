@@ -8,6 +8,10 @@
 .settings-row > div { display: grid; gap: var(--space-1); }
 .settings-row input { background: var(--rack-canvas); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-primary); height: 29px; padding: 0 var(--space-2); width: 100px; }
 .settings-row output { color: var(--label-muted); font: 9px var(--font-mono); text-transform: uppercase; }
+.settings-guidance { font-size: 11px; max-width: 640px; }
+.settings-status { border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); padding: 6px 8px; }
+.settings-status--available { border-color: var(--telemetry-cyan-soft); color: var(--heartbeat-green) !important; }
+.settings-status--suppressed { border-color: var(--fault-vermilion); color: var(--fault-vermilion) !important; }
 .settings-switch { align-items: center; background: var(--rack-raised); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-secondary); display: inline-flex; gap: var(--space-2); height: 29px; padding: 0 var(--space-2); }
 .settings-switch span { background: var(--cloud-unknown); border-radius: 50%; height: 7px; width: 7px; }
 .settings-switch[aria-pressed="true"] { border-color: var(--telemetry-cyan-soft); color: var(--telemetry-cyan); }

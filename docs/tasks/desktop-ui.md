@@ -263,6 +263,7 @@ RHM-G3-01 + UI-G2-01
 - **验收：** auto-launch 和 start-at-login 分开；disabled reason/处理指引明确；MCP unavailable 不显示为资源 empty。
 - **验证：** `V-UI + V-DESKTOP`。
 - **风险/停止：** capability 缺失时保持禁用，不伪装成功。
+- **实现证据（2026-08-05）：** Settings 已读取真实 shared marker/integration state，分离 start-at-login 与 MCP auto-launch，显示 available/unavailable 原因和 user Quit 恢复指引；没有 clear suppression 控件。Rust composition、React tests、lint/build 通过。
 
 ### `UI-G5-01` — GitHub 纵切 UI Acceptance
 

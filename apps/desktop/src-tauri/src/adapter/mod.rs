@@ -202,14 +202,16 @@ pub struct RuntimeCapabilities {
     pub start_at_login: bool,
     pub manual_sync: bool,
     pub mcp_auto_launch: bool,
+    pub mcp_auto_launch_reason: String,
 }
 
 impl RuntimeCapabilities {
-    pub const fn goal_3() -> Self {
+    pub fn goal_3() -> Self {
         Self {
             start_at_login: false,
             manual_sync: false,
             mcp_auto_launch: false,
+            mcp_auto_launch_reason: "Trusted MCP integration is unavailable.".into(),
         }
     }
 }
@@ -351,6 +353,7 @@ mod tests {
                 start_at_login: false,
                 manual_sync: false,
                 mcp_auto_launch: false,
+                mcp_auto_launch_reason: "Trusted MCP integration is unavailable.".into(),
             }
         );
         assert_eq!(

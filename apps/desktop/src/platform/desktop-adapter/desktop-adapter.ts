@@ -65,6 +65,7 @@ export interface RuntimeCapabilities {
   readonly start_at_login: boolean;
   readonly manual_sync: boolean;
   readonly mcp_auto_launch: boolean;
+  readonly mcp_auto_launch_reason: string;
 }
 
 export interface QueryInvalidation {

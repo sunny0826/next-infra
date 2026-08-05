@@ -229,6 +229,7 @@
 - **验收：** Bridge 无 Store/Keychain/Connector 依赖；无 HTTP listener；Quit 后当前和新 Bridge 均不复活 Host；Codex 真实查询通过。
 - **验证：** Local RPC/MCP/workspace tests、`rtk proxy codex mcp add --help`；用户级配置变更需另行授权并提供恢复步骤。
 - **风险/停止：** Hermes 未安装标记 `BLOCKED`；Fixture 不能替代真实 Codex 路径。
+- **阶段证据（2026-08-05）：** Desktop→UDS→Bridge→MCP real smoke 已通过，Codex CLI 使用 ephemeral/ignore-user-config/inline MCP config 发起验收，但被账户 usage limit 在 tool invocation 前阻止；Hermes 未安装。GATE-G4 因真实 Codex、live signed auto-launch 与锁屏 interactive lifecycle 证据缺失保持 `BLOCKED-EXTERNAL`。
 
 ## Goal 7：Binding、Topology 与 Timeline Core
 

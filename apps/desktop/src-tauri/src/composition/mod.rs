@@ -9,7 +9,10 @@ use crate::host::authorization::authorize_launch;
 use crate::host::lifecycle::LaunchSource;
 use crate::host::local_rpc::LocalRpcHost;
 use next_infra_core::Timestamp;
-use next_infra_host_integration::{IntegrationPaths, persist_user_quit};
+use next_infra_host_integration::{
+    IntegrationPaths, UserQuitInspection, authorize_mcp_host_launch, inspect_user_quit,
+    persist_user_quit,
+};
 use next_infra_local_rpc::session::QueryServiceHandler;
 use next_infra_query::dto::{
     ChangePageDto, ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, ErrorEnvelope,
@@ -38,6 +41,7 @@ pub struct AppState {
     settings: Mutex<LocalSettings>,
     settings_path: PathBuf,
     integration_paths: IntegrationPaths,
+    current_app_bundle: PathBuf,
     local_rpc: Mutex<Option<LocalRpcHost>>,
 }
 
@@ -54,7 +58,11 @@ pub fn restore_main_window(app: &tauri::AppHandle) {
 }
 
 impl AppState {
-    pub fn open(paths: &IntegrationPaths, source: LaunchSource) -> Result<Self, String> {
+    pub fn open(
+        paths: &IntegrationPaths,
+        source: LaunchSource,
+        current_app_bundle: &Path,
+    ) -> Result<Self, String> {
         let data_directory = &paths.root;
         ensure_data_directory(data_directory)?;
         let shared = SharedStore::open(&data_directory.join("next-infra.db"))
@@ -95,12 +103,36 @@ impl AppState {
             settings: Mutex::new(settings),
             settings_path,
             integration_paths: paths.clone(),
+            current_app_bundle: current_app_bundle.to_path_buf(),
             local_rpc: Mutex::new(Some(local_rpc)),
         })
     }
 
     pub fn runtime(&self) -> &Mutex<DesktopRuntime> {
         &self.runtime
+    }
+
+    fn user_quit_latched(&self) -> bool {
+        inspect_user_quit(&self.integration_paths) != UserQuitInspection::Clear
+    }
+
+    fn runtime_capabilities(&self) -> RuntimeCapabilities {
+        let user_quit = self.user_quit_latched();
+        let configured =
+            authorize_mcp_host_launch(&self.integration_paths, &self.current_app_bundle).is_ok();
+        let reason = if user_quit {
+            "Explicit Quit is latched. Reopen Next Infra interactively or at the next enabled login to clear suppression."
+        } else if configured {
+            "Trusted MCP integration is installed and authorized for this signed App."
+        } else {
+            "Trusted MCP integration is not installed, enabled, or verified for this App."
+        };
+        RuntimeCapabilities {
+            start_at_login: true,
+            manual_sync: false,
+            mcp_auto_launch: configured,
+            mcp_auto_launch_reason: reason.into(),
+        }
     }
 
     pub fn persist_user_quit_and_stop(&self) -> Result<(), String> {
@@ -156,7 +188,7 @@ pub fn setup(
         authorize_launch(source, paths, current_app_bundle)
             .map_err(|_| std::io::Error::other("desktop launch authorization changed"))?;
     }
-    let state = AppState::open(paths, source).map_err(std::io::Error::other)?;
+    let state = AppState::open(paths, source, current_app_bundle).map_err(std::io::Error::other)?;
     app.manage(state);
     crate::host::effects::install_workspace_observers(app.app_handle())
         .map_err(std::io::Error::other)?;
@@ -317,6 +349,7 @@ fn local_settings_get(
         .autolaunch()
         .is_enabled()
         .map_err(|_| safe_error("autostart_unavailable", "Start at login is unavailable."))?;
+    settings.user_quit = state.user_quit_latched();
     Ok(settings)
 }
 
@@ -330,6 +363,7 @@ fn local_settings_update(
         .settings
         .lock()
         .map_err(|_| safe_error("settings_unavailable", "Local settings are unavailable."))?;
+    current.user_quit = state.user_quit_latched();
     let updated = validate_settings_update(&current, settings)?;
     let autostart = app.autolaunch();
     if updated.start_at_login {
@@ -349,12 +383,8 @@ fn local_settings_update(
 }
 
 #[tauri::command]
-fn runtime_capabilities(_state: State<'_, AppState>) -> RuntimeCapabilities {
-    RuntimeCapabilities {
-        start_at_login: true,
-        manual_sync: false,
-        mcp_auto_launch: false,
-    }
+fn runtime_capabilities(state: State<'_, AppState>) -> RuntimeCapabilities {
+    state.runtime_capabilities()
 }
 
 fn load_settings(path: &Path) -> Result<LocalSettings, String> {
@@ -403,7 +433,8 @@ mod tests {
     fn composition_opens_one_runtime_and_persists_safe_settings() {
         let directory = test_home();
         let paths = IntegrationPaths::from_home(directory.path());
-        let state = AppState::open(&paths, LaunchSource::UserInteractive).unwrap();
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
         assert!(matches!(
             state.runtime().lock().unwrap().state(),
             next_infra_runtime::RuntimeState::Running(_)
@@ -428,12 +459,29 @@ mod tests {
         for source in [LaunchSource::LoginAutostart, LaunchSource::McpAuthorized] {
             let directory = test_home();
             let paths = IntegrationPaths::from_home(directory.path());
-            let state = AppState::open(&paths, source).unwrap();
+            let state = AppState::open(&paths, source, &paths.stable_app).unwrap();
             assert!(matches!(
                 state.runtime().lock().unwrap().state(),
                 next_infra_runtime::RuntimeState::Running(_)
             ));
         }
+    }
+
+    #[test]
+    fn host_mcp_state_reports_unavailable_and_explicit_quit_without_clearing_it() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let unavailable = state.runtime_capabilities();
+        assert!(!unavailable.mcp_auto_launch);
+        assert!(unavailable.mcp_auto_launch_reason.contains("not installed"));
+
+        persist_user_quit(&paths).unwrap();
+        let suppressed = state.runtime_capabilities();
+        assert!(!suppressed.mcp_auto_launch);
+        assert!(suppressed.mcp_auto_launch_reason.contains("Explicit Quit"));
+        assert!(state.user_quit_latched());
     }
 
     fn test_home() -> TempDir {

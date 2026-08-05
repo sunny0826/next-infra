@@ -68,6 +68,7 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
       start_at_login: false,
       manual_sync: false,
       mcp_auto_launch: false,
+      mcp_auto_launch_reason: "Desktop Host capabilities are unavailable.",
     };
   }
 

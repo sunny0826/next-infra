@@ -183,6 +183,7 @@ export class MockDesktopAdapter implements DesktopAdapter {
       start_at_login: true,
       manual_sync: true,
       mcp_auto_launch: false,
+      mcp_auto_launch_reason: "Trusted MCP integration is not installed, enabled, or verified for this App.",
     };
   }
 
