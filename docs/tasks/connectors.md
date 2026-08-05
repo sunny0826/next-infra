@@ -153,12 +153,14 @@ RHM-G2-01
 
 ### `CON-G5-04` — GitHub 纵切验收
 
+- **状态：** `REVIEW`（冻结见 [`CON-G5-04-TASK-FREEZE-2026-08-05.md`](./CON-G5-04-TASK-FREEZE-2026-08-05.md)，证据见 [`CON-G5-04-2026-08-05.md`](./CON-G5-04-2026-08-05.md)）。
 - **目标：** 合并两个 mapper 并证明 Desktop/MCP 查询 Repo → Workflow → Run。
 - **依赖：** `CON-G5-02/03`、`UI-G5-01` acceptance tests。
 - **独占路径：** GitHub `tests/contract/**` 和 Goal 5 integration tests；registry/manifests 由 `GATE-G5` Captain 修改。
 - **非目标：** 不在验收任务中修改 mapper、Query、UI 或保存 live response。
 - **验收：** ETag、429、permission、partial pagination 不误删；真实只读账户只经 Keychain，且不录制响应。
 - **验证：** GitHub conformance、vertical UI/MCP acceptance。
+- **实现证据（2026-08-05）：** `GitHubConnector<T,C>` 已实现 ReadConnector validation、Full/Targeted、process-local ETag/page/route cache、200 request 全局预算和固定 Repo→Environment→Deployment→Workflow→Run→Job 调度。42 项 GitHub tests 覆盖六资源纵切、304 reuse、Targeted exact cache、child permission partial、auth/uncached-304 fatal；真实临时 SQLite/SyncEngine replay 证明 partial 省略子资源不 tombstone。UI acceptance 待 `UI-G5-01`；真实 token/MCP 按用户决定 deferred。
 - **风险/停止：** 未配置真实只读身份时报告 blocked，不能用 Fixture 冒充 live acceptance。
 
 ## 4. Goal 6：SSH / Mac mini

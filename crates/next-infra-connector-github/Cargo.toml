@@ -17,4 +17,7 @@ url.workspace = true
 [dev-dependencies]
 next-infra-connector-contract-tests = { workspace = true }
 next-infra-normalizer = { workspace = true }
+next-infra-store = { workspace = true }
+next-infra-sync = { workspace = true }
+tempfile.workspace = true
 tokio.workspace = true

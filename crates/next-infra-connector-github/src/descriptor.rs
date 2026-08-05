@@ -32,32 +32,38 @@ pub fn github_descriptor() -> ConnectorDescriptor {
             resource(
                 repository.clone(),
                 "github.repositories",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Supported,
+                None,
             ),
             resource(
                 environment.clone(),
                 "github.environments",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Supported,
+                None,
             ),
             resource(
                 deployment.clone(),
                 "github.deployments",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Partial,
+                Some("deployment status endpoint is unsupported"),
             ),
             resource(
                 workflow.clone(),
                 "github.actions.workflows",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Supported,
+                None,
             ),
             resource(
                 run.clone(),
                 "github.actions.runs",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Partial,
+                Some("workflow run history is bounded to the newest 100 per repository"),
             ),
             resource(
                 job.clone(),
                 "github.actions.jobs",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Partial,
+                Some("job history is bounded per run and repository"),
             ),
         ],
         relations: vec![
@@ -66,35 +72,40 @@ pub fn github_descriptor() -> ConnectorDescriptor {
                 &environment,
                 "github.contains",
                 "github.repository_environment",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Supported,
+                None,
             ),
             relation(
                 &repository,
                 &deployment,
                 "github.contains",
                 "github.repository_deployment",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Supported,
+                None,
             ),
             relation(
                 &repository,
                 &workflow,
                 "github.contains",
                 "github.repository_workflow",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Supported,
+                None,
             ),
             relation(
                 &workflow,
                 &run,
                 "github.executes",
                 "github.workflow_run",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Partial,
+                Some("workflow run history is bounded"),
             ),
             relation(
                 &run,
                 &job,
                 "github.contains",
                 "github.run_job",
-                "CON-G5-04 collector integration pending",
+                ConnectorCoverageLevel::Partial,
+                Some("job history is bounded"),
             ),
         ],
         sensitive_field_policy: vec![
@@ -109,8 +120,9 @@ pub fn github_descriptor() -> ConnectorDescriptor {
         },
         recommended_sync_interval_secs: 900,
         known_gaps: vec![
-            "connector collector and ReadConnector integration pending CON-G5-04".into(),
             "deployment status endpoint is unsupported; deployment health remains unknown".into(),
+            "workflow run and job history are bounded current views".into(),
+            "ETag pages and targeted repository routes are process-local caches".into(),
             "logs, artifacts, secrets, variables and write APIs are unsupported".into(),
             "GitHub Enterprise Server base URLs are unsupported".into(),
         ],
@@ -121,14 +133,19 @@ fn kind(value: &str) -> ResourceKind {
     ResourceKind::new(value).expect("static resource kind")
 }
 
-fn resource(kind: ResourceKind, module: &str, reason: &str) -> ResourceCapability {
+fn resource(
+    kind: ResourceKind,
+    module: &str,
+    level: ConnectorCoverageLevel,
+    reason: Option<&str>,
+) -> ResourceCapability {
     ResourceCapability {
         kind,
         attribute_schema_version: SchemaVersion::new(1).expect("static schema version"),
         coverage: ConnectorCoverage {
             module: module.into(),
-            level: ConnectorCoverageLevel::Partial,
-            reason: Some(reason.into()),
+            level,
+            reason: reason.map(str::to_owned),
         },
     }
 }
@@ -138,7 +155,8 @@ fn relation(
     target_kind: &ResourceKind,
     relation_kind: &str,
     module: &str,
-    reason: &str,
+    level: ConnectorCoverageLevel,
+    reason: Option<&str>,
 ) -> RelationCapability {
     RelationCapability {
         kind: RelationKind::new(relation_kind).expect("static relation kind"),
@@ -146,8 +164,8 @@ fn relation(
         target_kind: target_kind.clone(),
         coverage: ConnectorCoverage {
             module: module.into(),
-            level: ConnectorCoverageLevel::Partial,
-            reason: Some(reason.into()),
+            level,
+            reason: reason.map(str::to_owned),
         },
     }
 }
@@ -163,11 +181,14 @@ mod tests {
         assert!(descriptor.validate().is_ok());
         assert!(check_descriptor(&descriptor).is_empty());
         assert!(
-            descriptor
-                .resources
-                .iter()
-                .all(|capability| { capability.coverage.level == ConnectorCoverageLevel::Partial })
+            descriptor.resources.iter().any(|capability| {
+                capability.coverage.level == ConnectorCoverageLevel::Supported
+            })
         );
+        assert!(descriptor.resources.iter().any(|capability| {
+            capability.coverage.level == ConnectorCoverageLevel::Partial
+                && capability.coverage.reason.is_some()
+        }));
         let serialized = serde_json::to_string(&descriptor)
             .unwrap()
             .to_ascii_lowercase();
@@ -178,5 +199,7 @@ mod tests {
                 assert!(!serialized.contains(forbidden));
             }
         }
+        assert!(!serialized.contains("mapper pending"));
+        assert!(!serialized.contains("collector integration pending"));
     }
 }

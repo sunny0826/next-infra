@@ -3,6 +3,7 @@
 pub mod actions;
 mod auth;
 mod client;
+mod connector;
 pub mod deployment;
 mod descriptor;
 pub mod environment;
@@ -11,6 +12,7 @@ pub mod repository;
 mod transport;
 
 pub use client::*;
+pub use connector::*;
 pub use descriptor::*;
 pub use error::*;
 pub use transport::*;

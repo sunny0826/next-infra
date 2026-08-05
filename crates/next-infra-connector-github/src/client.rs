@@ -12,6 +12,39 @@ pub const MAX_PAGES_PER_ENDPOINT: usize = 20;
 pub const MAX_REQUESTS_PER_BATCH: u64 = 200;
 const MAX_RETRY_AFTER_MS: u64 = 60 * 60 * 1000;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GitHubFetchBudget {
+    pub max_pages: usize,
+    pub max_requests: u64,
+}
+
+impl GitHubFetchBudget {
+    pub fn new(max_pages: usize, max_requests: u64) -> Result<Self, GitHubError> {
+        if max_pages == 0
+            || max_pages > MAX_PAGES_PER_ENDPOINT
+            || max_requests == 0
+            || max_requests > MAX_REQUESTS_PER_BATCH
+        {
+            return Err(GitHubError::invalid_response(
+                "GitHub fetch budget exceeds the transport contract",
+            ));
+        }
+        Ok(Self {
+            max_pages,
+            max_requests,
+        })
+    }
+}
+
+impl Default for GitHubFetchBudget {
+    fn default() -> Self {
+        Self {
+            max_pages: MAX_PAGES_PER_ENDPOINT,
+            max_requests: MAX_REQUESTS_PER_BATCH,
+        }
+    }
+}
+
 pub trait GitHubClock: Send + Sync {
     fn now_epoch_seconds(&self) -> u64;
 }
@@ -34,10 +67,23 @@ pub struct GitHubEndpoint {
 }
 
 impl GitHubEndpoint {
+    pub fn single(endpoint_class: &'static str, path: &str) -> Result<Self, GitHubError> {
+        Self::build(endpoint_class, path, &[], false)
+    }
+
     pub fn new(
         endpoint_class: &'static str,
         path: &str,
         query: &[(&str, &str)],
+    ) -> Result<Self, GitHubError> {
+        Self::build(endpoint_class, path, query, true)
+    }
+
+    fn build(
+        endpoint_class: &'static str,
+        path: &str,
+        query: &[(&str, &str)],
+        add_default_page_size: bool,
     ) -> Result<Self, GitHubError> {
         if endpoint_class.is_empty()
             || !path.starts_with('/')
@@ -67,7 +113,7 @@ impl GitHubEndpoint {
                 }
                 pairs.append_pair(key, value);
             }
-            if !query.iter().any(|(key, _)| *key == "per_page") {
+            if add_default_page_size && !query.iter().any(|(key, _)| *key == "per_page") {
                 pairs.append_pair("per_page", "100");
             }
         }
@@ -79,6 +125,10 @@ impl GitHubEndpoint {
 
     pub fn endpoint_class(&self) -> &'static str {
         self.endpoint_class
+    }
+
+    pub(crate) fn cache_key(&self) -> &str {
+        self.first_url.as_str()
     }
 }
 
@@ -171,12 +221,34 @@ where
     T: GitHubTransport,
     C: GitHubClock,
 {
+    pub(crate) fn now_epoch_seconds(&self) -> u64 {
+        self.clock.now_epoch_seconds()
+    }
+
     pub async fn fetch_pages(
         &self,
         endpoint: &GitHubEndpoint,
         secret: &SecretValue,
         etag: Option<&str>,
     ) -> Result<GitHubFetch, GitHubPaginationFailure> {
+        self.fetch_pages_with_budget(endpoint, secret, etag, GitHubFetchBudget::default())
+            .await
+    }
+
+    pub async fn fetch_pages_with_budget(
+        &self,
+        endpoint: &GitHubEndpoint,
+        secret: &SecretValue,
+        etag: Option<&str>,
+        budget: GitHubFetchBudget,
+    ) -> Result<GitHubFetch, GitHubPaginationFailure> {
+        if GitHubFetchBudget::new(budget.max_pages, budget.max_requests).is_err() {
+            return Err(pagination_failure(
+                Vec::new(),
+                summary(),
+                GitHubError::invalid_response("GitHub fetch budget exceeds the transport contract"),
+            ));
+        }
         let authorization = authorization_header(secret)
             .map_err(|error| pagination_failure(Vec::new(), summary(), error))?;
         let request_etag = etag.map(HeaderValue::from_str).transpose().map_err(|_| {
@@ -194,8 +266,8 @@ where
         let mut first_etag = None;
 
         loop {
-            if completed_pages.len() >= MAX_PAGES_PER_ENDPOINT
-                || request_summary.request_count >= MAX_REQUESTS_PER_BATCH
+            if completed_pages.len() >= budget.max_pages
+                || request_summary.request_count >= budget.max_requests
             {
                 return Err(pagination_failure(
                     completed_pages,

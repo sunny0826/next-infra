@@ -2252,9 +2252,12 @@ dependencies = [
  "next-infra-connector-contract-tests",
  "next-infra-core",
  "next-infra-normalizer",
+ "next-infra-store",
+ "next-infra-sync",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "url",
 ]

@@ -87,7 +87,12 @@ const allowedNormal = new Map([
 const allowedDev = new Map([
   [
     "next-infra-connector-github",
-    ["next-infra-connector-contract-tests", "next-infra-normalizer"],
+    [
+      "next-infra-connector-contract-tests",
+      "next-infra-normalizer",
+      "next-infra-store",
+      "next-infra-sync",
+    ],
   ],
 ]);
 

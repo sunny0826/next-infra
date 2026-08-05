@@ -75,6 +75,24 @@ impl RepositoryRouteContext {
     pub fn observed_at(&self) -> Timestamp {
         self.observed_at
     }
+
+    pub(crate) fn endpoint(
+        &self,
+        endpoint_class: &'static str,
+        suffix: &str,
+        query: &[(&str, &str)],
+    ) -> Result<crate::GitHubEndpoint, ConnectorFailure> {
+        let path = if suffix.is_empty() {
+            format!("/repos/{}/{}", self.owner, self.name)
+        } else {
+            format!("/repos/{}/{}/{suffix}", self.owner, self.name)
+        };
+        if suffix.is_empty() && query.is_empty() {
+            crate::GitHubEndpoint::single(endpoint_class, &path).map_err(Into::into)
+        } else {
+            crate::GitHubEndpoint::new(endpoint_class, &path, query).map_err(Into::into)
+        }
+    }
 }
 
 impl fmt::Debug for RepositoryRouteContext {
@@ -153,6 +171,8 @@ pub fn map_repositories(
     for repository in repositories {
         validate_required(&repository.name, "repository name")?;
         validate_required(&repository.owner.login, "repository owner")?;
+        validate_route_segment(&repository.owner.login, "repository owner")?;
+        validate_route_segment(&repository.name, "repository name")?;
         validate_required(&repository.visibility, "repository visibility")?;
         validate_optional(
             repository.default_branch.as_deref(),
@@ -284,6 +304,18 @@ fn validate_text(value: &str, field: &str) -> Result<(), ConnectorFailure> {
         || lower.contains("-----begin private key-----")
     {
         return Err(invalid(format!("GitHub {field} is unsafe or too long")));
+    }
+    Ok(())
+}
+
+fn validate_route_segment(value: &str, field: &str) -> Result<(), ConnectorFailure> {
+    if !value
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    {
+        return Err(invalid(format!(
+            "GitHub {field} is not a safe route segment"
+        )));
     }
     Ok(())
 }
