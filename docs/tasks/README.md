@@ -131,6 +131,9 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 25. [RHM-G3-05R Composition Review](./RHM-G3-05R-2026-08-04.md)
 26. [UI-G3-09 Real Desktop Lifecycle QA](./UI-G3-09-2026-08-04.md)
 27. [GATE-G3 纵切验收](./GATE-G3-2026-08-04.md)
+28. [GATE-G4 Local RPC 与 MCP 验收门](./GATE-G4-2026-08-05.md)
+29. [CON-G5-01 GitHub Transport、认证与 Descriptor 任务冻结](./CON-G5-01-TASK-FREEZE-2026-08-05.md)
+30. [CON-G5-01 GitHub Transport、认证与 Descriptor 验收记录](./CON-G5-01-2026-08-05.md)
 
 ## 6. 设计决策包
 
@@ -272,6 +275,7 @@ Gate Captain 必须：
 
 ### `GATE-G4` — Local RPC 与 MCP 验收门
 
+- **状态：** `REVIEW-READY / EXTERNAL-ACCEPTANCE-DEFERRED`（2026-08-05；用户授权继续 Goal 5，非 `PASS`）。
 - **目标：** 证明 Agent 通过受限本地协议调用同一 Query Service，且不能越权或复活显式退出的 Host。
 - **依赖：** `RHM-G4-01..05`、`UI-G4-01` 均处于 `REVIEW`。
 - **独占路径：** MCP/Bridge shared manifests/entrypoint/install metadata、`tests/gates/goal-4/**` 和验收报告。
@@ -334,6 +338,6 @@ Gate Captain 必须：
 
 - 已完成：Git 初始化、Goal 0、`DEC-G1-01..06`、Goal 1 工程任务与 `GATE-G1`。
 - 已完成：Goal 2 的 Core、Store、Sync、Normalizer、Fixture、Contract/Catalog、两条真实 SQLite integration suite、UI Fixture Catalog 与 `GATE-G2`。
-- 当前可派发：Goal 3 的 Query Service/QDTO v1 已进入 `REVIEW`；可按独占路径并行 `RHM-G3-02` Runtime、`RHM-G3-03` Host、`RHM-G3-04` Keychain、`UI-G3-01` Adapter 与 `UI-G3-02` Evidence Spine。
-- 当前等待：Goal 4 以后继续等待前序 Gate。
+- 已完成：Goal 3 内部验收与 Goal 4 内部实现；Goal 4 的 MCP Agent、Apple signing identity 和锁屏交互 smoke 保持 deferred，未标记为通过。
+- 当前可派发：用户于 2026-08-05 明确授权进入 Goal 5；先执行 `CON-G5-01` GitHub transport/auth/descriptor 冻结，再派发 Repository 与 Actions mapper 分支。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。

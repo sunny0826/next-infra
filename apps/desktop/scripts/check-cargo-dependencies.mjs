@@ -49,6 +49,7 @@ const allowedNormal = new Map([
     ],
   ],
   ["next-infra-connector-catalog", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-github", ["next-infra-connector-api", "next-infra-core"]],
   ["next-infra-sync", ["next-infra-connector-api", "next-infra-core", "next-infra-normalizer"]],
   ["next-infra-query", ["next-infra-core"]],
   ["next-infra-runtime", ["next-infra-connector-catalog", "next-infra-core", "next-infra-query", "next-infra-store", "next-infra-sync"]],
@@ -83,7 +84,9 @@ const allowedNormal = new Map([
   ],
 ]);
 
-const allowedDev = new Map();
+const allowedDev = new Map([
+  ["next-infra-connector-github", ["next-infra-connector-contract-tests"]],
+]);
 
 function internalDependencies(item, kind) {
   return [
@@ -151,8 +154,8 @@ for (const item of packages) {
   }
 }
 
-if (packages.length !== 17) {
-  failures.push(`workspace package count ${packages.length} != 17`);
+if (packages.length !== 18) {
+  failures.push(`workspace package count ${packages.length} != 18`);
 }
 
 if (failures.length > 0) {

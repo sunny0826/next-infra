@@ -7,6 +7,7 @@ members = [
   "crates/next-infra-connector-fixture",
   "crates/next-infra-connector-contract-tests",
   "crates/next-infra-connector-catalog",
+  "crates/next-infra-connector-github",
   "crates/next-infra-sync",
   "crates/next-infra-query",
   "crates/next-infra-runtime",
@@ -34,6 +35,7 @@ next-infra-normalizer = { path = "crates/next-infra-normalizer", version = "=0.1
 next-infra-connector-fixture = { path = "crates/next-infra-connector-fixture", version = "=0.1.0" }
 next-infra-connector-contract-tests = { path = "crates/next-infra-connector-contract-tests", version = "=0.1.0" }
 next-infra-connector-catalog = { path = "crates/next-infra-connector-catalog", version = "=0.1.0" }
+next-infra-connector-github = { path = "crates/next-infra-connector-github", version = "=0.1.0" }
 next-infra-sync = { path = "crates/next-infra-sync", version = "=0.1.0" }
 next-infra-query = { path = "crates/next-infra-query", version = "=0.1.0" }
 next-infra-runtime = { path = "crates/next-infra-runtime", version = "=0.1.0" }
@@ -64,3 +66,5 @@ objc2-foundation = { version = "=0.3.2", default-features = false, features = ["
 objc2-local-authentication = { version = "=0.3.2", default-features = false, features = ["std", "LAContext"] }
 security-framework = { version = "=3.7.0", features = ["OSX_10_15"] }
 security-framework-sys = { version = "=2.17.0", features = ["OSX_10_15"] }
+reqwest = { version = "=0.12.24", default-features = false, features = ["json", "rustls-tls"] }
+url = { version = "=2.5.8" }

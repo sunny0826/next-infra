@@ -113,6 +113,7 @@ RHM-G2-01
 
 ### `CON-G5-01` — GitHub Transport、认证与 Descriptor
 
+- **状态：** `REVIEW`（冻结见 [`CON-G5-01-TASK-FREEZE-2026-08-05.md`](./CON-G5-01-TASK-FREEZE-2026-08-05.md)，证据见 [`CON-G5-01-2026-08-05.md`](./CON-G5-01-2026-08-05.md)）。
 - **目标：** 固定官方 API/SDK、细粒度只读权限、分页、ETag 和 rate-limit transport。
 - **依赖：** `GATE-G4`、`CON-G2-05`。
 - **独占路径：** GitHub crate 的 `lib/client/auth/descriptor/error` modules。
@@ -121,6 +122,7 @@ RHM-G2-01
 - **输出：** 可供两个 mapper 分支使用的 GitHub Connector shell。
 - **验收：** 429/reset、permission、pagination error 可 fake-test；凭据不进入 request summary。
 - **验证：** GitHub transport/descriptor tests + common conformance。
+- **实现证据（2026-08-05）：** 新增隔离的 `next-infra-connector-github` crate，固定 GitHub REST API `2026-03-10`、rustls-only reqwest、敏感 token header、同源有界分页、typed 304、ETag、fake clock rate-limit、partial pagination 与 planned Descriptor coverage。15 项 crate tests、strict Clippy、workspace tests/Clippy、格式和 dependency direction 均通过；未使用真实 token，live/MCP 验收保持 deferred。
 - **风险/停止：** API/permission 易漂移；实施时只依赖官方文档并固定版本。
 
 ### `CON-G5-02` — Repository、Environment 与 Deployment

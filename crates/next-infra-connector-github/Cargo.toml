@@ -1,0 +1,19 @@
+[package]
+name = "next-infra-connector-github"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+next-infra-connector-api = { workspace = true }
+next-infra-core = { workspace = true }
+async-trait.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+
+[dev-dependencies]
+next-infra-connector-contract-tests = { workspace = true }
+tokio.workspace = true
