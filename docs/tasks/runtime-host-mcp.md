@@ -207,7 +207,7 @@
 
 ### `RHM-G4-04` — Host Availability 与 `user_quit`
 
-- **状态：** `RUNNING / BRIDGE-STATE-REVIEW / LIVE-SIGNATURE-BLOCKED-ENVIRONMENT`。
+- **状态：** `REVIEW / LOCKED-CONSOLE-LIFECYCLE-SMOKE-BLOCKED / LIVE-SIGNATURE-BLOCKED-ENVIRONMENT`。
 - **目标：** 实现可信自动拉起与跨 Bridge 抑制状态机。
 - **依赖：** `DEC-G1-02/03`、`RHM-G4-01`。
 - **独占路径：** Bridge host-availability/trusted-install 模块和 Desktop `user_quit` 模块；entrypoint wiring 留给 Gate Captain。
@@ -216,6 +216,7 @@
 - **验收：** 未授权/超时/失败均返回 `host_unavailable`；MCP 不能清除 `user_quit`；新 Bridge 仍受抑制；只有用户启动或已启用的下一次登录启动可清除。
 - **验证：** 多进程状态机 tests 和签名 App smoke。
 - **阶段证据（2026-08-04）：** Bridge 纯文件合同已实现 strict IntegrationRecord、七 capability 顺序、stable App/Bridge/current release、euid/mode/type 和 `user_quit` fail-closed。Bridge auto-launch 状态机现已增加强制 10 秒 monotonic deadline、真实 Local RPC handshake timeout、等待期 marker 抑制、artifact identity 前后校验、严格唯一 codesign 字段解析、App launch 前二次验签和单次固定 `/usr/bin/open` latch；withholding peer、超时截断、替换与 marker race 均有自动化证据。Bridge entrypoint、Desktop 二次授权和多进程/Tauri smoke 仍待后续阶段；当前 `0 valid identities found`，live signature smoke 未伪造通过。
+- **Composition 证据（2026-08-04）：** Bridge entrypoint、共享 Host integration contract、Desktop MCP 二次授权、interactive/login marker clear、动态 WebView、Desktop owner-only Local RPC listener、active session shutdown 与跨进程 `mcp-launch-v1.lock` 已接入。真实 release Desktop + 独立 Bridge 在临时 HOME 完成 MCP initialize、七工具 list 和 `get_health_summary` 查询；真实 login background bundle 连续观察无 on-screen window且 socket 为 `0600`。Workspace 187 tests、strict Clippy、dependency/bundle guards 通过。锁屏阻止 interactive Accessibility close/tray Quit automation，真实生命周期该部分保持阻塞；当前仍无 signing identity，live signature smoke 未伪造通过。
 - **风险/停止：** mock 不能代替安装路径、签名和升级验收。
 
 ### `RHM-G4-05` — Agent 与安全端到端验收

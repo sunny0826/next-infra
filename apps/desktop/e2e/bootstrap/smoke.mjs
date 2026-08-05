@@ -24,10 +24,18 @@ const appBundle = path.join(
   "target/release/bundle/macos/Next Infra.app",
 );
 const requestedExecutable = process.env.NEXT_INFRA_SMOKE_EXECUTABLE;
+const requestedHome = process.env.NEXT_INFRA_SMOKE_HOME;
+const smokeHome = requestedHome ? path.resolve(requestedHome) : homedir();
+const childEnvironment = { ...process.env, HOME: smokeHome };
 const verifyExplicitQuit = process.env.NEXT_INFRA_SMOKE_EXPLICIT_QUIT === "1";
+const skipVisualCapture = process.env.NEXT_INFRA_SMOKE_SKIP_VISUAL === "1";
+const expectBackground = process.env.NEXT_INFRA_SMOKE_EXPECT_BACKGROUND === "1";
+const launchArguments = expectBackground
+  ? ["--background", "--launch-source=login"]
+  : [];
 const userQuitMarker = path.join(
-  homedir(),
-  "Library/Application Support/dev.guoxudong.next-infra.dev/state/user-quit-v1.json",
+  smokeHome,
+  "Library/Application Support/Next Infra/state/user-quit-v1.json",
 );
 const appExecutable = requestedExecutable
   ? path.resolve(requestedExecutable)
@@ -169,9 +177,35 @@ async function waitForHiddenWindow(probeExecutable, pid, deadline) {
   throw new Error(`PID ${pid} did not hide its main window`);
 }
 
+async function verifyBackgroundOnly(probeExecutable, pid) {
+  const deadline = performance.now() + 2_000;
+  while (performance.now() < deadline) {
+    if (!(await exactCommandForPid(pid))) {
+      throw new Error(`background PID ${pid} exited unexpectedly`);
+    }
+    const { stdout } = await run(probeExecutable, [String(pid)]);
+    if (JSON.parse(stdout).window) {
+      throw new Error(`background PID ${pid} created an on-screen window`);
+    }
+    await delay(pollIntervalMs);
+  }
+  const socket = path.join(
+    smokeHome,
+    "Library/Application Support/Next Infra/run/next-infra-v1.sock",
+  );
+  const socketStats = await stat(socket);
+  if ((socketStats.mode & 0o777) !== 0o600) {
+    throw new Error(`background Local RPC socket mode is ${(socketStats.mode & 0o777).toString(8)}`);
+  }
+  console.log("[lifecycle] background launch created no window and exposed a 0600 Local RPC socket");
+}
+
 async function launchSecondInstanceAndWaitForExit() {
   return new Promise((resolve, reject) => {
-    const child = spawn(appExecutable, [], { stdio: "ignore" });
+    const child = spawn(appExecutable, launchArguments, {
+      env: childEnvironment,
+      stdio: "ignore",
+    });
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new Error("second instance did not exit after activation request"));
@@ -370,14 +404,26 @@ async function smoke() {
 
   const deadline = performance.now() + pollTimeoutMs;
   if (requestedExecutable) {
-    const child = spawn(appExecutable, [], { detached: true, stdio: "ignore" });
+    const child = spawn(appExecutable, launchArguments, {
+      detached: true,
+      env: childEnvironment,
+      stdio: "ignore",
+    });
     child.unref();
     launchedPid = child.pid;
   } else {
+    if (requestedHome) {
+      throw new Error("NEXT_INFRA_SMOKE_HOME requires NEXT_INFRA_SMOKE_EXECUTABLE");
+    }
     await run("/usr/bin/open", ["-n", appBundle]);
     launchedPid = await waitForNewPid(preexistingPids, deadline);
   }
   console.log(`[launch] selected new bundle PID: ${launchedPid}`);
+
+  if (expectBackground) {
+    await verifyBackgroundOnly(probeExecutable, launchedPid);
+    return;
+  }
 
   const probe = await probeWindow(probeExecutable, launchedPid, deadline);
   const window = probe.window;
@@ -385,29 +431,33 @@ async function smoke() {
     `[window] on-screen id=${window.id} geometry=${window.width}x${window.height}+${window.x}+${window.y}`,
   );
 
-  if (probe.screenLocked) {
-    throw new Error(
-      "macOS console is locked; unlock the active user session before visual bootstrap smoke",
+  if (skipVisualCapture) {
+    console.log("[screenshot] skipped by NEXT_INFRA_SMOKE_SKIP_VISUAL=1");
+  } else {
+    if (probe.screenLocked) {
+      throw new Error(
+        "macOS console is locked; unlock the active user session before visual bootstrap smoke",
+      );
+    }
+
+    if (!probe.screenCaptureAccess) {
+      throw new Error(
+        "macOS Screen Recording permission is unavailable; grant it to the invoking terminal/Codex app and rerun",
+      );
+    }
+
+    await delay(renderSettleMs);
+    const captureMode = await captureWindow(probeExecutable, window);
+    const png = await validatePng(screenshotPath, window);
+
+    if (!(await exactCommandForPid(launchedPid))) {
+      throw new Error(`launched PID ${launchedPid} exited during screenshot capture`);
+    }
+
+    console.log(
+      `[screenshot] mode=${captureMode} ${screenshotPath} (${png.width}x${png.height}, ${png.bytes} bytes)`,
     );
   }
-
-  if (!probe.screenCaptureAccess) {
-    throw new Error(
-      "macOS Screen Recording permission is unavailable; grant it to the invoking terminal/Codex app and rerun",
-    );
-  }
-
-  await delay(renderSettleMs);
-  const captureMode = await captureWindow(probeExecutable, window);
-  const png = await validatePng(screenshotPath, window);
-
-  if (!(await exactCommandForPid(launchedPid))) {
-    throw new Error(`launched PID ${launchedPid} exited during screenshot capture`);
-  }
-
-  console.log(
-    `[screenshot] mode=${captureMode} ${screenshotPath} (${png.width}x${png.height}, ${png.bytes} bytes)`,
-  );
 
   if (requestedExecutable) {
     await run(probeExecutable, ["close", String(launchedPid)]);
@@ -432,9 +482,11 @@ async function smoke() {
       launchedPid = null;
     }
   }
-  console.log(
-    "[visual] OCR is intentionally not asserted; inspect the retained screenshot for Next Infra, Overview, and Goal 1 placeholder",
-  );
+  if (!skipVisualCapture) {
+    console.log(
+      "[visual] OCR is intentionally not asserted; inspect the retained screenshot for Next Infra, Overview, and Goal 1 placeholder",
+    );
+  }
 }
 
 try {

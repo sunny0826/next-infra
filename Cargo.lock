@@ -2241,7 +2241,9 @@ version = "0.1.0"
 dependencies = [
  "block2",
  "core-foundation",
+ "libc",
  "next-infra-core",
+ "next-infra-host-integration",
  "next-infra-local-rpc",
  "next-infra-query",
  "next-infra-runtime",
@@ -2258,6 +2260,17 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tempfile",
+]
+
+[[package]]
+name = "next-infra-host-integration"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "next-infra-local-rpc",
+ "serde",
+ "serde_json",
  "tempfile",
 ]
 
@@ -2290,9 +2303,9 @@ name = "next-infra-mcp-bridge"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "next-infra-host-integration",
  "next-infra-local-rpc",
  "next-infra-mcp",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",

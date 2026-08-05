@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use next_infra_local_rpc::protocol::{
     Caller, ClientHello, ErrorCode, GetResourceQuery, GetTopologyQuery, HandshakeResponse,
     HostHello, QueryRequest, QueryResponse, RecentChangesQuery, RequestEnvelope, ResourceInclude,
-    ResponseBody, RpcError, SearchResourcesQuery, SyncStatusQuery,
+    ResponseBody, RpcError, SearchResourcesQuery, SyncStatusQuery, handshake_response,
 };
 use next_infra_local_rpc::session::{
     QueryHandler, QueryServiceHandler, RpcClient, RpcServer, SessionError,
@@ -119,6 +119,36 @@ fn handshake_with_timeout_rejects_a_peer_that_withholds_response() {
         SessionError::Frame(FramedError::Io(error))
             if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
     ));
+}
+
+#[test]
+fn query_with_timeout_rejects_a_peer_that_withholds_response() {
+    let (client_stream, mut server_stream) = UnixStream::pair().unwrap();
+    let server_thread = thread::spawn(move || {
+        let client: ClientHello = read_json_frame(&mut server_stream).unwrap();
+        let host = HostHello::initial("host-1.0.0", "release-a");
+        write_json_frame(&mut server_stream, &handshake_response(&client, &host)).unwrap();
+        let _: RequestEnvelope = read_json_frame(&mut server_stream).unwrap();
+        thread::sleep(Duration::from_millis(200));
+    });
+
+    let hello = ClientHello::initial("bridge-1.0.0", "release-a");
+    let mut client = RpcClient::handshake(client_stream, &hello).unwrap();
+    let request = RequestEnvelope::new(
+        "withheld-query",
+        Caller::test("session-test"),
+        QueryRequest::GetHealthSummary,
+    )
+    .unwrap();
+    let started_at = Instant::now();
+    let result = client.query_with_timeout(&request, Duration::from_millis(50));
+    assert!(started_at.elapsed() < Duration::from_secs(1));
+    assert!(matches!(
+        result,
+        Err(SessionError::Frame(FramedError::Io(error)))
+            if error.kind() == io::ErrorKind::TimedOut
+    ));
+    server_thread.join().unwrap();
 }
 
 #[test]

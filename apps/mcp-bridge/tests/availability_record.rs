@@ -123,6 +123,7 @@ impl Fixture {
         let home = temp.path().join("home");
         fs::create_dir_all(&home).unwrap();
         let paths = IntegrationPaths::from_home(&home);
+        create_dir_mode(&paths.root, 0o700);
         for directory in [
             &paths.integration_dir,
             &paths.mcp_dir,

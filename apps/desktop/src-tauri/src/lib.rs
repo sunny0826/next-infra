@@ -1,20 +1,47 @@
 //! Desktop Host modules composed by the `next-infra` binary.
 
+use std::ffi::OsString;
+use std::path::PathBuf;
+
+use host::authorization::{app_bundle_from_executable, authorize_launch, parse_process_arguments};
+use host::lifecycle::LaunchSource;
+use next_infra_host_integration::IntegrationPaths;
+
 pub mod adapter;
 pub mod composition;
 pub mod host;
 pub mod keychain;
 
-pub fn run() {
-    tauri::Builder::default()
+pub fn run() -> Result<(), String> {
+    let source = parse_process_arguments(std::env::args_os())
+        .map_err(|_| String::from("desktop_launch_rejected: Invalid launch arguments."))?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| String::from("desktop_launch_rejected: HOME is unavailable."))?;
+    let paths = IntegrationPaths::from_home(&home);
+    let current_executable = std::env::current_exe()
+        .map_err(|_| String::from("desktop_launch_rejected: Executable path is unavailable."))?;
+    let current_app = app_bundle_from_executable(&current_executable)
+        .map(PathBuf::from)
+        .or_else(|| (source != LaunchSource::McpAuthorized).then(|| paths.stable_app.clone()))
+        .ok_or_else(|| String::from("desktop_launch_rejected: App bundle is unavailable."))?;
+    authorize_launch(source, &paths, &current_app)
+        .map_err(|_| String::from("desktop_launch_rejected: Launch is not authorized."))?;
+
+    let setup_paths = paths.clone();
+    let setup_app = current_app.clone();
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(
-            |app, _arguments, _working_directory| {
-                composition::restore_main_window(app);
+            |app, arguments, _working_directory| {
+                let source = parse_process_arguments(arguments.into_iter().map(OsString::from));
+                if matches!(source, Ok(LaunchSource::UserInteractive)) {
+                    composition::restore_main_window(app);
+                }
             },
         ))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec!["--background", "--launch-source=login"]),
         ))
         .on_window_event(|window, event| {
             if window.label() == "main"
@@ -24,14 +51,15 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .setup(composition::setup)
+        .setup(move |app| composition::setup(app, &setup_paths, source, &setup_app))
         .invoke_handler(composition::invoke_handler())
         .build(tauri::generate_context!())
-        .expect("failed to build Next Infra desktop host")
-        .run(|app, event| {
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = event {
-                composition::restore_main_window(app);
-            }
-        });
+        .map_err(|_| String::from("desktop_start_failed: Desktop Host could not be built."))?;
+    app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            composition::restore_main_window(app);
+        }
+    });
+    Ok(())
 }

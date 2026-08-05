@@ -5,7 +5,12 @@ use crate::adapter::{
     RecentChangesCommand, RuntimeCapabilities, SearchResourcesCommand, SyncStatusCommand,
     manual_sync_unavailable, validate_settings_update,
 };
+use crate::host::authorization::authorize_launch;
+use crate::host::lifecycle::LaunchSource;
+use crate::host::local_rpc::LocalRpcHost;
 use next_infra_core::Timestamp;
+use next_infra_host_integration::{IntegrationPaths, persist_user_quit};
+use next_infra_local_rpc::session::QueryServiceHandler;
 use next_infra_query::dto::{
     ChangePageDto, ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, ErrorEnvelope,
     HealthSummaryDto, ResourceDetailDto, ResourcePageDto, SyncStatusDto, TopologyDto,
@@ -16,12 +21,13 @@ use next_infra_runtime::{
     SharedStore, SqliteRuntimeBackend,
 };
 use std::fs;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{App, AppHandle, Manager, State};
+use tauri::{App, AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt;
 
 type DesktopRuntime = Runtime<SqliteRuntimeBackend, CommittedQuerySource>;
@@ -31,11 +37,16 @@ pub struct AppState {
     query: DesktopQueryAdapter<CommittedQuerySource>,
     settings: Mutex<LocalSettings>,
     settings_path: PathBuf,
-    user_quit_path: PathBuf,
+    integration_paths: IntegrationPaths,
+    local_rpc: Mutex<Option<LocalRpcHost>>,
 }
 
 pub fn restore_main_window(app: &tauri::AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+    let window = app
+        .get_webview_window("main")
+        .or_else(|| build_main_window(app).ok());
+    if let Some(window) = window {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
@@ -43,20 +54,38 @@ pub fn restore_main_window(app: &tauri::AppHandle) {
 }
 
 impl AppState {
-    pub fn open(data_directory: &Path) -> Result<Self, String> {
-        fs::create_dir_all(data_directory).map_err(|_| "desktop data directory unavailable")?;
+    pub fn open(paths: &IntegrationPaths, source: LaunchSource) -> Result<Self, String> {
+        let data_directory = &paths.root;
+        ensure_data_directory(data_directory)?;
         let shared = SharedStore::open(&data_directory.join("next-infra.db"))
             .map_err(|_| "desktop store unavailable")?;
         let evaluated_at = now()?;
         let context = QueryContextSnapshot::empty(evaluated_at, 0);
-        let source =
+        let query_source =
             CommittedQuerySource::new(shared.clone(), ConnectorCatalogSnapshot::default(), context);
-        let query = DesktopQueryAdapter::new(QueryService::new(source.clone()));
+        let query = DesktopQueryAdapter::new(QueryService::new(query_source.clone()));
+        let rpc_handler = QueryServiceHandler::new(QueryService::new(query_source.clone()));
         let backend = SqliteRuntimeBackend::from_shared_store(shared);
-        let mut runtime = Runtime::new(backend, QueryService::new(source), Scheduler::default());
-        runtime
-            .start_interactive(evaluated_at)
-            .map_err(|_| "desktop runtime unavailable")?;
+        let mut runtime = Runtime::new(
+            backend,
+            QueryService::new(query_source),
+            Scheduler::default(),
+        );
+        match source {
+            LaunchSource::UserInteractive => runtime.start_interactive(evaluated_at),
+            LaunchSource::LoginAutostart | LaunchSource::McpAuthorized => {
+                runtime.start_background(evaluated_at)
+            }
+        }
+        .map_err(|_| "desktop runtime unavailable")?;
+
+        let local_rpc = match LocalRpcHost::start(paths, source, rpc_handler) {
+            Ok(local_rpc) => local_rpc,
+            Err(error) => {
+                let _ = runtime.stop();
+                return Err(error);
+            }
+        };
 
         let settings_path = data_directory.join("settings-v1.json");
         let settings = load_settings(&settings_path)?;
@@ -65,7 +94,8 @@ impl AppState {
             query,
             settings: Mutex::new(settings),
             settings_path,
-            user_quit_path: data_directory.join("state").join("user-quit-v1.json"),
+            integration_paths: paths.clone(),
+            local_rpc: Mutex::new(Some(local_rpc)),
         })
     }
 
@@ -74,15 +104,15 @@ impl AppState {
     }
 
     pub fn persist_user_quit_and_stop(&self) -> Result<(), String> {
-        let parent = self
-            .user_quit_path
-            .parent()
-            .ok_or("user quit path unavailable")?;
-        fs::create_dir_all(parent).map_err(|_| "user quit marker unavailable")?;
-        let temporary = self.user_quit_path.with_extension("json.tmp");
-        fs::write(&temporary, br#"{"schema_version":1,"user_quit":true}"#)
-            .and_then(|_| fs::rename(&temporary, &self.user_quit_path))
-            .map_err(|_| "user quit marker unavailable")?;
+        persist_user_quit(&self.integration_paths).map_err(|_| "user quit marker unavailable")?;
+        if let Some(local_rpc) = self
+            .local_rpc
+            .lock()
+            .map_err(|_| "local RPC unavailable")?
+            .take()
+        {
+            local_rpc.stop();
+        }
         self.runtime
             .lock()
             .map_err(|_| "desktop runtime unavailable")?
@@ -105,15 +135,28 @@ impl AppState {
     }
 
     pub fn handle_power_off(&self) {
+        if let Ok(mut local_rpc) = self.local_rpc.lock()
+            && let Some(local_rpc) = local_rpc.take()
+        {
+            local_rpc.stop();
+        }
         if let Ok(mut runtime) = self.runtime.lock() {
             let _ = runtime.stop();
         }
     }
 }
 
-pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
-    let data_directory = app.path().app_data_dir()?;
-    let state = AppState::open(&data_directory).map_err(std::io::Error::other)?;
+pub fn setup(
+    app: &mut App,
+    paths: &IntegrationPaths,
+    source: LaunchSource,
+    current_app_bundle: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if source == LaunchSource::McpAuthorized {
+        authorize_launch(source, paths, current_app_bundle)
+            .map_err(|_| std::io::Error::other("desktop launch authorization changed"))?;
+    }
+    let state = AppState::open(paths, source).map_err(std::io::Error::other)?;
     app.manage(state);
     crate::host::effects::install_workspace_observers(app.app_handle())
         .map_err(std::io::Error::other)?;
@@ -138,6 +181,40 @@ pub fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         _ => {}
     })
     .build(app)?;
+    if source == LaunchSource::UserInteractive {
+        app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        build_main_window(app.app_handle())?;
+    } else {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
+    Ok(())
+}
+
+fn build_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
+    WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title("Next Infra")
+        .inner_size(900.0, 600.0)
+        .build()
+}
+
+fn ensure_data_directory(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink()
+                || !metadata.is_dir()
+                || metadata.uid() != unsafe { libc::geteuid() as u32 }
+                || metadata.permissions().mode() & 0o7777 != 0o700
+            {
+                return Err("desktop data directory unavailable".into());
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::create_dir_all(path).map_err(|_| "desktop data directory unavailable")?;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+                .map_err(|_| "desktop data directory unavailable")?;
+        }
+        Err(_) => return Err("desktop data directory unavailable".into()),
+    }
     Ok(())
 }
 
@@ -320,12 +397,13 @@ fn safe_error(code: &str, message: &str) -> ErrorEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
+    use tempfile::{Builder, TempDir};
 
     #[test]
     fn composition_opens_one_runtime_and_persists_safe_settings() {
-        let directory = TempDir::new().unwrap();
-        let state = AppState::open(directory.path()).unwrap();
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state = AppState::open(&paths, LaunchSource::UserInteractive).unwrap();
         assert!(matches!(
             state.runtime().lock().unwrap().state(),
             next_infra_runtime::RuntimeState::Running(_)
@@ -338,10 +416,30 @@ mod tests {
         persist_settings(&state.settings_path, &updated).unwrap();
         assert_eq!(load_settings(&state.settings_path).unwrap(), updated);
         state.persist_user_quit_and_stop().unwrap();
-        assert!(state.user_quit_path.exists());
+        assert!(state.integration_paths.user_quit.exists());
         assert_eq!(
             state.runtime().lock().unwrap().state(),
             next_infra_runtime::RuntimeState::Stopped
         );
+    }
+
+    #[test]
+    fn background_sources_start_runtime_without_needing_a_window() {
+        for source in [LaunchSource::LoginAutostart, LaunchSource::McpAuthorized] {
+            let directory = test_home();
+            let paths = IntegrationPaths::from_home(directory.path());
+            let state = AppState::open(&paths, source).unwrap();
+            assert!(matches!(
+                state.runtime().lock().unwrap().state(),
+                next_infra_runtime::RuntimeState::Running(_)
+            ));
+        }
+    }
+
+    fn test_home() -> TempDir {
+        Builder::new()
+            .prefix("ni-desktop-composition")
+            .tempdir_in("/tmp")
+            .unwrap()
     }
 }

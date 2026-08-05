@@ -4,13 +4,15 @@ use std::cell::Cell;
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::thread;
 use std::time::Duration;
 
 use next_infra_mcp::McpBridgeError;
 use next_infra_mcp_bridge::availability::{
     AvailabilityActionError, AvailabilityPolicy, HostConnector, HostLauncher, IntegrationPaths,
-    IntegrationRecord, MonotonicClock, SignatureVerifier, VerifiedArtifacts, ensure_host,
-    open_command,
+    IntegrationRecord, MacOpenLauncher, MonotonicClock, SignatureVerifier, VerifiedArtifacts,
+    ensure_host, open_command,
 };
 use tempfile::{Builder, TempDir};
 
@@ -145,6 +147,74 @@ fn valid_fixture_launches_once_and_waits_for_handshake() {
     assert_eq!(launcher.calls.get(), 1);
     assert_eq!(connector.calls.get(), 3);
     assert!(clock.now.get() <= policy().timeout);
+}
+
+#[test]
+fn follower_waits_without_reverifying_or_launching() {
+    let fixture = Fixture::new();
+    let connector = FakeConnector::new(2, None);
+    let verifier = FakeVerifier::new(true);
+    let launcher = FakeLauncher::follower();
+    assert_eq!(
+        ensure_host(
+            &fixture.paths,
+            &fixture.bridge,
+            &connector,
+            &verifier,
+            &launcher,
+            &FakeClock::default(),
+            policy(),
+        )
+        .unwrap(),
+        2
+    );
+    assert_eq!(verifier.calls.get(), 0);
+    assert_eq!(launcher.calls.get(), 0);
+}
+
+#[test]
+fn production_launch_lock_is_exclusive_across_processes() {
+    let fixture = Fixture::new();
+    let ready = fixture._temp.path().join("launch-lock-ready");
+    let release = fixture._temp.path().join("launch-lock-release");
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .arg("--exact")
+        .arg("launch_lock_child_helper")
+        .arg("--nocapture")
+        .env("NEXT_INFRA_LOCK_HELPER_HOME", &fixture.home)
+        .env("NEXT_INFRA_LOCK_HELPER_READY", &ready)
+        .env("NEXT_INFRA_LOCK_HELPER_RELEASE", &release)
+        .spawn()
+        .unwrap();
+    for _ in 0..100 {
+        if ready.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ready.exists());
+
+    let launcher = MacOpenLauncher::default();
+    assert!(launcher.coordinate(&fixture.paths).unwrap().is_none());
+    fs::write(&release, b"release").unwrap();
+    assert!(child.wait().unwrap().success());
+    assert!(launcher.coordinate(&fixture.paths).unwrap().is_some());
+}
+
+#[test]
+fn launch_lock_child_helper() {
+    let Some(home) = std::env::var_os("NEXT_INFRA_LOCK_HELPER_HOME") else {
+        return;
+    };
+    let ready = PathBuf::from(std::env::var_os("NEXT_INFRA_LOCK_HELPER_READY").unwrap());
+    let release = PathBuf::from(std::env::var_os("NEXT_INFRA_LOCK_HELPER_RELEASE").unwrap());
+    let paths = IntegrationPaths::from_home(Path::new(&home));
+    let launcher = MacOpenLauncher::default();
+    let _guard = launcher.coordinate(&paths).unwrap().unwrap();
+    fs::write(&ready, b"ready").unwrap();
+    while !release.exists() {
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[test]
@@ -373,6 +443,7 @@ impl SignatureVerifier for FakeVerifier {
 struct FakeLauncher {
     calls: Cell<usize>,
     succeeds: bool,
+    leader: bool,
 }
 
 impl FakeLauncher {
@@ -380,11 +451,29 @@ impl FakeLauncher {
         Self {
             calls: Cell::new(0),
             succeeds,
+            leader: true,
+        }
+    }
+
+    fn follower() -> Self {
+        Self {
+            calls: Cell::new(0),
+            succeeds: true,
+            leader: false,
         }
     }
 }
 
 impl HostLauncher for FakeLauncher {
+    type Guard = ();
+
+    fn coordinate(
+        &self,
+        _paths: &IntegrationPaths,
+    ) -> Result<Option<Self::Guard>, AvailabilityActionError> {
+        Ok(self.leader.then_some(()))
+    }
+
     fn launch(&self, _artifacts: &VerifiedArtifacts) -> Result<(), AvailabilityActionError> {
         self.calls.set(self.calls.get() + 1);
         self.succeeds.then_some(()).ok_or(AvailabilityActionError)
@@ -408,6 +497,7 @@ impl MonotonicClock for FakeClock {
 
 struct Fixture {
     _temp: TempDir,
+    home: PathBuf,
     paths: IntegrationPaths,
     bridge: PathBuf,
     record: IntegrationRecord,
@@ -422,6 +512,7 @@ impl Fixture {
         let home = temp.path().join("home");
         fs::create_dir_all(&home).unwrap();
         let paths = IntegrationPaths::from_home(&home);
+        create_dir_mode(&paths.root);
         for directory in [
             &paths.integration_dir,
             &paths.mcp_dir,
@@ -463,6 +554,7 @@ impl Fixture {
         };
         let fixture = Self {
             _temp: temp,
+            home,
             paths,
             bridge,
             record,

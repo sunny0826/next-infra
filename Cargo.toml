@@ -11,6 +11,7 @@ members = [
   "crates/next-infra-query",
   "crates/next-infra-runtime",
   "crates/next-infra-local-rpc",
+  "crates/next-infra-host-integration",
   "crates/next-infra-mcp",
   "apps/desktop/src-tauri",
   "apps/mcp-bridge",
@@ -37,6 +38,7 @@ next-infra-sync = { path = "crates/next-infra-sync", version = "=0.1.0" }
 next-infra-query = { path = "crates/next-infra-query", version = "=0.1.0" }
 next-infra-runtime = { path = "crates/next-infra-runtime", version = "=0.1.0" }
 next-infra-local-rpc = { path = "crates/next-infra-local-rpc", version = "=0.1.0" }
+next-infra-host-integration = { path = "crates/next-infra-host-integration", version = "=0.1.0" }
 next-infra-mcp = { path = "crates/next-infra-mcp", version = "=0.1.0" }
 tauri = { version = "=2.11.5", features = ["tray-icon"] }
 tauri-build = { version = "=2.6.3" }

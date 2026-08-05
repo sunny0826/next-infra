@@ -53,9 +53,10 @@ const allowedNormal = new Map([
   ["next-infra-query", ["next-infra-core"]],
   ["next-infra-runtime", ["next-infra-connector-catalog", "next-infra-core", "next-infra-query", "next-infra-store", "next-infra-sync"]],
   ["next-infra-local-rpc", ["next-infra-query"]],
+  ["next-infra-host-integration", ["next-infra-local-rpc"]],
   ["next-infra-mcp", ["next-infra-local-rpc"]],
-  ["next-infra-desktop-adapter", ["next-infra-core", "next-infra-local-rpc", "next-infra-query", "next-infra-runtime"]],
-  ["next-infra-mcp-bridge", ["next-infra-mcp"]],
+  ["next-infra-desktop-adapter", ["next-infra-core", "next-infra-host-integration", "next-infra-local-rpc", "next-infra-query", "next-infra-runtime"]],
+  ["next-infra-mcp-bridge", ["next-infra-host-integration", "next-infra-local-rpc", "next-infra-mcp"]],
   [
     "next-infra-store-sync-integration",
     [
@@ -82,9 +83,7 @@ const allowedNormal = new Map([
   ],
 ]);
 
-const allowedDev = new Map([
-  ["next-infra-mcp-bridge", ["next-infra-local-rpc"]],
-]);
+const allowedDev = new Map();
 
 function internalDependencies(item, kind) {
   return [
@@ -152,8 +151,8 @@ for (const item of packages) {
   }
 }
 
-if (packages.length !== 16) {
-  failures.push(`workspace package count ${packages.length} != 16`);
+if (packages.length !== 17) {
+  failures.push(`workspace package count ${packages.length} != 17`);
 }
 
 if (failures.length > 0) {

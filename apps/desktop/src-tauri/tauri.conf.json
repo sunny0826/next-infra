@@ -10,15 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [
-      {
-        "label": "main",
-        "title": "Next Infra",
-        "width": 900,
-        "height": 600,
-        "visible": true
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": {
         "default-src": "'self'",

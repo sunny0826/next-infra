@@ -28,6 +28,11 @@ pub trait SignatureVerifier {
 }
 
 pub trait HostLauncher {
+    type Guard;
+    fn coordinate(
+        &self,
+        paths: &IntegrationPaths,
+    ) -> Result<Option<Self::Guard>, AvailabilityActionError>;
     fn launch(&self, artifacts: &VerifiedArtifacts) -> Result<(), AvailabilityActionError>;
 }
 
@@ -207,14 +212,18 @@ where
     if !record.allow_mcp_auto_launch {
         return Err(host_unavailable());
     }
-    let verified = verifier
-        .verify(paths, &record, current_executable)
-        .map_err(|_| host_unavailable())?;
-    if inspect_user_quit(paths) != UserQuitInspection::Clear {
-        return Err(host_unavailable());
+    let launch_guard = launcher.coordinate(paths).map_err(|_| host_unavailable())?;
+    if launch_guard.is_some() {
+        let verified = verifier
+            .verify(paths, &record, current_executable)
+            .map_err(|_| host_unavailable())?;
+        if inspect_user_quit(paths) != UserQuitInspection::Clear {
+            return Err(host_unavailable());
+        }
+        verified.revalidate().map_err(|_| host_unavailable())?;
+        launcher.launch(&verified).map_err(|_| host_unavailable())?;
     }
-    verified.revalidate().map_err(|_| host_unavailable())?;
-    launcher.launch(&verified).map_err(|_| host_unavailable())?;
+    let _launch_guard = launch_guard;
 
     let deadline = clock
         .now()

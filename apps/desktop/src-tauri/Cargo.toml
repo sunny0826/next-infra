@@ -14,7 +14,9 @@ path = "src/main.rs"
 tauri-build = { workspace = true }
 
 [dependencies]
+libc = { workspace = true }
 next-infra-core = { workspace = true }
+next-infra-host-integration = { workspace = true }
 next-infra-local-rpc = { workspace = true }
 next-infra-query = { workspace = true }
 next-infra-runtime = { workspace = true }

@@ -4,6 +4,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use next_infra_local_rpc::transport::{SocketError, SocketErrorKind, UnixLock};
 use next_infra_mcp::{LocalRpcMcpClient, McpBridgeError};
 
 use super::{
@@ -72,6 +73,22 @@ pub struct MacOpenLauncher {
 }
 
 impl HostLauncher for MacOpenLauncher {
+    type Guard = UnixLock;
+
+    fn coordinate(
+        &self,
+        paths: &IntegrationPaths,
+    ) -> Result<Option<Self::Guard>, AvailabilityActionError> {
+        match UnixLock::acquire(&paths.launch_lock) {
+            Ok(lock) => Ok(Some(lock)),
+            Err(SocketError::Kind {
+                kind: SocketErrorKind::AlreadyRunning,
+                ..
+            }) => Ok(None),
+            Err(_) => Err(AvailabilityActionError),
+        }
+    }
+
     fn launch(&self, artifacts: &VerifiedArtifacts) -> Result<(), AvailabilityActionError> {
         self.claim_launch()?;
         artifacts.revalidate()?;

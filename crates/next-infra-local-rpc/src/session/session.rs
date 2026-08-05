@@ -1,5 +1,6 @@
 use std::fmt;
-use std::io;
+use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -185,14 +186,12 @@ impl RpcClient {
         let deadline = Instant::now()
             .checked_add(timeout)
             .ok_or_else(timeout_error)?;
-        set_stream_timeouts(&stream, timeout)?;
         verify_peer_uid(&stream).map_err(TransportError::Peer)?;
-
-        set_write_timeout(&stream, remaining_timeout(deadline)?)?;
-        write_json_frame(&mut stream, client)?;
-
-        set_read_timeout(&stream, remaining_timeout(deadline)?)?;
-        let response: HandshakeResponse = read_json_frame(&mut stream)?;
+        let response: HandshakeResponse = {
+            let mut deadline_stream = DeadlineStream::new(&mut stream, deadline);
+            write_json_frame(&mut deadline_stream, client)?;
+            read_json_frame(&mut deadline_stream)?
+        };
         match response {
             HandshakeResponse::Accepted {
                 host,
@@ -204,7 +203,6 @@ impl RpcClient {
                         "Host upgrade recommendation does not match negotiated releases",
                     )));
                 }
-                clear_stream_timeouts(&stream)?;
                 Ok(Self {
                     stream,
                     host,
@@ -216,8 +214,20 @@ impl RpcClient {
     }
 
     pub fn query(&mut self, request: &RequestEnvelope) -> Result<ResponseEnvelope, SessionError> {
-        write_json_frame(&mut self.stream, request)?;
-        let response: ResponseEnvelope = read_json_frame(&mut self.stream)?;
+        self.query_with_timeout(request, DEFAULT_QUERY_TIMEOUT)
+    }
+
+    pub fn query_with_timeout(
+        &mut self,
+        request: &RequestEnvelope,
+        timeout: Duration,
+    ) -> Result<ResponseEnvelope, SessionError> {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .ok_or_else(timeout_error)?;
+        let mut deadline_stream = DeadlineStream::new(&mut self.stream, deadline);
+        write_json_frame(&mut deadline_stream, request)?;
+        let response: ResponseEnvelope = read_json_frame(&mut deadline_stream)?;
         if response.request_id != request.request_id {
             return Err(SessionError::Protocol(RpcError::invalid_frame(
                 "response request_id does not match the request",
@@ -236,43 +246,71 @@ impl RpcClient {
 }
 
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+const DEFAULT_QUERY_TIMEOUT: Duration = Duration::from_secs(30);
 
-fn remaining_timeout(deadline: Instant) -> Result<Duration, SessionError> {
-    deadline
-        .checked_duration_since(Instant::now())
-        .filter(|remaining| !remaining.is_zero())
-        .ok_or_else(timeout_error)
+struct DeadlineStream<'a> {
+    stream: &'a mut UnixStream,
+    deadline: Instant,
 }
 
-fn set_stream_timeouts(stream: &UnixStream, timeout: Duration) -> Result<(), SessionError> {
-    set_read_timeout(stream, timeout)?;
-    set_write_timeout(stream, timeout)
+impl<'a> DeadlineStream<'a> {
+    fn new(stream: &'a mut UnixStream, deadline: Instant) -> Self {
+        Self { stream, deadline }
+    }
+
+    fn wait(&self, events: libc::c_short) -> io::Result<()> {
+        loop {
+            let remaining = self
+                .deadline
+                .checked_duration_since(Instant::now())
+                .filter(|remaining| !remaining.is_zero())
+                .ok_or_else(deadline_timeout_io)?;
+            let milliseconds = remaining.as_millis().clamp(1, i32::MAX as u128) as i32;
+            let mut descriptor = libc::pollfd {
+                fd: self.stream.as_raw_fd(),
+                events,
+                revents: 0,
+            };
+            let result = unsafe { libc::poll(&mut descriptor, 1, milliseconds) };
+            if result > 0 {
+                return Ok(());
+            }
+            if result == 0 {
+                return Err(deadline_timeout_io());
+            }
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
 }
 
-fn clear_stream_timeouts(stream: &UnixStream) -> Result<(), SessionError> {
-    stream
-        .set_read_timeout(None)
-        .and_then(|_| stream.set_write_timeout(None))
-        .map_err(|error| SessionError::Frame(FramedError::Io(error)))
+impl Read for DeadlineStream<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.wait(libc::POLLIN)?;
+        self.stream.read(buffer)
+    }
 }
 
-fn set_read_timeout(stream: &UnixStream, timeout: Duration) -> Result<(), SessionError> {
-    stream
-        .set_read_timeout(Some(timeout))
-        .map_err(|error| SessionError::Frame(FramedError::Io(error)))
+impl Write for DeadlineStream<'_> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.wait(libc::POLLOUT)?;
+        self.stream.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.wait(libc::POLLOUT)?;
+        self.stream.flush()
+    }
 }
 
-fn set_write_timeout(stream: &UnixStream, timeout: Duration) -> Result<(), SessionError> {
-    stream
-        .set_write_timeout(Some(timeout))
-        .map_err(|error| SessionError::Frame(FramedError::Io(error)))
+fn deadline_timeout_io() -> io::Error {
+    io::Error::new(io::ErrorKind::TimedOut, "local RPC operation timed out")
 }
 
 fn timeout_error() -> SessionError {
-    SessionError::Frame(FramedError::Io(io::Error::new(
-        io::ErrorKind::TimedOut,
-        "local RPC handshake timed out",
-    )))
+    SessionError::Frame(FramedError::Io(deadline_timeout_io()))
 }
 
 fn selected_host(template: &HostHello, client: &ClientHello) -> HostHello {
