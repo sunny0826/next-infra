@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   createConnectorCoverageFixtures,
   createEmptyQuerySnapshotFixture,
+  createGitHubConnectorCoverageFixtures,
+  createGitHubGoal5SnapshotFixture,
   createQueryChangeFixture,
   createQueryErrorEnvelopeFixture,
   createQueryEvidenceLifecycleSnapshotFixture,
@@ -67,6 +69,12 @@ describe("UI query fixture catalog", () => {
     expect(JSON.stringify(createConnectorCoverageFixtures())).toBe(
       JSON.stringify(createConnectorCoverageFixtures()),
     );
+    expect(JSON.stringify(createGitHubGoal5SnapshotFixture())).toBe(
+      JSON.stringify(createGitHubGoal5SnapshotFixture()),
+    );
+    expect(JSON.stringify(createGitHubConnectorCoverageFixtures())).toBe(
+      JSON.stringify(createGitHubConnectorCoverageFixtures()),
+    );
     expect(JSON.stringify(createSyncRunFixtures())).toBe(
       JSON.stringify(createSyncRunFixtures()),
     );
@@ -86,6 +94,8 @@ describe("UI query fixture catalog", () => {
       page: createQueryPageInfoFixture(),
       change: createQueryChangeFixture(),
       coverage: createConnectorCoverageFixtures(),
+      github: createGitHubGoal5SnapshotFixture(),
+      githubCoverage: createGitHubConnectorCoverageFixtures(),
       syncRuns: createSyncRunFixtures(),
       states: createQueryViewStateFixtures(),
       unresolved: createUnresolvedRelationSnapshotFixture(),
@@ -94,6 +104,25 @@ describe("UI query fixture catalog", () => {
     expect(serialized).toContain("fixture-");
     expect(serialized).not.toMatch(/github\.com|10\.0\.|192\.168\.|https?:\/\//);
     expect(serialized).not.toMatch(/secret|password|token/i);
+  });
+
+  it("provides the bounded Repo to Workflow to Run and Deployment representative paths", () => {
+    const fixture = createGitHubGoal5SnapshotFixture();
+
+    expect(fixture.resources).toHaveLength(6);
+    expect(fixture.relations).toHaveLength(5);
+    expect(fixture.relations.map(({ kind }) => kind)).toEqual([
+      "github.contains",
+      "github.contains",
+      "github.contains",
+      "github.executes",
+      "github.contains",
+    ]);
+    expect(fixture.relations.every(({ evidence }) =>
+      evidence.type === "provider" && evidence.connector_type === "github",
+    )).toBe(true);
+    expect(createGitHubConnectorCoverageFixtures().map(({ level }) => level)).toContain("supported");
+    expect(createGitHubConnectorCoverageFixtures().map(({ level }) => level)).toContain("partial");
   });
 
   it("keeps empty state distinct from a committed snapshot", () => {

@@ -267,12 +267,14 @@ RHM-G3-01 + UI-G2-01
 
 ### `UI-G5-01` — GitHub 纵切 UI Acceptance
 
+- **状态：** `REVIEW`（见 [`UI-G5-01-2026-08-05.md`](./UI-G5-01-2026-08-05.md)）。
 - **目标：** 在既有页面核实 Repo → Workflow → Run/Deployment。
 - **依赖：** `CON-G5-02`、`CON-G5-03` 的清洗后 Query snapshots；不依赖尚未执行的 `CON-G5-04` 纵切汇合任务。
 - **独占路径：** `tests/acceptance/github/**`。
 - **非目标：** 不创建 Provider 专属页面。
 - **验收：** 429、permission 和 partial 不触发误删或假 empty；来源/时间/evidence 可见。
 - **验证：** `V-UI + V-DESKTOP`。
+- **实现证据（2026-08-05）：** 新增 Goal 5 synthetic QDTO snapshot、GitHub fixture adapter 与 `tests/acceptance/github/**`，复用既有 Overview/Inventory/Resource Detail/Connectors/Shell，无 Provider 专属页面。73 项 React tests、lint/build 通过；真实 in-app Browser 验证桌面与 390×844：Inventory 过滤到单一 workflow run、Connectors 分离 degraded health 与 Supported/Partial coverage、Repository Detail 展示 Environment/Deployment/Workflow provider evidence，console 无 error/warn、document 无横向 overflow。真实 Tauri bundle 与 live GitHub/MCP 按用户决定 deferred。
 - **风险/停止：** fixtures 不包含私有 repo data。
 
 ### `UI-G6-01` — SSH / Mac mini UI Acceptance

@@ -1,6 +1,7 @@
 import type { ConnectionDto } from "../../generated/query/ConnectionDto";
 import type { ConnectorCoverageSnapshotDto } from "../../generated/query/ConnectorCoverageSnapshotDto";
 import type { RelationDto } from "../../generated/query/RelationDto";
+import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
 
@@ -69,7 +70,7 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async getResource(input: GetResourceInput) {
+  async getResource(input: GetResourceInput): Promise<ResourceDetailDto> {
     const resource = this.#snapshot.resources.find(
       (item) => item.resource_id === input.resource_id,
     );

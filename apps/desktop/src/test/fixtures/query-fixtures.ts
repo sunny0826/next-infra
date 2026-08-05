@@ -284,6 +284,134 @@ export function createConnectorCoverageFixtures(): readonly ConnectorCoverageDto
   ];
 }
 
+export function createGitHubConnectorCoverageFixtures(): readonly ConnectorCoverageDto[] {
+  const supported = [
+    "github.repositories",
+    "github.environments",
+    "github.actions.workflows",
+    "github.repository_environment",
+    "github.repository_deployment",
+    "github.repository_workflow",
+  ].map((module) => ({
+    connector_type: "github",
+    connector_version: "1.0.0",
+    module,
+    level: "supported" as const,
+    reason: null,
+  }));
+  return [
+    ...supported,
+    {
+      connector_type: "github",
+      connector_version: "1.0.0",
+      module: "github.deployments",
+      level: "partial",
+      reason: "Deployment status is not collected; health remains unknown.",
+    },
+    {
+      connector_type: "github",
+      connector_version: "1.0.0",
+      module: "github.actions.runs",
+      level: "partial",
+      reason: "Workflow run history is bounded to the newest 100 per repository.",
+    },
+    {
+      connector_type: "github",
+      connector_version: "1.0.0",
+      module: "github.actions.jobs",
+      level: "partial",
+      reason: "Job history is bounded per run and repository.",
+    },
+    {
+      connector_type: "github",
+      connector_version: "1.0.0",
+      module: "github.workflow_run",
+      level: "partial",
+      reason: "Workflow run history is bounded.",
+    },
+    {
+      connector_type: "github",
+      connector_version: "1.0.0",
+      module: "github.run_job",
+      level: "partial",
+      reason: "Job history is bounded.",
+    },
+  ];
+}
+
+export function createGitHubGoal5SnapshotFixture(): DesktopAdapterSnapshot {
+  const connectionId = "fixture-github-connection";
+  const scope = "fixture-github-scope";
+  const githubResource = (
+    resourceId: string,
+    kind: string,
+    displayName: string,
+    health: ResourceDto["health"],
+  ): ResourceDto => ({
+    resource_id: resourceId,
+    connection_id: connectionId,
+    kind,
+    display_name: displayName,
+    scope,
+    lifecycle: "active",
+    health,
+    freshness: "fresh",
+    observed_at: FIXTURE_OBSERVED_AT,
+  });
+  const resources = [
+    githubResource("fixture-github-repository-10", "github.repository", "Fixture Repository", "unknown"),
+    githubResource("fixture-github-environment-20", "github.environment", "Fixture Environment", "unknown"),
+    githubResource("fixture-github-deployment-30", "github.deployment", "Fixture Environment", "unknown"),
+    githubResource("fixture-github-workflow-40", "github.workflow", "Fixture Workflow", "unknown"),
+    githubResource("fixture-github-run-50", "github.workflow_run", "Fixture Run", "healthy"),
+    githubResource("fixture-github-job-60", "github.workflow_job", "Fixture Job", "healthy"),
+  ];
+  const providerRelation = (
+    relationId: string,
+    sourceResourceId: string,
+    targetResourceId: string,
+    kind: string,
+    fieldPath: string,
+  ): RelationDto => ({
+    relation_id: relationId,
+    source_resource_id: sourceResourceId,
+    target_resource_id: targetResourceId,
+    kind,
+    lifecycle: "active",
+    evidence_type: "provider",
+    evidence: {
+      type: "provider",
+      connector_type: "github",
+      connection_id: connectionId,
+      sync_run_id: "fixture-github-sync-run-partial",
+      field_path: fieldPath,
+    },
+    last_seen_at: FIXTURE_OBSERVED_AT,
+  });
+  return {
+    metadata: metadata("fixture-github-goal5-v1"),
+    resources,
+    relations: [
+      providerRelation("fixture-github-repository-environment", resources[0].resource_id, resources[1].resource_id, "github.contains", "attributes.repository_id"),
+      providerRelation("fixture-github-repository-deployment", resources[0].resource_id, resources[2].resource_id, "github.contains", "attributes.repository_id"),
+      providerRelation("fixture-github-repository-workflow", resources[0].resource_id, resources[3].resource_id, "github.contains", "attributes.workflow_id"),
+      providerRelation("fixture-github-workflow-run", resources[3].resource_id, resources[4].resource_id, "github.executes", "attributes.workflow_id"),
+      providerRelation("fixture-github-run-job", resources[4].resource_id, resources[5].resource_id, "github.contains", "attributes.run_id"),
+    ],
+    connections: [
+      {
+        connection_id: connectionId,
+        connector_type: "github",
+        display_name: "GitHub Fixture Connection",
+        enabled: true,
+        health: "degraded",
+        last_success_at: FIXTURE_OBSERVED_AT,
+        last_attempt_at: FIXTURE_OBSERVED_AT,
+      },
+    ],
+  };
+}
+
 function syncRun(
   syncRunId: string,
   overrides: Partial<SyncRunDto>,
