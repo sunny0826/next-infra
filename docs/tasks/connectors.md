@@ -127,7 +127,7 @@ RHM-G2-01
 
 ### `CON-G5-02` — Repository、Environment 与 Deployment
 
-- **状态：** `FROZEN / READY-TO-IMPLEMENT`（见 [`CON-G5-02-TASK-FREEZE-2026-08-05.md`](./CON-G5-02-TASK-FREEZE-2026-08-05.md)）。
+- **状态：** `REVIEW`（冻结见 [`CON-G5-02-TASK-FREEZE-2026-08-05.md`](./CON-G5-02-TASK-FREEZE-2026-08-05.md)，证据见 [`CON-G5-02-2026-08-05.md`](./CON-G5-02-2026-08-05.md)）。
 - **目标：** 映射 GitHub Repository、Environment、Deployment 及显式 Provider relations。
 - **依赖：** `CON-G5-01`。
 - **独占路径：** GitHub crate `repository/**`、`environment/**`、`deployment/**` 和专属 fixtures。
@@ -135,6 +135,7 @@ RHM-G2-01
 - **输出：** 稳定 Resource/Relation、module coverage。
 - **验收：** visibility 只保留安全摘要；权限不足成为 module-level gap；fixture 无私有信息。
 - **验证：** mapper golden + conformance tests。
+- **实现证据（2026-08-05）：** 已实现三类 allowlisted DTO 与纯 mapper；numeric Provider ID 稳定 identity，Repository route owner/name 仅保留于不可序列化且 Debug redacted 的 transient context，Targeted lookup 缺 route 时失败而不猜路径。Environment/Deployment 关系固定 `attributes.repository_id`，Deployment Status 明确 unsupported/health Unknown。Repository 2,000、Environment 100、Deployment 200 上限由 mapper 强制执行；12 项聚焦测试含 unknown-field sentinel、Normalizer 与公共 conformance，GitHub crate 35 tests、strict Clippy 和 dependency direction 通过。
 - **风险/停止：** 不下载完整 deployment logs/payloads。
 
 ### `CON-G5-03` — Workflow、Run 与 Job

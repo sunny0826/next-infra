@@ -1,7 +1,7 @@
 # CON-G5-02 Repository、Environment 与 Deployment Mapper 任务冻结
 
 **冻结日期：** 2026-08-05  
-**状态：** `FROZEN / READY-TO-IMPLEMENT`  
+**状态：** `FROZEN / IMPLEMENTED / REVIEW`  
 **依赖：** `CON-G5-01` 已进入 `REVIEW`  
 **Reader Review：** 独立 `luna_worker` 只读审查完成
 
@@ -110,3 +110,7 @@ rtk git diff --check
 ## 8. 停止条件
 
 需要 Deployment Status、额外权限/query key、更大预算、任意 GitHub Enterprise origin、共享 Connector API/Core/Normalizer 修改时立即停止并回派 owner；不得在 mapper 内静默扩围。
+
+## 9. 实施结果
+
+2026-08-05 已完成 Repository、Environment、Deployment allowlisted DTO/mapper、transient route context、数量边界、stable relations 与 Normalizer/conformance 证据；详见 [`CON-G5-02-2026-08-05.md`](./CON-G5-02-2026-08-05.md)。HTTP child collector、304 cache 与 page-level failure composition 仍由 `CON-G5-04` 统一实现。

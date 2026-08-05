@@ -137,6 +137,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 31. [CON-G5-03 Workflow、Run 与 Job Mapper 任务冻结](./CON-G5-03-TASK-FREEZE-2026-08-05.md)
 32. [CON-G5-03 Workflow、Run 与 Job Mapper 验收记录](./CON-G5-03-2026-08-05.md)
 33. [CON-G5-02 Repository、Environment 与 Deployment Mapper 任务冻结](./CON-G5-02-TASK-FREEZE-2026-08-05.md)
+34. [CON-G5-02 Repository、Environment 与 Deployment Mapper 验收记录](./CON-G5-02-2026-08-05.md)
 
 ## 6. 设计决策包
 

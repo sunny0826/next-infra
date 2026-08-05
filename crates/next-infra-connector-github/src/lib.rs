@@ -3,8 +3,11 @@
 pub mod actions;
 mod auth;
 mod client;
+pub mod deployment;
 mod descriptor;
+pub mod environment;
 mod error;
+pub mod repository;
 mod transport;
 
 pub use client::*;
