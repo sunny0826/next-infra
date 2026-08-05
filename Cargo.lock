@@ -2251,6 +2251,7 @@ dependencies = [
  "next-infra-connector-api",
  "next-infra-connector-contract-tests",
  "next-infra-core",
+ "next-infra-normalizer",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
