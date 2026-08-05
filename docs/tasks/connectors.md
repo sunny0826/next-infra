@@ -138,6 +138,7 @@ RHM-G2-01
 
 ### `CON-G5-03` — Workflow、Run 与 Job
 
+- **状态：** `REVIEW`（冻结见 [`CON-G5-03-TASK-FREEZE-2026-08-05.md`](./CON-G5-03-TASK-FREEZE-2026-08-05.md)，证据见 [`CON-G5-03-2026-08-05.md`](./CON-G5-03-2026-08-05.md)）。
 - **目标：** 映射 Repo → Workflow → Run → Job 观察与关系。
 - **依赖：** `CON-G5-01`；可与 `CON-G5-02` 并行。
 - **独占路径：** GitHub crate `actions/**` 和专属 fixtures。
@@ -145,6 +146,7 @@ RHM-G2-01
 - **输出：** 有界 Actions resources/relations 和 pagination coverage。
 - **验收：** 高频 Run/Job 有结果上限；partial page/429 不触发权威删除。
 - **验证：** Actions mapper/pagination/conformance tests。
+- **实现证据（2026-08-05）：** 已实现 Workflow/Run/Job allowlisted DTO 与确定性 mapper；numeric Provider ID 形成稳定 identity/evidence，rerun attempt 不改变 Run identity，status/conclusion 映射 conservative health。Run 100、Workflow/Job 200 条上限由 mapper 强制执行，bounded/failure module 保持 partial；runner/steps/actor/URL/secret sentinel 不可达。8 项 Actions 聚焦测试含 Normalizer 与公共 conformance，strict Clippy 和 dependency direction 通过。
 - **风险/停止：** 结果体积或 API scope 需要扩张时先回到 Descriptor owner。
 
 ### `CON-G5-04` — GitHub 纵切验收

@@ -1,5 +1,6 @@
 //! Read-only GitHub REST transport and descriptor for Next Infra.
 
+pub mod actions;
 mod auth;
 mod client;
 mod descriptor;
