@@ -212,6 +212,8 @@ Hermes 的实际命令必须在安装后根据当时版本重新确认，不提�
 
 **依赖：** Goal 4
 
+**内部状态（2026-08-05）：** `PASS`；真实 GitHub read-only identity 未配置，live acceptance 保持 `BLOCKED-EXTERNAL`，MCP acceptance 按用户决定 deferred。内部工程轨道可继续 Goal 6，但不得宣称 Goal 5 live PASS。
+
 ### 范围
 
 - 实现细粒度只读认证和 Keychain SecretRef。

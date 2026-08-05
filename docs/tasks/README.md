@@ -141,6 +141,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 35. [CON-G5-04 GitHub Collector、ReadConnector 与纵切任务冻结](./CON-G5-04-TASK-FREEZE-2026-08-05.md)
 36. [CON-G5-04 GitHub Collector、ReadConnector 与纵切验收记录](./CON-G5-04-2026-08-05.md)
 37. [UI-G5-01 GitHub 纵切 UI Acceptance](./UI-G5-01-2026-08-05.md)
+38. [GATE-G5 GitHub / Actions 验收门](./GATE-G5-2026-08-05.md)
 
 ## 6. 设计决策包
 
@@ -293,6 +294,7 @@ Gate Captain 必须：
 
 ### `GATE-G5` — GitHub / Actions 验收门
 
+- **状态：** `INTERNAL-PASS / LIVE-ACCEPTANCE-BLOCKED-EXTERNAL`（2026-08-05，见 [`GATE-G5-2026-08-05.md`](./GATE-G5-2026-08-05.md)）。
 - **目标：** 证明 GitHub/Actions 首个真实 Provider 纵切符合只读、部分覆盖和证据契约。
 - **依赖：** `CON-G5-01..04`、`UI-G5-01` 均处于 `REVIEW`。
 - **独占路径：** GitHub registry/manifests/lockfile、`tests/gates/goal-5/**` 和验收报告。
@@ -346,5 +348,6 @@ Gate Captain 必须：
 - 已完成：Git 初始化、Goal 0、`DEC-G1-01..06`、Goal 1 工程任务与 `GATE-G1`。
 - 已完成：Goal 2 的 Core、Store、Sync、Normalizer、Fixture、Contract/Catalog、两条真实 SQLite integration suite、UI Fixture Catalog 与 `GATE-G2`。
 - 已完成：Goal 3 内部验收与 Goal 4 内部实现；Goal 4 的 MCP Agent、Apple signing identity 和锁屏交互 smoke 保持 deferred，未标记为通过。
-- 当前可派发：用户于 2026-08-05 明确授权进入 Goal 5；先执行 `CON-G5-01` GitHub transport/auth/descriptor 冻结，再派发 Repository 与 Actions mapper 分支。
+- 已完成：Goal 5 GitHub/Actions 内部 transport、mapper、ReadConnector、SQLite partial 纵切与 UI/browser acceptance；真实 GitHub identity 未配置，live 项保持 `BLOCKED-EXTERNAL`，MCP 按用户决定 deferred。
+- 当前可派发：Goal 6 内部工程轨道；先复核 `DEC-G6-01`，再执行 `CON-G6-01` OpenSSH transport/probe registry 冻结。Goal 5 live 缺口不得被后续 fixture 冒充补齐。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。
