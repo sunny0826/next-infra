@@ -127,6 +127,7 @@ RHM-G2-01
 
 ### `CON-G5-02` — Repository、Environment 与 Deployment
 
+- **状态：** `FROZEN / READY-TO-IMPLEMENT`（见 [`CON-G5-02-TASK-FREEZE-2026-08-05.md`](./CON-G5-02-TASK-FREEZE-2026-08-05.md)）。
 - **目标：** 映射 GitHub Repository、Environment、Deployment 及显式 Provider relations。
 - **依赖：** `CON-G5-01`。
 - **独占路径：** GitHub crate `repository/**`、`environment/**`、`deployment/**` 和专属 fixtures。
