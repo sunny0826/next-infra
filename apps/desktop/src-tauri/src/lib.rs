@@ -13,6 +13,7 @@ pub mod composition;
 pub mod github_live;
 pub mod host;
 pub mod keychain;
+pub mod scheduled_sync;
 
 pub fn run() -> Result<(), String> {
     let source = parse_process_arguments(std::env::args_os())

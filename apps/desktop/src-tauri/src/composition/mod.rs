@@ -9,6 +9,7 @@ use crate::github_live::GitHubSecretFiles;
 use crate::host::authorization::authorize_launch;
 use crate::host::lifecycle::LaunchSource;
 use crate::host::local_rpc::LocalRpcHost;
+use crate::scheduled_sync::{self, DriverHandle};
 use next_infra_binding::{BindingInput, BindingService};
 use next_infra_connector_aliyun::descriptor as aliyun_descriptor;
 use next_infra_connector_api::{
@@ -44,17 +45,17 @@ use next_infra_query::dto::{
 use next_infra_query::service::QueryService;
 use next_infra_runtime::{
     CommittedQuerySource, ConnectorCatalogSnapshot, QueryContextRefreshHandle,
-    QueryContextSnapshot, Runtime, Scheduler, SharedStore, SqliteRuntimeBackend,
+    QueryContextSnapshot, Runtime, ScheduledSync, Scheduler, SharedStore, SqliteRuntimeBackend,
 };
 use next_infra_sync::{SyncEngine, SyncRunStart};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder};
@@ -65,7 +66,7 @@ type DesktopRuntime = Runtime<SqliteRuntimeBackend, CommittedQuerySource>;
 const DEFAULT_QUERY_SYNC_INTERVAL_MILLIS: u64 = 15 * 60 * 1_000;
 
 pub struct AppState {
-    runtime: Mutex<DesktopRuntime>,
+    runtime: Arc<Mutex<DesktopRuntime>>,
     store: SharedStore,
     query: DesktopQueryAdapter<CommittedQuerySource>,
     query_context: QueryContextRefreshHandle,
@@ -75,6 +76,8 @@ pub struct AppState {
     github_sync_running: Arc<AtomicBool>,
     integration_paths: IntegrationPaths,
     current_app_bundle: PathBuf,
+    scheduler_driver: Mutex<Option<DriverHandle>>,
+    pending_syncs: Arc<Mutex<VecDeque<ScheduledSync>>>,
     local_rpc: Mutex<Option<LocalRpcHost>>,
     explicit_quit: AtomicBool,
     system_shutdown: AtomicBool,
@@ -134,17 +137,121 @@ impl AppState {
         let settings = load_settings(&settings_path)?;
         let github_secrets = GitHubSecretFiles::open(data_directory)
             .map_err(|_| "GitHub secret storage unavailable")?;
+
+        if let Ok(connections) = shared.read(|s| s.query_connections()) {
+            for connection in connections.body {
+                if connection.enabled && has_live_sync_path(&connection.connector_type) {
+                    let interval = query_sync_interval_millis(&connection.connector_type);
+                    let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
+                    let next_due = Timestamp::from_unix_millis(next_due).unwrap_or(evaluated_at);
+                    if let Err(e) = runtime.scheduler_mut().register(
+                        connection.connection_id.clone(),
+                        interval,
+                        next_due,
+                    ) {
+                        eprintln!(
+                            "scheduler: startup registration failed for {}: {:?}",
+                            connection.connection_id.as_str(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
+        let store_for_driver = shared.clone();
+        let github_secrets_for_driver = github_secrets.clone();
+        let runtime_for_driver = Arc::new(Mutex::new(runtime));
+        let runtime_for_driver_clone = runtime_for_driver.clone();
+        let pending_for_driver: Arc<Mutex<VecDeque<ScheduledSync>>> =
+            Arc::new(Mutex::new(VecDeque::new()));
+        let pending_for_driver_clone = pending_for_driver.clone();
+        let running_for_driver = Arc::new(AtomicBool::new(false));
+        let running_for_driver_clone = running_for_driver.clone();
+        let store_for_driver_clone = store_for_driver.clone();
+        let github_secrets_for_driver_clone = github_secrets_for_driver.clone();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let join = std::thread::spawn(move || {
+            let rt = runtime_for_driver_clone;
+            let store = store_for_driver_clone;
+            let github_secrets = github_secrets_for_driver_clone;
+            let pending = pending_for_driver_clone;
+            let running = running_for_driver_clone;
+            loop {
+                match rx.recv_timeout(Duration::from_millis(scheduled_sync::TICK_MILLIS)) {
+                    Ok(()) => break,
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        let Ok(at) = now() else {
+                            continue;
+                        };
+                        let Ok(mut guard) = rt.lock() else {
+                            continue;
+                        };
+                        let pending_inner = &mut pending.lock().unwrap();
+                        scheduled_sync::ScheduledSyncDriver::new(
+                            {
+                                let store = store.clone();
+                                move |id: &ConnectionId| {
+                                    store.read(|s| s.get_connection(id)).ok().flatten()
+                                }
+                            },
+                            {
+                                let store = store.clone();
+                                let github_secrets = github_secrets.clone();
+                                let running = running.clone();
+                                move |conn: Connection, trigger: SyncTrigger| {
+                                    if running.swap(true, Ordering::AcqRel) {
+                                        return Err(scheduled_sync::EnqueueError::SyncInProgress);
+                                    }
+                                    let sync_run_id = SyncRunId::new(format!(
+                                        "github-scheduled-{}",
+                                        uuid::Uuid::new_v4()
+                                    ))
+                                    .map_err(|_| {
+                                        running.store(false, Ordering::Release);
+                                        scheduled_sync::EnqueueError::Unavailable
+                                    })?;
+                                    scheduled_sync::spawn_github_sync(
+                                        store.clone(),
+                                        github_secrets.clone(),
+                                        running.clone(),
+                                        conn,
+                                        trigger,
+                                        sync_run_id,
+                                    )
+                                    .map_err(|_| {
+                                        running.store(false, Ordering::Release);
+                                        scheduled_sync::EnqueueError::Unavailable
+                                    })?;
+                                    Ok(())
+                                }
+                            },
+                        )
+                        .tick(&mut guard, pending_inner, at);
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        });
+        let driver_handle = DriverHandle {
+            stop: tx,
+            join: Some(join),
+        };
+
         Ok(Self {
-            runtime: Mutex::new(runtime),
+            runtime: runtime_for_driver,
             store: shared,
             query,
             query_context,
             settings: Mutex::new(settings),
             settings_path,
             github_secrets,
-            github_sync_running: Arc::new(AtomicBool::new(false)),
+            github_sync_running: running_for_driver,
             integration_paths: paths.clone(),
             current_app_bundle: current_app_bundle.to_path_buf(),
+            scheduler_driver: Mutex::new(Some(driver_handle)),
+            pending_syncs: pending_for_driver,
             local_rpc: Mutex::new(Some(local_rpc)),
             explicit_quit: AtomicBool::new(false),
             system_shutdown: AtomicBool::new(false),
@@ -226,12 +333,19 @@ impl AppState {
         {
             local_rpc.stop();
         }
+        self.stop_scheduler_driver();
         self.runtime
             .lock()
             .map_err(|_| "desktop runtime unavailable")?
             .stop()
             .map_err(|_| "desktop runtime unavailable")?;
         Ok(())
+    }
+
+    fn stop_scheduler_driver(&self) {
+        if let Some(handle) = self.scheduler_driver.lock().unwrap().take() {
+            handle.stop();
+        }
     }
 
     pub fn handle_sleep(&self) {
@@ -242,8 +356,11 @@ impl AppState {
 
     pub fn handle_wake(&self) {
         let Ok(at) = now() else { return };
-        if let Ok(mut runtime) = self.runtime.lock() {
-            let _ = runtime.wake(at);
+        if let Ok(mut runtime) = self.runtime.lock()
+            && let Ok(plans) = runtime.wake(at)
+        {
+            let mut pending = self.pending_syncs.lock().unwrap();
+            pending.extend(plans);
         }
     }
 
@@ -254,6 +371,7 @@ impl AppState {
         {
             local_rpc.stop();
         }
+        self.stop_scheduler_driver();
         if let Ok(mut runtime) = self.runtime.lock() {
             let _ = runtime.stop();
         }
@@ -351,6 +469,12 @@ impl AppState {
                     "Local query context is unavailable.",
                 )
             })?)?;
+            if let Err(error) = self.register_github_connection(&connection) {
+                eprintln!(
+                    "scheduler: connection saved but registration failed: {}",
+                    error.message
+                );
+            }
             let sync_run_id = self.enqueue_github_sync(connection, SyncTrigger::User)?;
             Ok(GitHubConnectResult {
                 connection_id: connection_id.as_str().to_owned(),
@@ -441,6 +565,21 @@ impl AppState {
                         "The local connection snapshot could not be removed.",
                     )
                 })?;
+            self.runtime
+                .lock()
+                .map_err(|_| {
+                    safe_error(
+                        "scheduler_unavailable",
+                        "Cannot remove scheduler entry: runtime unavailable.",
+                    )
+                })?
+                .scheduler_mut()
+                .remove(&connection_id);
+
+            // The driver thread stays alive for the whole AppState lifetime
+            // (it is a no-op while no entries are registered). It is stopped
+            // only by explicit Quit or power-off; a later connection create
+            // re-registers an entry without needing to restart the driver.
             self.refresh_query_context(now().map_err(|_| {
                 safe_error(
                     "query_context_unavailable",
@@ -474,6 +613,43 @@ impl AppState {
         Ok(connection_id)
     }
 
+    fn register_github_connection(&self, connection: &Connection) -> Result<(), ErrorEnvelope> {
+        if !has_live_sync_path(&connection.connector_type) {
+            return Ok(());
+        }
+        let at = now().map_err(|_| {
+            safe_error(
+                "scheduler_unavailable",
+                "Cannot register connection: clock unavailable.",
+            )
+        })?;
+        let interval = query_sync_interval_millis(&connection.connector_type);
+        let next_due = at.unix_millis().saturating_add(interval as i64);
+        let next_due = Timestamp::from_unix_millis(next_due).map_err(|_| {
+            safe_error(
+                "scheduler_unavailable",
+                "Cannot register connection: timestamp overflow.",
+            )
+        })?;
+        self.runtime
+            .lock()
+            .map_err(|_| {
+                safe_error(
+                    "scheduler_unavailable",
+                    "Cannot register connection: runtime unavailable.",
+                )
+            })?
+            .scheduler_mut()
+            .register(connection.connection_id.clone(), interval, next_due)
+            .map_err(|e| {
+                safe_error(
+                    "scheduler_error",
+                    format!("Cannot register connection: {:?}", e).as_str(),
+                )
+            })?;
+        Ok(())
+    }
+
     fn begin_github_sync(&self) -> Result<(), ErrorEnvelope> {
         if self.github_sync_running.swap(true, Ordering::AcqRel) {
             return Err(ErrorEnvelope {
@@ -498,19 +674,18 @@ impl AppState {
                     "GitHub synchronization could not start.",
                 )
             })?;
-        let store = self.store.clone();
-        let github_secrets = self.github_secrets.clone();
-        let running = self.github_sync_running.clone();
-        let queued_id = sync_run_id.as_str().to_owned();
-        tauri::async_runtime::spawn(async move {
-            let _ = sync_github(store, github_secrets, connection, trigger, sync_run_id).await;
-            running.store(false, Ordering::Release);
-        });
-        Ok(queued_id)
+        scheduled_sync::spawn_github_sync(
+            self.store.clone(),
+            self.github_secrets.clone(),
+            self.github_sync_running.clone(),
+            connection,
+            trigger,
+            sync_run_id,
+        )
     }
 }
 
-async fn sync_github(
+pub(crate) async fn sync_github(
     store: SharedStore,
     github_secrets: GitHubSecretFiles,
     mut connection: Connection,
@@ -860,7 +1035,7 @@ async fn github_discover_repositories(
         ],
     )
     .map_err(|_| safe_error("github_unavailable", "GitHub is unavailable."))?;
-    let fetched = client
+    let pages = match client
         .fetch_pages_with_budget(
             &endpoint,
             &secret,
@@ -1676,6 +1851,236 @@ mod tests {
         assert_eq!(error.code, "binding_unavailable");
         assert!(error.retryable);
         assert!(!error.message.contains("StoreError"));
+    }
+
+    // ── Scheduler integration tests ─────────────────────────────────────────
+
+    #[test]
+    fn scheduler_restarts_existing_github_connections_on_open() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let conn_id = ConnectionId::new("github-seeded-conn").unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+        store
+            .write(|s| {
+                s.upsert_connection(Connection {
+                    connection_id: conn_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "Seeded".into(),
+                    enabled: true,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+        drop(store);
+
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+
+        let rt = state.runtime().lock().unwrap();
+        let entry = rt.scheduler().entry(&conn_id);
+        assert!(
+            entry.is_some(),
+            "github connection should be registered on open"
+        );
+        let entry = entry.unwrap();
+        assert_eq!(entry.interval_millis, 900_000);
+        let current_time = now().unwrap();
+        let tolerance = 5_000;
+        let expected_next = current_time.unix_millis() + 900_000;
+        assert!(
+            (entry.next_due_at.unix_millis() - expected_next).abs() < tolerance,
+            "next_due_at should be within tolerance of now+900_000"
+        );
+        drop(rt);
+        assert!(
+            state.scheduler_driver.lock().unwrap().is_some(),
+            "driver should be running for existing github connection"
+        );
+        state.persist_user_quit_and_stop().unwrap();
+    }
+
+    #[test]
+    fn scheduler_disabled_github_connection_not_registered() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let conn_id = ConnectionId::new("github-disabled-conn").unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+        store
+            .write(|s| {
+                s.upsert_connection(Connection {
+                    connection_id: conn_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "Disabled".into(),
+                    enabled: false,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+        drop(store);
+
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+
+        let rt = state.runtime().lock().unwrap();
+        assert!(
+            rt.scheduler().entry(&conn_id).is_none(),
+            "disabled github connection should not be registered"
+        );
+        drop(rt);
+        assert!(
+            state.scheduler_driver.lock().unwrap().is_some(),
+            "driver starts regardless of connection state"
+        );
+        state.persist_user_quit_and_stop().unwrap();
+    }
+
+    #[test]
+    fn scheduler_non_github_connection_not_registered() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let conn_id = ConnectionId::new("ssh-conn").unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+        store
+            .write(|s| {
+                s.upsert_connection(Connection {
+                    connection_id: conn_id.clone(),
+                    connector_type: ConnectorType::new("ssh").unwrap(),
+                    display_name: "SSH".into(),
+                    enabled: true,
+                    config: serde_json::json!({}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+        drop(store);
+
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+
+        let rt = state.runtime().lock().unwrap();
+        assert!(
+            rt.scheduler().entry(&conn_id).is_none(),
+            "ssh connection should not be registered"
+        );
+        drop(rt);
+        assert!(
+            state.scheduler_driver.lock().unwrap().is_some(),
+            "driver starts regardless of connection state"
+        );
+        state.persist_user_quit_and_stop().unwrap();
+    }
+
+    #[test]
+    fn purge_removes_scheduler_entry_and_keeps_driver_alive() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let conn_id = ConnectionId::new("github-purge-conn").unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+        store
+            .write(|s| {
+                s.upsert_connection(Connection {
+                    connection_id: conn_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "Purge Me".into(),
+                    enabled: true,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+        drop(store);
+
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+
+        assert!(
+            state.scheduler_driver.lock().unwrap().is_some(),
+            "driver should be running"
+        );
+
+        state.purge_github_connection(conn_id.to_string()).unwrap();
+
+        assert!(
+            state
+                .runtime()
+                .lock()
+                .unwrap()
+                .scheduler()
+                .entry(&conn_id)
+                .is_none(),
+            "scheduler entry should be removed after purge"
+        );
+        assert!(
+            state.scheduler_driver.lock().unwrap().is_some(),
+            "driver must stay alive so a later connection create can be scheduled"
+        );
+        state.persist_user_quit_and_stop().unwrap();
+    }
+
+    #[test]
+    fn explicit_quit_stops_scheduler_driver() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let conn_id = ConnectionId::new("github-quit-conn").unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+        store
+            .write(|s| {
+                s.upsert_connection(Connection {
+                    connection_id: conn_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "Quit Test".into(),
+                    enabled: true,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+        drop(store);
+
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+
+        assert!(
+            state.scheduler_driver.lock().unwrap().is_some(),
+            "driver should be running"
+        );
+
+        persist_user_quit(&paths).unwrap();
+        state.stop_scheduler_driver();
+
+        assert!(
+            state.scheduler_driver.lock().unwrap().is_none(),
+            "driver should be stopped after quit"
+        );
+        state.persist_user_quit_and_stop().unwrap();
     }
 
     fn test_home() -> TempDir {
