@@ -536,6 +536,57 @@ impl AppState {
         Ok(summary.into())
     }
 
+    fn query_github_actions_summary(&self) -> Result<GitHubActionsSummarySnapshot, ErrorEnvelope> {
+        let rows = self
+            .store
+            .read(|store| store.query_github_actions_summary())
+            .map_err(|_| {
+                safe_error(
+                    "github_actions_summary_unavailable",
+                    "GitHub actions summary could not be read.",
+                )
+            })?;
+
+        use std::collections::BTreeMap;
+        let mut by_connection: BTreeMap<String, Vec<next_infra_store::GitHubActionsSummaryRow>> =
+            BTreeMap::new();
+        for row in rows.body {
+            by_connection
+                .entry(row.connection_id.as_str().to_owned())
+                .or_default()
+                .push(row);
+        }
+
+        let items: Vec<GitHubActionsSummary> = by_connection
+            .into_iter()
+            .map(|(connection_id, repo_rows)| {
+                let connection_name = repo_rows
+                    .first()
+                    .map(|r| r.connection_name.as_str())
+                    .unwrap_or("")
+                    .to_owned();
+                let repositories: Vec<GitHubRepositoryActions> = repo_rows
+                    .into_iter()
+                    .map(|r| GitHubRepositoryActions {
+                        repository_id: r.repository_id.as_str().to_owned(),
+                        repository_name: r.repository_name,
+                        action_count: r.action_count,
+                        succeeded: r.succeeded,
+                        failed: r.failed,
+                        running: r.running,
+                    })
+                    .collect();
+                GitHubActionsSummary {
+                    connection_id,
+                    connection_name,
+                    repositories,
+                }
+            })
+            .collect();
+
+        Ok(GitHubActionsSummarySnapshot { items })
+    }
+
     fn purge_github_connection(
         &self,
         connection_id: String,
@@ -941,6 +992,7 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         binding_disable,
         query_sync_status,
         query_connector_coverage,
+        query_github_actions_summary,
         github_discover_repositories,
         github_connect,
         github_connection_purge_preview,
@@ -1004,6 +1056,28 @@ impl From<next_infra_store::ConnectionPurgeSummary> for GitHubConnectionPurgeSum
             sync_runs: value.sync_runs,
         }
     }
+}
+
+#[derive(Serialize)]
+struct GitHubActionsSummarySnapshot {
+    items: Vec<GitHubActionsSummary>,
+}
+
+#[derive(Serialize)]
+struct GitHubActionsSummary {
+    connection_id: String,
+    connection_name: String,
+    repositories: Vec<GitHubRepositoryActions>,
+}
+
+#[derive(Serialize)]
+struct GitHubRepositoryActions {
+    repository_id: String,
+    repository_name: String,
+    action_count: u64,
+    succeeded: u64,
+    failed: u64,
+    running: u64,
 }
 
 #[tauri::command]
@@ -1100,6 +1174,13 @@ fn github_connection_purge_preview(
     request: GitHubConnectionPurgeCommand,
 ) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
     state.preview_github_connection_purge(request.connection_id)
+}
+
+#[tauri::command]
+fn query_github_actions_summary(
+    state: State<'_, AppState>,
+) -> Result<GitHubActionsSummarySnapshot, ErrorEnvelope> {
+    state.query_github_actions_summary()
 }
 
 #[tauri::command]

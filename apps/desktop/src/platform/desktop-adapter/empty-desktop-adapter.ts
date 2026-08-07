@@ -67,6 +67,10 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
     throw new Error("Desktop query service is unavailable.");
   }
 
+  async getGitHubActionsSummary(): Promise<never> {
+    throw new Error("Desktop query service is unavailable.");
+  }
+
   async discoverGitHubRepositories(_token: string): Promise<never> {
     throw new Error("GitHub repository discovery is unavailable.");
   }

@@ -101,6 +101,25 @@ export interface ConnectionPurgeSummary {
   readonly sync_runs: number;
 }
 
+export interface GitHubRepositoryActions {
+  readonly repository_id: string;
+  readonly repository_name: string;
+  readonly action_count: number;
+  readonly succeeded: number;
+  readonly failed: number;
+  readonly running: number;
+}
+
+export interface GitHubActionsSummary {
+  readonly connection_id: string;
+  readonly connection_name: string;
+  readonly repositories: readonly GitHubRepositoryActions[];
+}
+
+export interface GitHubActionsSummarySnapshot {
+  readonly items: readonly GitHubActionsSummary[];
+}
+
 export interface LocalSettings {
   readonly start_at_login: boolean;
   readonly data_budget_mb: number;
@@ -141,6 +160,7 @@ export interface DesktopAdapter {
   disableBinding(input: DisableBindingInput): Promise<BindingCommandResultDto>;
   getSyncStatus(input: SyncStatusInput): Promise<SyncStatusDto>;
   listConnectorCoverage(): Promise<ConnectorCoverageSnapshotDto>;
+  getGitHubActionsSummary(): Promise<GitHubActionsSummarySnapshot>;
   discoverGitHubRepositories(token: string): Promise<readonly GitHubRepositoryOption[]>;
   createGitHubConnection(input: CreateGitHubConnectionInput): Promise<CreateGitHubConnectionResult>;
   previewGitHubConnectionPurge(connectionId: string): Promise<ConnectionPurgeSummary>;

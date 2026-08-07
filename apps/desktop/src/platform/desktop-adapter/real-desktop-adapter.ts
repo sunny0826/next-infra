@@ -16,6 +16,7 @@ import type {
   DesktopAdapter,
   GetResourceInput,
   GetTopologyInput,
+  GitHubActionsSummarySnapshot,
   LocalSettings,
   ManualSyncResult,
   QueryInvalidation,
@@ -145,6 +146,10 @@ export class RealDesktopAdapter implements DesktopAdapter {
 
   async listConnectorCoverage() {
     return this.#invoke<ConnectorCoverageSnapshotDto>("query_connector_coverage");
+  }
+
+  async getGitHubActionsSummary() {
+    return this.#invoke<GitHubActionsSummarySnapshot>("query_github_actions_summary");
   }
 
   async discoverGitHubRepositories(token: string) {

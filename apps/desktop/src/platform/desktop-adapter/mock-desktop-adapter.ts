@@ -10,6 +10,7 @@ import type { DesktopAdapter } from "./desktop-adapter";
 import type {
   GetResourceInput,
   GetTopologyInput,
+  GitHubActionsSummarySnapshot,
   LocalSettings,
   QueryInvalidation,
   RecentChangesInput,
@@ -190,6 +191,10 @@ export class MockDesktopAdapter implements DesktopAdapter {
 
   async listConnectorCoverage(): Promise<ConnectorCoverageSnapshotDto> {
     return { metadata: this.#metadata(), items: [] };
+  }
+
+  async getGitHubActionsSummary(): Promise<GitHubActionsSummarySnapshot> {
+    return { items: [] };
   }
 
   async discoverGitHubRepositories() {
