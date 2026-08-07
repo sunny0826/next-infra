@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChangeDto } from "../../generated/query/ChangeDto";
 import type { ConnectionDto } from "../../generated/query/ConnectionDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
+import type { GitHubActionsSummarySnapshot } from "../../platform/desktop-adapter/desktop-adapter";
 import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { desktopErrorCode } from "../../platform/desktop-adapter/desktop-adapter";
@@ -13,6 +14,7 @@ interface OverviewState {
   readonly resources: readonly ResourceDto[];
   readonly connections: readonly ConnectionDto[];
   readonly changes: readonly ChangeDto[];
+  readonly githubActionsSummary: GitHubActionsSummarySnapshot;
 }
 
 interface OverviewPageProps {
@@ -45,13 +47,15 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
       adapter.searchResources({ limit: 25 }),
       adapter.listConnections(),
       adapter.getRecentChanges({ limit: 8 }),
+      adapter.getGitHubActionsSummary(),
     ])
-      .then(([resourcePage, connectionsSnapshot, changePage]) => {
+      .then(([resourcePage, connectionsSnapshot, changePage, githubActionsSummary]) => {
         if (!active) return;
         setState({
           resources: resourcePage.items,
           connections: connectionsSnapshot.items,
           changes: changePage.items,
+          githubActionsSummary,
         });
       })
       .catch((error) => {
@@ -65,6 +69,7 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
   const attention = useMemo(
     () =>
       state?.resources
+        .filter((resource) => resource.kind !== "github.workflow_run")
         .map((resource) => ({ resource, reason: attentionReason(resource) }))
         .filter(
           (item): item is { resource: ResourceDto; reason: string } =>
@@ -163,6 +168,48 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
             </article>
           ))}
         </div>
+      </section>
+
+      <section className="overview-section" aria-labelledby="overview-github-actions">
+        <div className="overview-section-heading">
+          <div>
+            <p className="overview-eyebrow">GitHub CI/CD</p>
+            <h2 id="overview-github-actions">GitHub Actions 聚合</h2>
+          </div>
+        </div>
+        {state.githubActionsSummary.items.length === 0 ? (
+          <p className="overview-empty">没有已同步的 GitHub Actions 数据。</p>
+        ) : (
+          <div className="overview-github-actions-table">
+            {state.githubActionsSummary.items.map((connection) => (
+              <div key={connection.connection_id} className="overview-github-actions-connection">
+                <h3>{connection.connection_name}</h3>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>仓库</th>
+                      <th>Action 数量</th>
+                      <th>成功</th>
+                      <th>失败</th>
+                      <th>进行中</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {connection.repositories.map((repo) => (
+                      <tr key={repo.repository_id}>
+                        <td>{repo.repository_name}</td>
+                        <td>{repo.action_count}</td>
+                        <td className="overview-github-actions--success">{repo.succeeded}</td>
+                        <td className="overview-github-actions--failed">{repo.failed}</td>
+                        <td className="overview-github-actions--running">{repo.running}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="overview-section overview-critical" aria-labelledby="overview-critical">
