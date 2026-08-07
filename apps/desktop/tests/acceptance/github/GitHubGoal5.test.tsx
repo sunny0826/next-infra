@@ -29,10 +29,9 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
     const repositories = screen.getByText("github.repositories").closest("article");
     expect(repositories).not.toBeNull();
     expect(within(repositories!).getByText("支持")).toBeInTheDocument();
-    const deployments = screen.getByText("github.deployments").closest("article");
-    expect(deployments).not.toBeNull();
-    expect(within(deployments!).getByText("部分覆盖")).toBeInTheDocument();
-    expect(within(deployments!).getByText(/status is not collected/i)).toBeInTheDocument();
+    const actionsWorkflows = screen.getByText("github.actions.workflows").closest("article");
+    expect(actionsWorkflows).not.toBeNull();
+    expect(within(actionsWorkflows!).getByText("支持")).toBeInTheDocument();
   });
 
   it("filters the bounded inventory through the adapter without producing a fake empty state", async () => {
@@ -46,24 +45,23 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
     expect(screen.getByText("1 个可见资源")).toBeInTheDocument();
   });
 
-  it("renders repository evidence paths to workflow and deployment with provider provenance", async () => {
+  it("renders repository evidence paths to workflow with provider provenance", async () => {
     renderWithGitHubFixture(
       <ResourceDetailPage resourceId="fixture-github-repository-10" />,
     );
 
     expect(await screen.findByRole("heading", { name: "Fixture Repository" })).toBeInTheDocument();
     expect(screen.getByText("Fixture Workflow")).toBeInTheDocument();
-    expect(screen.getAllByText("Fixture Environment").length).toBeGreaterThan(0);
     expect(screen.getAllByText("提供方").length).toBeGreaterThan(0);
     expect(screen.getByText("visibility")).toBeInTheDocument();
     expect(screen.getByText("private")).toBeInTheDocument();
-    expect(screen.getByText("11 个声明模块")).toBeInTheDocument();
+    expect(screen.getByText("5 个声明模块")).toBeInTheDocument();
   });
 
-  it("keeps workflow run and job health visible without inventing a critical path", async () => {
+  it("keeps workflow run health visible without inventing a critical path", async () => {
     renderWithGitHubFixture(<OverviewPage />);
 
-    expect(await screen.findByText("6 个受限资源")).toBeInTheDocument();
+    expect(await screen.findByText("3 个受限资源")).toBeInTheDocument();
     expect(screen.getByText("GitHub Fixture Connection")).toBeInTheDocument();
     expect(screen.getByText("当前没有固定关键路径。Next Infra 不会根据展示名称或近期活动推断重要性。")).toBeInTheDocument();
 
@@ -72,8 +70,7 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
       <ResourceDetailPage resourceId="fixture-github-run-50" />,
     );
     expect(await screen.findByRole("heading", { name: "Fixture Run" })).toBeInTheDocument();
-    expect(screen.getByText("Fixture Job")).toBeInTheDocument();
     expect(screen.getAllByText("健康").length).toBeGreaterThan(0);
-    expect(screen.getByText("run_attempt")).toBeInTheDocument();
+    expect(screen.getByText("run_id")).toBeInTheDocument();
   });
 });

@@ -1438,28 +1438,6 @@ fn github_normalizer() -> Normalizer {
                 ],
             ),
             github_schema(
-                "github.environment",
-                &[
-                    "environment_id",
-                    "repository_id",
-                    "protected_branches",
-                    "custom_branch_policies",
-                ],
-            ),
-            github_schema(
-                "github.deployment",
-                &[
-                    "deployment_id",
-                    "repository_id",
-                    "environment",
-                    "task",
-                    "transient_environment",
-                    "production_environment",
-                    "created_at",
-                    "updated_at",
-                ],
-            ),
-            github_schema(
                 "github.workflow",
                 &["workflow_id", "path", "state", "created_at", "updated_at"],
             ),
@@ -1469,38 +1447,15 @@ fn github_normalizer() -> Normalizer {
                     "run_id",
                     "workflow_id",
                     "run_number",
-                    "run_attempt",
-                    "event",
                     "status",
                     "conclusion",
-                    "head_branch",
                     "created_at",
-                    "updated_at",
-                    "run_started_at",
-                ],
-            ),
-            github_schema(
-                "github.workflow_job",
-                &[
-                    "job_id",
-                    "run_id",
-                    "status",
-                    "conclusion",
-                    "started_at",
-                    "completed_at",
                 ],
             ),
         ],
         [
-            github_relation("github.contains", "github.repository", "github.environment"),
-            github_relation("github.contains", "github.repository", "github.deployment"),
             github_relation("github.contains", "github.repository", "github.workflow"),
             github_relation("github.executes", "github.workflow", "github.workflow_run"),
-            github_relation(
-                "github.contains",
-                "github.workflow_run",
-                "github.workflow_job",
-            ),
         ],
     )
     .expect("static GitHub schemas are valid")

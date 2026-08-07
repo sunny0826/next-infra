@@ -1,7 +1,4 @@
-use super::{
-    JobDto, MAX_JOBS_PER_RUN, MAX_RUNS_PER_REPOSITORY, MAX_WORKFLOWS_PER_REPOSITORY, WorkflowDto,
-    WorkflowRunDto,
-};
+use super::{MAX_RUNS_PER_REPOSITORY, MAX_WORKFLOWS_PER_REPOSITORY, WorkflowDto, WorkflowRunDto};
 use next_infra_connector_api::{
     ConnectorFailure, ObservationWarning, RelationObservation, ResourceLocator, ResourceObservation,
 };
@@ -132,13 +129,9 @@ pub fn map_runs(
     for run in runs {
         validate_optional(run.name.as_deref(), "run name")?;
         validate_required(&run.display_title, "run display title")?;
-        validate_required(&run.event, "run event")?;
         validate_required(&run.status, "run status")?;
         validate_optional(run.conclusion.as_deref(), "run conclusion")?;
-        validate_optional(run.head_branch.as_deref(), "run branch")?;
         validate_required(&run.created_at, "run created_at")?;
-        validate_required(&run.updated_at, "run updated_at")?;
-        validate_optional(run.run_started_at.as_deref(), "run started_at")?;
         let resource_external_id = external_id("github-run", run.id)?;
         if !identities.insert(resource_external_id.clone()) {
             return Err(invalid("GitHub workflow runs contain duplicate identities"));
@@ -156,14 +149,9 @@ pub fn map_runs(
                 "run_id": run.id,
                 "workflow_id": run.workflow_id,
                 "run_number": run.run_number,
-                "run_attempt": run.run_attempt,
-                "event": run.event,
                 "status": run.status,
                 "conclusion": run.conclusion,
-                "head_branch": run.head_branch,
                 "created_at": run.created_at,
-                "updated_at": run.updated_at,
-                "run_started_at": run.run_started_at,
             }),
             attribute_schema_version: schema_version()?,
             observed_at: context.observed_at,
@@ -191,72 +179,6 @@ pub fn map_runs(
         failure,
     )
 }
-
-pub fn map_jobs(
-    context: &GitHubRepositoryContext,
-    jobs: impl IntoIterator<Item = JobDto>,
-    bounded: bool,
-    failure: Option<ConnectorFailure>,
-) -> Result<ActionMapperOutput, ConnectorFailure> {
-    let mut jobs = jobs.into_iter().collect::<Vec<_>>();
-    let bounded = bounded || jobs.len() > MAX_JOBS_PER_RUN;
-    jobs.truncate(MAX_JOBS_PER_RUN);
-    let mut resources = Vec::new();
-    let mut relations = Vec::new();
-    let mut identities = BTreeSet::new();
-    for job in jobs {
-        validate_required(&job.name, "job name")?;
-        validate_required(&job.status, "job status")?;
-        validate_optional(job.conclusion.as_deref(), "job conclusion")?;
-        validate_optional(job.started_at.as_deref(), "job started_at")?;
-        validate_optional(job.completed_at.as_deref(), "job completed_at")?;
-        let resource_external_id = external_id("github-job", job.id)?;
-        if !identities.insert(resource_external_id.clone()) {
-            return Err(invalid("GitHub jobs contain duplicate identities"));
-        }
-        resources.push(ResourceObservation {
-            kind: kind("github.workflow_job")?,
-            external_id: resource_external_id.clone(),
-            name: job.name.clone(),
-            display_name: job.name,
-            scope: context.scope.clone(),
-            labels: labels("workflow_job", Some(&job.status))?,
-            health: action_health(&job.status, job.conclusion.as_deref()),
-            attributes: json!({
-                "job_id": job.id,
-                "run_id": job.run_id,
-                "status": job.status,
-                "conclusion": job.conclusion,
-                "started_at": job.started_at,
-                "completed_at": job.completed_at,
-            }),
-            attribute_schema_version: schema_version()?,
-            observed_at: context.observed_at,
-        });
-        relations.push(RelationObservation {
-            source: ResourceLocator {
-                kind: kind("github.workflow_run")?,
-                external_id: external_id("github-run", job.run_id)?,
-            },
-            target: ResourceLocator {
-                kind: kind("github.workflow_job")?,
-                external_id: resource_external_id,
-            },
-            kind: relation_kind("github.contains")?,
-            evidence_key: evidence("github-provider-job", job.id)?,
-            field_path: field("attributes.run_id")?,
-            observed_at: context.observed_at,
-        });
-    }
-    output(
-        "github.actions.jobs",
-        resources,
-        relations,
-        bounded,
-        failure,
-    )
-}
-
 fn output(
     module: &'static str,
     resources: Vec<ResourceObservation>,
@@ -401,7 +323,6 @@ fn invalid(message: impl Into<String>) -> ConnectorFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Value;
 
     fn context() -> GitHubRepositoryContext {
         GitHubRepositoryContext {
@@ -453,10 +374,6 @@ mod tests {
             first.relations[0].evidence_key,
             second.relations[0].evidence_key
         );
-        assert_ne!(
-            first.resources[0].attributes,
-            second.resources[0].attributes
-        );
     }
 
     #[test]
@@ -471,27 +388,6 @@ mod tests {
             let output =
                 map_runs(&context(), [run(30, 1, status, conclusion)], false, None).unwrap();
             assert_eq!(output.resources[0].health, expected);
-        }
-    }
-
-    #[test]
-    fn unknown_dto_fields_and_job_steps_do_not_survive() {
-        let value: Value = serde_json::from_str(
-            r#"{"total_count":1,"jobs":[{"id":40,"run_id":30,"name":"Fixture job","status":"completed","conclusion":"success","started_at":null,"completed_at":null,"steps":[{"name":"bearer secret-sentinel"}],"runner_name":"private-runner","authorization":"secret-sentinel"}]}"#,
-        )
-        .unwrap();
-        let list: crate::actions::JobListDto = serde_json::from_value(value).unwrap();
-        let output = map_jobs(&context(), list.jobs, false, None).unwrap();
-        let serialized = serde_json::to_string(&output.resources)
-            .unwrap()
-            .to_ascii_lowercase();
-        for forbidden in [
-            "secret-sentinel",
-            "private-runner",
-            "steps",
-            "authorization",
-        ] {
-            assert!(!serialized.contains(forbidden));
         }
     }
 

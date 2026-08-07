@@ -17,19 +17,6 @@ const attributesByResourceId: Readonly<Record<string, Readonly<Record<string, st
     archived: false,
     disabled: false,
   },
-  "fixture-github-environment-20": {
-    environment_id: 20,
-    repository_id: 10,
-    protected_branches: true,
-    custom_branch_policies: false,
-  },
-  "fixture-github-deployment-30": {
-    deployment_id: 30,
-    repository_id: 10,
-    environment: "fixture-environment",
-    task: "deploy",
-    production_environment: true,
-  },
   "fixture-github-workflow-40": {
     workflow_id: 40,
     path: ".github/workflows/fixture.yml",
@@ -39,13 +26,6 @@ const attributesByResourceId: Readonly<Record<string, Readonly<Record<string, st
     run_id: 50,
     workflow_id: 40,
     run_number: 1,
-    run_attempt: 1,
-    status: "completed",
-    conclusion: "success",
-  },
-  "fixture-github-job-60": {
-    job_id: 60,
-    run_id: 50,
     status: "completed",
     conclusion: "success",
   },

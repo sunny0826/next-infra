@@ -2,11 +2,9 @@ use crate::{
     GitHubClient, GitHubClock, GitHubEndpoint, GitHubFetch, GitHubFetchBudget, GitHubPage,
     GitHubPages, GitHubPaginationFailure, GitHubTransport, MAX_REQUESTS_PER_BATCH,
     actions::{
-        ActionMapperOutput, GitHubRepositoryContext, JobListDto, WorkflowListDto,
-        WorkflowRunListDto, map_jobs, map_runs, map_workflows,
+        ActionMapperOutput, GitHubRepositoryContext, WorkflowListDto, WorkflowRunListDto, map_runs,
+        map_workflows,
     },
-    deployment::{DeploymentDto, map_deployments},
-    environment::{EnvironmentListDto, map_environments},
     github_descriptor,
     repository::{
         RepositoryDto, RepositoryMapperOutput, RepositoryRouteContext, find_targeted_route,
@@ -295,41 +293,6 @@ where
         route: &RepositoryRouteContext,
         collector: &mut Collector,
     ) -> ConnectorResult<()> {
-        let environment = route.endpoint("environments", "environments", &[])?;
-        let fetched = self
-            .fetch_cached(&environment, secret, 1, collector.remaining_requests)
-            .await;
-        let (pages, summary, failure) = optional_pages(fetched)?;
-        collector.add_summary(summary);
-        let environments = deserialize_wrapped(&pages, |dto: EnvironmentListDto| dto.environments)?;
-        collector.merge_repository(map_environments(
-            route,
-            environments,
-            failure.is_some(),
-            failure,
-        )?);
-
-        if collector.remaining_requests == 0 {
-            collector.mark_budget_exhausted();
-            return Ok(());
-        }
-        let deployment = route.endpoint("deployments", "deployments", &[])?;
-        let fetched = self
-            .fetch_cached(&deployment, secret, 2, collector.remaining_requests)
-            .await;
-        let (pages, summary, failure) = optional_pages(fetched)?;
-        collector.add_summary(summary);
-        collector.merge_repository(map_deployments(
-            route,
-            deserialize_array::<DeploymentDto>(&pages)?,
-            failure.is_some(),
-            failure,
-        )?);
-
-        if collector.remaining_requests == 0 {
-            collector.mark_budget_exhausted();
-            return Ok(());
-        }
         let actions_context = GitHubRepositoryContext {
             repository_external_id: route.repository_external_id().clone(),
             scope: route.scope().clone(),
@@ -370,28 +333,6 @@ where
             failure,
         )?);
 
-        let mut jobs_seen = 0usize;
-        for run in runs {
-            if collector.remaining_requests == 0
-                || jobs_seen >= crate::actions::MAX_JOBS_PER_REPOSITORY
-            {
-                collector.mark_budget_exhausted();
-                break;
-            }
-            let jobs_endpoint =
-                route.endpoint("jobs", &format!("actions/runs/{}/jobs", run.id), &[])?;
-            let fetched = self
-                .fetch_cached(&jobs_endpoint, secret, 2, collector.remaining_requests)
-                .await;
-            let (pages, summary, failure) = optional_pages(fetched)?;
-            collector.add_summary(summary);
-            let mut jobs = deserialize_wrapped(&pages, |dto: JobListDto| dto.jobs)?;
-            let remaining = crate::actions::MAX_JOBS_PER_REPOSITORY - jobs_seen;
-            let bounded = jobs.len() > remaining || failure.is_some();
-            jobs.truncate(remaining);
-            jobs_seen += jobs.len();
-            collector.merge_actions(map_jobs(&actions_context, jobs, bounded, failure)?);
-        }
         Ok(())
     }
 
@@ -879,16 +820,6 @@ mod tests {
             ),
             response(
                 StatusCode::OK,
-                Some("environment-etag"),
-                br#"{"total_count":1,"environments":[{"id":20,"name":"fixture-environment","deployment_branch_policy":{"protected_branches":true,"custom_branch_policies":false}}]}"#,
-            ),
-            response(
-                StatusCode::OK,
-                Some("deployment-etag"),
-                br#"[{"id":30,"environment":"fixture-environment","task":"deploy","transient_environment":false,"production_environment":true,"created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:01:00Z"}]"#,
-            ),
-            response(
-                StatusCode::OK,
                 Some("workflow-etag"),
                 br#"{"total_count":1,"workflows":[{"id":40,"name":"Fixture workflow","path":".github/workflows/fixture.yml","state":"active","created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:01:00Z"}]}"#,
             ),
@@ -896,11 +827,6 @@ mod tests {
                 StatusCode::OK,
                 Some("run-etag"),
                 br#"{"total_count":1,"workflow_runs":[{"id":50,"workflow_id":40,"name":"Fixture workflow","display_title":"Fixture run","run_number":1,"run_attempt":1,"event":"push","status":"completed","conclusion":"success","head_branch":"fixture-branch","created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:01:00Z","run_started_at":"2026-08-05T00:00:10Z"}]}"#,
-            ),
-            response(
-                StatusCode::OK,
-                Some("job-etag"),
-                br#"{"total_count":1,"jobs":[{"id":60,"run_id":50,"name":"Fixture job","status":"completed","conclusion":"success","started_at":"2026-08-05T00:00:20Z","completed_at":"2026-08-05T00:00:50Z"}]}"#,
             ),
         ]
     }
@@ -942,7 +868,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn full_vertical_collects_six_resources_and_only_allowlisted_endpoints() {
+    async fn full_vertical_collects_three_resources_and_only_allowlisted_endpoints() {
         let (transport, requests) = FakeTransport::new(full_responses());
         let connector = GitHubConnector::with_clock(transport, FixedClock(1_000));
         let outcome = connector
@@ -952,9 +878,9 @@ mod tests {
         let SyncOutcome::Partial { batch, failure } = outcome else {
             panic!("GitHub bounded view must be partial")
         };
-        assert_eq!(batch.resources.len(), 6);
-        assert_eq!(batch.relations.len(), 5);
-        assert_eq!(batch.provider_request_summary.request_count, 6);
+        assert_eq!(batch.resources.len(), 3);
+        assert_eq!(batch.relations.len(), 2);
+        assert_eq!(batch.provider_request_summary.request_count, 3);
         assert_eq!(failure.code, ErrorCode::PartialPagination);
         let serialized = serde_json::to_string(&batch).unwrap().to_ascii_lowercase();
         for forbidden in ["logs", "artifacts", "secrets", "variables", "statuses"] {
@@ -968,11 +894,8 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![
                 "/user/repos",
-                "/repos/fixture-owner/fixture-repo/environments",
-                "/repos/fixture-owner/fixture-repo/deployments",
                 "/repos/fixture-owner/fixture-repo/actions/workflows",
                 "/repos/fixture-owner/fixture-repo/actions/runs",
-                "/repos/fixture-owner/fixture-repo/actions/runs/50/jobs",
             ]
         );
     }
@@ -980,7 +903,7 @@ mod tests {
     #[tokio::test]
     async fn second_full_sync_reuses_all_cached_pages_on_304() {
         let mut responses = full_responses();
-        responses.extend((0..6).map(|_| response(StatusCode::NOT_MODIFIED, None, b"")));
+        responses.extend((0..3).map(|_| response(StatusCode::NOT_MODIFIED, None, b"")));
         let (transport, requests) = FakeTransport::new(responses);
         let connector = GitHubConnector::with_clock(transport, FixedClock(1_000));
         connector
@@ -994,10 +917,10 @@ mod tests {
         let SyncOutcome::Partial { batch, .. } = outcome else {
             panic!("GitHub bounded view must be partial")
         };
-        assert_eq!(batch.resources.len(), 6);
-        assert_eq!(batch.provider_request_summary.status_class_counts["3xx"], 6);
+        assert_eq!(batch.resources.len(), 3);
+        assert_eq!(batch.provider_request_summary.status_class_counts["3xx"], 3);
         let requests = requests.lock().unwrap();
-        assert!(requests[6..].iter().all(|(_, has_etag)| *has_etag));
+        assert!(requests[3..].iter().all(|(_, has_etag)| *has_etag));
     }
 
     #[tokio::test]
@@ -1038,10 +961,10 @@ mod tests {
         let SyncOutcome::Partial { batch, .. } = outcome else {
             panic!("GitHub targeted bounded view must be partial")
         };
-        assert_eq!(batch.resources.len(), 6);
+        assert_eq!(batch.resources.len(), 3);
         {
             let requests = requests.lock().unwrap();
-            assert_eq!(requests[6].0, "/repos/fixture-owner/fixture-repo");
+            assert_eq!(requests[3].0, "/repos/fixture-owner/fixture-repo");
         }
 
         let (transport, _) = FakeTransport::new(Vec::new());
@@ -1067,11 +990,11 @@ mod tests {
             panic!("GitHub child permission gap must be partial")
         };
         assert_eq!(failure.code, ErrorCode::PermissionDenied);
-        assert_eq!(batch.resources.len(), 5);
-        assert_eq!(batch.relations.len(), 4);
+        assert_eq!(batch.resources.len(), 2);
+        assert_eq!(batch.relations.len(), 1);
         assert!(batch.warnings.iter().any(|warning| {
             warning.code == ErrorCode::PermissionDenied
-                && warning.message == "GitHub module github.environments is partial"
+                && warning.message == "GitHub module github.actions.workflows is partial"
         }));
         assert!(!format!("{batch:?}").contains("permission-body-sentinel"));
     }

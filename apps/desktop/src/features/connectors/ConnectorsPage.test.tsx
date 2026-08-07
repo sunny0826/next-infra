@@ -56,6 +56,6 @@ describe("ConnectorsPage", () => {
     expect(await screen.findByRole("heading", { name: "删除本地快照" })).toBeInTheDocument();
     expect(screen.getByText(/将永久删除“GitHub Fixture Connection”/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认删除本地快照" }));
-    expect(await screen.findByText(/已删除 6 个资源、5 条关系/)).toBeInTheDocument();
+    expect(await screen.findByText(/已删除 3 个资源、2 条关系/)).toBeInTheDocument();
   });
 });

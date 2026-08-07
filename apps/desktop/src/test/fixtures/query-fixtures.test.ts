@@ -106,17 +106,14 @@ describe("UI query fixture catalog", () => {
     expect(serialized).not.toMatch(/secret|password|token/i);
   });
 
-  it("provides the bounded Repo to Workflow to Run and Deployment representative paths", () => {
+  it("provides the bounded Repo to Workflow to Run representative paths", () => {
     const fixture = createGitHubGoal5SnapshotFixture();
 
-    expect(fixture.resources).toHaveLength(6);
-    expect(fixture.relations).toHaveLength(5);
+    expect(fixture.resources).toHaveLength(3);
+    expect(fixture.relations).toHaveLength(2);
     expect(fixture.relations.map(({ kind }) => kind)).toEqual([
       "github.contains",
-      "github.contains",
-      "github.contains",
       "github.executes",
-      "github.contains",
     ]);
     expect(fixture.relations.every(({ evidence }) =>
       evidence.type === "provider" && evidence.connector_type === "github",

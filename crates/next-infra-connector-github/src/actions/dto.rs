@@ -38,20 +38,3 @@ pub struct WorkflowRunDto {
     pub updated_at: String,
     pub run_started_at: Option<String>,
 }
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-pub struct JobListDto {
-    pub total_count: u64,
-    pub jobs: Vec<JobDto>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-pub struct JobDto {
-    pub id: u64,
-    pub run_id: u64,
-    pub name: String,
-    pub status: String,
-    pub conclusion: Option<String>,
-    pub started_at: Option<String>,
-    pub completed_at: Option<String>,
-}

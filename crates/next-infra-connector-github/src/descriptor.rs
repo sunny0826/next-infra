@@ -9,11 +9,8 @@ use next_infra_core::{
 
 pub fn github_descriptor() -> ConnectorDescriptor {
     let repository = kind("github.repository");
-    let environment = kind("github.environment");
-    let deployment = kind("github.deployment");
     let workflow = kind("github.workflow");
     let run = kind("github.workflow_run");
-    let job = kind("github.workflow_job");
 
     ConnectorDescriptor {
         connector_type: ConnectorType::new("github").expect("static connector type"),
@@ -21,11 +18,7 @@ pub fn github_descriptor() -> ConnectorDescriptor {
         config_schema_version: SchemaVersion::new(1).expect("static schema version"),
         auth: AuthDescriptor {
             kind: AuthKind::Token,
-            minimum_permissions: vec![
-                "Metadata: read".into(),
-                "Actions: read".into(),
-                "Deployments: read".into(),
-            ],
+            minimum_permissions: vec!["Metadata: read".into(), "Actions: read".into()],
         },
         sync_modes: vec![SyncMode::Full, SyncMode::Targeted],
         resources: vec![
@@ -34,18 +27,6 @@ pub fn github_descriptor() -> ConnectorDescriptor {
                 "github.repositories",
                 ConnectorCoverageLevel::Supported,
                 None,
-            ),
-            resource(
-                environment.clone(),
-                "github.environments",
-                ConnectorCoverageLevel::Supported,
-                None,
-            ),
-            resource(
-                deployment.clone(),
-                "github.deployments",
-                ConnectorCoverageLevel::Partial,
-                Some("deployment status endpoint is unsupported"),
             ),
             resource(
                 workflow.clone(),
@@ -59,30 +40,8 @@ pub fn github_descriptor() -> ConnectorDescriptor {
                 ConnectorCoverageLevel::Partial,
                 Some("workflow run history is bounded to the newest 100 per repository"),
             ),
-            resource(
-                job.clone(),
-                "github.actions.jobs",
-                ConnectorCoverageLevel::Partial,
-                Some("job history is bounded per run and repository"),
-            ),
         ],
         relations: vec![
-            relation(
-                &repository,
-                &environment,
-                "github.contains",
-                "github.repository_environment",
-                ConnectorCoverageLevel::Supported,
-                None,
-            ),
-            relation(
-                &repository,
-                &deployment,
-                "github.contains",
-                "github.repository_deployment",
-                ConnectorCoverageLevel::Supported,
-                None,
-            ),
             relation(
                 &repository,
                 &workflow,
@@ -99,14 +58,6 @@ pub fn github_descriptor() -> ConnectorDescriptor {
                 ConnectorCoverageLevel::Partial,
                 Some("workflow run history is bounded"),
             ),
-            relation(
-                &run,
-                &job,
-                "github.contains",
-                "github.run_job",
-                ConnectorCoverageLevel::Partial,
-                Some("job history is bounded"),
-            ),
         ],
         sensitive_field_policy: vec![
             "tokens are accepted only as ephemeral SecretValue input".into(),
@@ -120,8 +71,7 @@ pub fn github_descriptor() -> ConnectorDescriptor {
         },
         recommended_sync_interval_secs: 900,
         known_gaps: vec![
-            "deployment status endpoint is unsupported; deployment health remains unknown".into(),
-            "workflow run and job history are bounded current views".into(),
+            "workflow run history is bounded to the newest 100 per repository".into(),
             "ETag pages and targeted repository routes are process-local caches".into(),
             "logs, artifacts, secrets, variables and write APIs are unsupported".into(),
             "GitHub Enterprise Server base URLs are unsupported".into(),

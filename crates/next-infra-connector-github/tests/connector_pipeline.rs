@@ -76,7 +76,7 @@ async fn github_partial_replay_commits_without_tombstoning_omitted_children() {
         1,
         2,
     );
-    assert_eq!(resources(engine.writer().store()).len(), 6);
+    assert_eq!(resources(engine.writer().store()).len(), 3);
 
     let second_request = request("github-pipeline-second");
     let second_connector = GitHubConnector::with_clock(
@@ -105,7 +105,7 @@ async fn github_partial_replay_commits_without_tombstoning_omitted_children() {
     );
 
     let persisted = resources(engine.writer().store());
-    assert_eq!(persisted.len(), 6);
+    assert_eq!(persisted.len(), 3);
     assert!(
         persisted
             .iter()
@@ -212,19 +212,14 @@ fn response(
 fn full_responses() -> Vec<Result<GitHubTransportResponse, GitHubError>> {
     vec![
         response(StatusCode::OK, br#"[{"id":10,"name":"fixture-repo","owner":{"login":"fixture-owner"},"visibility":"private","default_branch":"main","archived":false,"disabled":false,"created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:01:00Z"}]"#),
-        response(StatusCode::OK, br#"{"total_count":1,"environments":[{"id":20,"name":"fixture-environment","deployment_branch_policy":null}]}"#),
-        response(StatusCode::OK, br#"[{"id":30,"environment":"fixture-environment","task":"deploy","transient_environment":false,"production_environment":true,"created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:01:00Z"}]"#),
         response(StatusCode::OK, br#"{"total_count":1,"workflows":[{"id":40,"name":"Fixture workflow","path":".github/workflows/fixture.yml","state":"active","created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:01:00Z"}]}"#),
         response(StatusCode::OK, br#"{"total_count":1,"workflow_runs":[{"id":50,"workflow_id":40,"name":"Fixture workflow","display_title":"Fixture run","run_number":1,"run_attempt":1,"event":"push","status":"completed","conclusion":"success","head_branch":"fixture-branch","created_at":"2026-08-05T00:00:00Z","updated_at":"2026-08-05T00:01:00Z","run_started_at":null}]}"#),
-        response(StatusCode::OK, br#"{"total_count":1,"jobs":[{"id":60,"run_id":50,"name":"Fixture job","status":"completed","conclusion":"success","started_at":null,"completed_at":null}]}"#),
     ]
 }
 
 fn repo_with_child_failures() -> Vec<Result<GitHubTransportResponse, GitHubError>> {
     vec![
         full_responses().remove(0),
-        response(StatusCode::FORBIDDEN, b"denied"),
-        response(StatusCode::FORBIDDEN, b"denied"),
         response(StatusCode::FORBIDDEN, b"denied"),
         response(StatusCode::FORBIDDEN, b"denied"),
     ]
@@ -246,28 +241,6 @@ fn normalizer() -> Normalizer {
                 ],
             ),
             schema(
-                "github.environment",
-                &[
-                    "environment_id",
-                    "repository_id",
-                    "protected_branches",
-                    "custom_branch_policies",
-                ],
-            ),
-            schema(
-                "github.deployment",
-                &[
-                    "deployment_id",
-                    "repository_id",
-                    "environment",
-                    "task",
-                    "transient_environment",
-                    "production_environment",
-                    "created_at",
-                    "updated_at",
-                ],
-            ),
-            schema(
                 "github.workflow",
                 &["workflow_id", "path", "state", "created_at", "updated_at"],
             ),
@@ -277,38 +250,15 @@ fn normalizer() -> Normalizer {
                     "run_id",
                     "workflow_id",
                     "run_number",
-                    "run_attempt",
-                    "event",
                     "status",
                     "conclusion",
-                    "head_branch",
                     "created_at",
-                    "updated_at",
-                    "run_started_at",
-                ],
-            ),
-            schema(
-                "github.workflow_job",
-                &[
-                    "job_id",
-                    "run_id",
-                    "status",
-                    "conclusion",
-                    "started_at",
-                    "completed_at",
                 ],
             ),
         ],
         [
-            relation("github.contains", "github.repository", "github.environment"),
-            relation("github.contains", "github.repository", "github.deployment"),
             relation("github.contains", "github.repository", "github.workflow"),
             relation("github.executes", "github.workflow", "github.workflow_run"),
-            relation(
-                "github.contains",
-                "github.workflow_run",
-                "github.workflow_job",
-            ),
         ],
     )
     .unwrap()

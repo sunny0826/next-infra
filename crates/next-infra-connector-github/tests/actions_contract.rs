@@ -3,7 +3,7 @@ use next_infra_connector_api::{
 };
 use next_infra_connector_contract_tests::check_batch;
 use next_infra_connector_github::actions::{
-    GitHubRepositoryContext, JobDto, WorkflowDto, WorkflowRunDto, map_jobs, map_runs, map_workflows,
+    GitHubRepositoryContext, WorkflowDto, WorkflowRunDto, map_runs, map_workflows,
 };
 use next_infra_core::{
     ConnectorType, CoverageGapReason, ExternalId, ResourceKind, SchemaVersion, Scope, SyncCoverage,
@@ -55,22 +55,7 @@ fn actions_output_passes_common_conformance_and_normalizer() {
         None,
     )
     .unwrap();
-    let jobs = map_jobs(
-        &context,
-        [JobDto {
-            id: 40,
-            run_id: 30,
-            name: "Fixture job".into(),
-            status: "completed".into(),
-            conclusion: Some("success".into()),
-            started_at: Some("2026-08-05T00:00:20Z".into()),
-            completed_at: Some("2026-08-05T00:00:50Z".into()),
-        }],
-        false,
-        None,
-    )
-    .unwrap();
-    let output = workflows.merge(runs).merge(jobs);
+    let output = workflows.merge(runs);
     let batch = ObservationBatch {
         resources: output.resources,
         relations: output.relations,
@@ -97,36 +82,15 @@ fn actions_output_passes_common_conformance_and_normalizer() {
                     "run_id",
                     "workflow_id",
                     "run_number",
-                    "run_attempt",
-                    "event",
                     "status",
                     "conclusion",
-                    "head_branch",
                     "created_at",
-                    "updated_at",
-                    "run_started_at",
-                ],
-            ),
-            schema(
-                "github.workflow_job",
-                &[
-                    "job_id",
-                    "run_id",
-                    "status",
-                    "conclusion",
-                    "started_at",
-                    "completed_at",
                 ],
             ),
         ],
         [
             relation("github.contains", "github.repository", "github.workflow"),
             relation("github.executes", "github.workflow", "github.workflow_run"),
-            relation(
-                "github.contains",
-                "github.workflow_run",
-                "github.workflow_job",
-            ),
         ],
     )
     .unwrap();
@@ -144,8 +108,8 @@ fn actions_output_passes_common_conformance_and_normalizer() {
         targeted_resources: Vec::new(),
     };
     let normalized = normalizer.normalize(&request, batch).unwrap();
-    assert_eq!(normalized.resources.len(), 3);
-    assert_eq!(normalized.relations.len(), 3);
+    assert_eq!(normalized.resources.len(), 2);
+    assert_eq!(normalized.relations.len(), 2);
     assert_eq!(normalized.redaction_report.secret_sentinels_detected, 0);
 }
 
