@@ -528,20 +528,41 @@ impl Collector {
             )
         });
         reject_duplicate_observations(&self.resources, &self.relations)?;
-        let failure = self.primary_failure.unwrap_or_else(bounded_failure);
+        let coverage = match &self.primary_failure {
+            Some(failure) => SyncCoverage::Partial {
+                scope: Some(self.scope.clone()),
+                reason: coverage_reason(failure.code),
+            },
+            None if request.mode == SyncMode::Targeted => SyncCoverage::Targeted {
+                resource_ids: request
+                    .targeted_resources
+                    .iter()
+                    .map(|locator| {
+                        ResourceId::new(format!("{}:{}", locator.kind, locator.external_id))
+                            .expect("static resource id")
+                    })
+                    .collect(),
+            },
+            None => SyncCoverage::AuthoritativeFull {
+                scope: self.scope.clone(),
+            },
+        };
         let batch = ObservationBatch {
             resources: self.resources,
             relations: self.relations,
-            coverage: SyncCoverage::Partial {
-                scope: Some(self.scope),
-                reason: coverage_reason(failure.code),
-            },
+            coverage,
             next_cursor: None,
             warnings: self.warnings,
             redaction_report: RedactionReport::default(),
             provider_request_summary: self.summary,
         };
-        let outcome = SyncOutcome::Partial { batch, failure };
+        let outcome = match &self.primary_failure {
+            Some(failure) => SyncOutcome::Partial {
+                batch,
+                failure: failure.clone(),
+            },
+            None => SyncOutcome::Complete { batch },
+        };
         outcome
             .validate_for(request)
             .map_err(|_| invalid_failure("GitHub sync outcome violates the connector contract"))?;
@@ -875,13 +896,12 @@ mod tests {
             .sync(sync_request(), Some(&SecretValue::new("fixture-token")))
             .await
             .unwrap();
-        let SyncOutcome::Partial { batch, failure } = outcome else {
-            panic!("GitHub bounded view must be partial")
+        let SyncOutcome::Complete { batch } = outcome else {
+            panic!("GitHub clean vertical must be complete")
         };
         assert_eq!(batch.resources.len(), 3);
         assert_eq!(batch.relations.len(), 2);
         assert_eq!(batch.provider_request_summary.request_count, 3);
-        assert_eq!(failure.code, ErrorCode::PartialPagination);
         let serialized = serde_json::to_string(&batch).unwrap().to_ascii_lowercase();
         for forbidden in ["logs", "artifacts", "secrets", "variables", "statuses"] {
             assert!(!serialized.contains(forbidden));
@@ -906,16 +926,20 @@ mod tests {
         responses.extend((0..3).map(|_| response(StatusCode::NOT_MODIFIED, None, b"")));
         let (transport, requests) = FakeTransport::new(responses);
         let connector = GitHubConnector::with_clock(transport, FixedClock(1_000));
-        connector
+        let first_outcome = connector
             .sync(sync_request(), Some(&SecretValue::new("fixture-token")))
             .await
             .unwrap();
+        let SyncOutcome::Complete { batch: first_batch } = first_outcome else {
+            panic!("GitHub first clean sync must be complete")
+        };
+        assert_eq!(first_batch.resources.len(), 3);
         let outcome = connector
             .sync(sync_request(), Some(&SecretValue::new("fixture-token")))
             .await
             .unwrap();
-        let SyncOutcome::Partial { batch, .. } = outcome else {
-            panic!("GitHub bounded view must be partial")
+        let SyncOutcome::Complete { batch } = outcome else {
+            panic!("GitHub second sync with all 304s must be complete")
         };
         assert_eq!(batch.resources.len(), 3);
         assert_eq!(batch.provider_request_summary.status_class_counts["3xx"], 3);
@@ -950,16 +974,20 @@ mod tests {
         responses.extend(targeted_responses());
         let (transport, requests) = FakeTransport::new(responses);
         let connector = GitHubConnector::with_clock(transport, FixedClock(1_000));
-        connector
+        let first_outcome = connector
             .sync(sync_request(), Some(&SecretValue::new("fixture-token")))
             .await
             .unwrap();
+        let SyncOutcome::Complete { batch: first_batch } = first_outcome else {
+            panic!("GitHub first clean sync must be complete")
+        };
+        assert_eq!(first_batch.resources.len(), 3);
         let outcome = connector
             .sync(targeted_request(), Some(&SecretValue::new("fixture-token")))
             .await
             .unwrap();
-        let SyncOutcome::Partial { batch, .. } = outcome else {
-            panic!("GitHub targeted bounded view must be partial")
+        let SyncOutcome::Complete { batch } = outcome else {
+            panic!("GitHub targeted sync with route cache hit must be complete")
         };
         assert_eq!(batch.resources.len(), 3);
         {

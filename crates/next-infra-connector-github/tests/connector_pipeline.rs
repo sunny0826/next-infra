@@ -66,7 +66,10 @@ async fn github_partial_replay_commits_without_tombstoning_omitted_children() {
         )
         .await
         .unwrap();
-    assert!(matches!(first_outcome, SyncOutcome::Partial { .. }));
+    let SyncOutcome::Complete { batch: first_batch } = &first_outcome else {
+        panic!("GitHub first clean sync must be complete")
+    };
+    assert_eq!(first_batch.resources.len(), 3);
     commit(
         &mut engine,
         &normalizer,
