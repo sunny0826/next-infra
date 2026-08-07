@@ -90,8 +90,8 @@ export function ConnectorsPage() {
       setRepositories(null);
       setSelectedRepositoryIds([]);
       await refresh();
-    } catch {
-      setError("无法创建 GitHub 连接。请检查 Token 权限后重试。");
+    } catch (error) {
+      setError(`无法创建 GitHub 连接（${desktopErrorCode(error)}）。请检查 Token 权限后重试。`);
     } finally {
       setToken("");
       setConnecting(false);
@@ -116,8 +116,8 @@ export function ConnectorsPage() {
           ? "没有发现可访问的 GitHub 仓库。"
           : `已加载 ${discovered.length} 个可访问仓库；请选择本次同步范围。`,
       );
-    } catch {
-      setError("无法验证 Token 或加载 GitHub 仓库。请检查 Token 权限后重试。");
+    } catch (error) {
+      setError(`无法验证 Token 或加载 GitHub 仓库（${desktopErrorCode(error)}）。请检查 Token 权限或网络后重试。`);
     } finally {
       setDiscovering(false);
     }

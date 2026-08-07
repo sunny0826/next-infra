@@ -18,7 +18,7 @@ use next_infra_connector_catalog::ConnectorCoverageSnapshot;
 use next_infra_connector_cloudflare::cloudflare_descriptor;
 use next_infra_connector_dokploy::dokploy_descriptor;
 use next_infra_connector_github::{
-    GitHubClient, GitHubConnector, GitHubEndpoint, GitHubFetch, GitHubFetchBudget,
+    GitHubClient, GitHubConnector, GitHubEndpoint, GitHubFetch, GitHubFetchBudget, GitHubPages,
     ReqwestGitHubTransport, github_descriptor, repository::RepositoryDto,
 };
 use next_infra_connector_supabase_managed::descriptor as supabase_managed_descriptor;
@@ -868,17 +868,32 @@ async fn github_discover_repositories(
             GitHubFetchBudget::new(1, 1).expect("static budget"),
         )
         .await
-        .map_err(|_| {
-            safe_error(
+    {
+        Ok(GitHubFetch::Pages(pages)) => pages,
+        Ok(GitHubFetch::NotModified { .. }) => {
+            return Err(safe_error(
                 "github_validation_failed",
                 "GitHub repositories could not be loaded.",
-            )
-        })?;
-    let GitHubFetch::Pages(pages) = fetched else {
-        return Err(safe_error(
-            "github_validation_failed",
-            "GitHub repositories could not be loaded.",
-        ));
+            ));
+        }
+        Err(failure)
+            if failure.failure.code == ErrorCode::PartialPagination && failure.is_partial() =>
+        {
+            // Discovery budgets a single page (up to 100 repositories). An
+            // account with more accessible repositories trips the budget;
+            // the pages already fetched are exactly what discovery promises.
+            GitHubPages {
+                pages: failure.completed_pages,
+                etag: None,
+                request_summary: failure.request_summary,
+            }
+        }
+        Err(_) => {
+            return Err(safe_error(
+                "github_validation_failed",
+                "GitHub repositories could not be loaded.",
+            ));
+        }
     };
     let repositories = pages
         .pages
@@ -1437,7 +1452,13 @@ fn committed_query_context(
     .map_err(|_| "desktop query context unavailable".into())
 }
 
-fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 {
+/// True only for "github" today — single source of truth per plan §2.2.
+/// Other connectors use offline replay/fixtures and are NOT scheduled.
+pub(crate) fn has_live_sync_path(connector_type: &ConnectorType) -> bool {
+    connector_type.as_str() == "github"
+}
+
+pub(crate) fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 {
     if connector_type.as_str() == "github" {
         return github_descriptor()
             .recommended_sync_interval_secs
