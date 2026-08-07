@@ -9,6 +9,7 @@
 //! - Tauri wrapper layer: a std thread that ticks every TICK_MILLIS ms,
 //!   calling the pure driver and dispatching via the real AppState enqueue path.
 
+use next_infra_connector_github::{GitHubConnector, ReqwestGitHubTransport};
 use next_infra_core::{Connection, ConnectionId, SyncTrigger, Timestamp};
 use next_infra_runtime::{Runtime, ScheduledSync};
 use std::collections::VecDeque;
@@ -152,6 +153,7 @@ pub fn spawn_github_sync(
     store: next_infra_runtime::SharedStore,
     github_secrets: crate::github_live::GitHubSecretFiles,
     running: Arc<AtomicBool>,
+    connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
     connection: Connection,
     trigger: SyncTrigger,
     sync_run_id: next_infra_core::SyncRunId,
@@ -164,6 +166,7 @@ pub fn spawn_github_sync(
         let _ = crate::composition::sync_github(
             store,
             github_secrets,
+            connector,
             connection,
             trigger,
             sync_run_id,

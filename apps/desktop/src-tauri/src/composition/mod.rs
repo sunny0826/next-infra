@@ -73,6 +73,11 @@ pub struct AppState {
     settings: Mutex<LocalSettings>,
     settings_path: PathBuf,
     github_secrets: GitHubSecretFiles,
+    /// Shared GitHub connector instance (Arc-wrapped, not Clone). Reused across all syncs
+    /// (scheduled, manual, connect-first-sync) so that `page_cache` (ETag + pages) and
+    /// `route_cache` survive between runs within the same App lifetime — unchanged data hits
+    /// If-None-Match → 304 → cached-page replay. App 重启后缓存丢失，首次同步全量 —— 已知边界。
+    github_connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
     github_sync_running: Arc<AtomicBool>,
     integration_paths: IntegrationPaths,
     current_app_bundle: PathBuf,
@@ -106,7 +111,8 @@ impl AppState {
         let shared = SharedStore::open(&data_directory.join("next-infra.db"))
             .map_err(|_| "desktop store unavailable")?;
         let evaluated_at = now()?;
-        let context = committed_query_context(&shared, evaluated_at, 0)?;
+        let context =
+            committed_query_context(&shared, evaluated_at, 0, &std::collections::BTreeMap::new())?;
         let query_source = CommittedQuerySource::new(shared.clone(), goal9_catalog(), context);
         let query_context = query_source.context_handle();
         let query = DesktopQueryAdapter::new(QueryService::new(query_source.clone()));
@@ -137,6 +143,7 @@ impl AppState {
         let settings = load_settings(&settings_path)?;
         let github_secrets = GitHubSecretFiles::open(data_directory)
             .map_err(|_| "GitHub secret storage unavailable")?;
+        let github_connector = Arc::new(github_connector()?);
 
         if let Ok(connections) = shared.read(|s| s.query_connections()) {
             for connection in connections.body {
@@ -170,6 +177,8 @@ impl AppState {
         let running_for_driver_clone = running_for_driver.clone();
         let store_for_driver_clone = store_for_driver.clone();
         let github_secrets_for_driver_clone = github_secrets_for_driver.clone();
+        let query_context_for_driver = query_context.clone();
+        let github_connector_for_driver = github_connector.clone();
 
         let (tx, rx) = std::sync::mpsc::channel();
         let join = std::thread::spawn(move || {
@@ -178,57 +187,83 @@ impl AppState {
             let github_secrets = github_secrets_for_driver_clone;
             let pending = pending_for_driver_clone;
             let running = running_for_driver_clone;
+            let query_context = query_context_for_driver;
             loop {
                 match rx.recv_timeout(Duration::from_millis(scheduled_sync::TICK_MILLIS)) {
                     Ok(()) => break,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        let github_connector = github_connector_for_driver.clone();
                         let Ok(at) = now() else {
                             continue;
                         };
-                        let Ok(mut guard) = rt.lock() else {
-                            continue;
-                        };
-                        let pending_inner = &mut pending.lock().unwrap();
-                        scheduled_sync::ScheduledSyncDriver::new(
-                            {
-                                let store = store.clone();
-                                move |id: &ConnectionId| {
-                                    store.read(|s| s.get_connection(id)).ok().flatten()
-                                }
-                            },
-                            {
-                                let store = store.clone();
-                                let github_secrets = github_secrets.clone();
-                                let running = running.clone();
-                                move |conn: Connection, trigger: SyncTrigger| {
-                                    if running.swap(true, Ordering::AcqRel) {
-                                        return Err(scheduled_sync::EnqueueError::SyncInProgress);
+                        // Collect the next_due map inside the same runtime lock that
+                        // drives the tick, then drop the guard before any store read
+                        // or context refresh (std::sync::Mutex is not reentrant).
+                        let next_due: std::collections::BTreeMap<ConnectionId, Timestamp> = {
+                            let Ok(mut guard) = rt.lock() else {
+                                continue;
+                            };
+                            let pending_inner = &mut pending.lock().unwrap();
+                            scheduled_sync::ScheduledSyncDriver::new(
+                                {
+                                    let store = store.clone();
+                                    move |id: &ConnectionId| {
+                                        store.read(|s| s.get_connection(id)).ok().flatten()
                                     }
-                                    let sync_run_id = SyncRunId::new(format!(
-                                        "github-scheduled-{}",
-                                        uuid::Uuid::new_v4()
-                                    ))
-                                    .map_err(|_| {
-                                        running.store(false, Ordering::Release);
-                                        scheduled_sync::EnqueueError::Unavailable
-                                    })?;
-                                    scheduled_sync::spawn_github_sync(
-                                        store.clone(),
-                                        github_secrets.clone(),
-                                        running.clone(),
-                                        conn,
-                                        trigger,
-                                        sync_run_id,
-                                    )
-                                    .map_err(|_| {
-                                        running.store(false, Ordering::Release);
-                                        scheduled_sync::EnqueueError::Unavailable
-                                    })?;
-                                    Ok(())
-                                }
-                            },
-                        )
-                        .tick(&mut guard, pending_inner, at);
+                                },
+                                {
+                                    let store = store.clone();
+                                    let github_secrets = github_secrets.clone();
+                                    let running = running.clone();
+                                    move |conn: Connection, trigger: SyncTrigger| {
+                                        if running.swap(true, Ordering::AcqRel) {
+                                            return Err(
+                                                scheduled_sync::EnqueueError::SyncInProgress,
+                                            );
+                                        }
+                                        let sync_run_id = SyncRunId::new(format!(
+                                            "github-scheduled-{}",
+                                            uuid::Uuid::new_v4()
+                                        ))
+                                        .map_err(|_| {
+                                            running.store(false, Ordering::Release);
+                                            scheduled_sync::EnqueueError::Unavailable
+                                        })?;
+                                        scheduled_sync::spawn_github_sync(
+                                            store.clone(),
+                                            github_secrets.clone(),
+                                            running.clone(),
+                                            github_connector.clone(),
+                                            conn,
+                                            trigger,
+                                            sync_run_id,
+                                        )
+                                        .map_err(|_| {
+                                            running.store(false, Ordering::Release);
+                                            scheduled_sync::EnqueueError::Unavailable
+                                        })?;
+                                        Ok(())
+                                    }
+                                },
+                            )
+                            .tick(&mut guard, pending_inner, at);
+
+                            guard
+                                .scheduler()
+                                .entries()
+                                .map(|e| (e.connection_id.clone(), e.next_due_at))
+                                .collect()
+                        };
+
+                        // Refresh query context after each tick so next_due reflects
+                        // any scheduler state change (entries added, removed, or advanced).
+                        if !next_due.is_empty() {
+                            let revision = query_context.revision().unwrap_or(0).saturating_add(1);
+                            let context = committed_query_context(&store, at, revision, &next_due);
+                            if let Ok(ctx) = context {
+                                let _ = query_context.refresh(ctx);
+                            }
+                        }
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
@@ -239,7 +274,7 @@ impl AppState {
             join: Some(join),
         };
 
-        Ok(Self {
+        let mut state = Self {
             runtime: runtime_for_driver,
             store: shared,
             query,
@@ -247,15 +282,25 @@ impl AppState {
             settings: Mutex::new(settings),
             settings_path,
             github_secrets,
+            github_connector,
             github_sync_running: running_for_driver,
             integration_paths: paths.clone(),
             current_app_bundle: current_app_bundle.to_path_buf(),
-            scheduler_driver: Mutex::new(Some(driver_handle)),
+            scheduler_driver: Mutex::new(None),
             pending_syncs: pending_for_driver,
             local_rpc: Mutex::new(Some(local_rpc)),
             explicit_quit: AtomicBool::new(false),
             system_shutdown: AtomicBool::new(false),
-        })
+        };
+
+        // Initial context refresh so the first snapshot has real next_due values.
+        let evaluated_at = now().map_err(|_| "desktop runtime unavailable")?;
+        state
+            .refresh_query_context(evaluated_at)
+            .map_err(|_| "desktop runtime unavailable")?;
+
+        state.scheduler_driver = Mutex::new(Some(driver_handle));
+        Ok(state)
     }
 
     pub fn runtime(&self) -> &Mutex<DesktopRuntime> {
@@ -279,8 +324,23 @@ impl AppState {
                     "Local query context is unavailable.",
                 )
             })?;
-        let context =
-            committed_query_context(&self.store, evaluated_at, revision).map_err(|_| {
+
+        let next_due: std::collections::BTreeMap<ConnectionId, Timestamp> = self
+            .runtime
+            .lock()
+            .map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?
+            .scheduler()
+            .entries()
+            .map(|e| (e.connection_id.clone(), e.next_due_at))
+            .collect();
+
+        let context = committed_query_context(&self.store, evaluated_at, revision, &next_due)
+            .map_err(|_| {
                 safe_error(
                     "query_context_unavailable",
                     "Local query context is unavailable.",
@@ -410,7 +470,8 @@ impl AppState {
             if request.selected_repository_ids.is_empty() { return Err(safe_error("sync_scope_required", "Select at least one GitHub repository.")); }
             let input = github_connection_input(&connection_id, &request.selected_repository_ids);
             let secret = SecretValue::new(request.token.into_bytes());
-            let connector = github_connector()?;
+            let connector = github_connector()
+                .map_err(|e| safe_error("sync_unavailable", &e))?;
             let validation = connector
                 .validate(
                     ValidationRequest {
@@ -729,6 +790,7 @@ impl AppState {
             self.store.clone(),
             self.github_secrets.clone(),
             self.github_sync_running.clone(),
+            self.github_connector.clone(),
             connection,
             trigger,
             sync_run_id,
@@ -739,6 +801,7 @@ impl AppState {
 pub(crate) async fn sync_github(
     store: SharedStore,
     github_secrets: GitHubSecretFiles,
+    connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
     mut connection: Connection,
     trigger: SyncTrigger,
     sync_run_id: SyncRunId,
@@ -786,7 +849,6 @@ pub(crate) async fn sync_github(
                 "GitHub token is unavailable from local storage.",
             )
         })?;
-    let connector = github_connector()?;
     let mut engine = SyncEngine::new(store.clone());
     let handle = engine
         .start(
@@ -1418,10 +1480,10 @@ fn github_connection_input(
     }
 }
 
-fn github_connector() -> Result<GitHubConnector<ReqwestGitHubTransport>, ErrorEnvelope> {
+fn github_connector() -> Result<GitHubConnector<ReqwestGitHubTransport>, String> {
     ReqwestGitHubTransport::new()
         .map(GitHubConnector::new)
-        .map_err(|_| safe_error("sync_unavailable", "GitHub transport is unavailable."))
+        .map_err(|_| "GitHub transport is unavailable.".to_string())
 }
 
 fn validation_error(code: Option<ErrorCode>) -> ErrorEnvelope {
@@ -1645,6 +1707,7 @@ fn committed_query_context(
     store: &SharedStore,
     evaluated_at: Timestamp,
     query_context_revision: u64,
+    next_due: &std::collections::BTreeMap<ConnectionId, Timestamp>,
 ) -> Result<QueryContextSnapshot, String> {
     let connections = store
         .read(|store| store.query_connections())
@@ -1654,9 +1717,9 @@ fn committed_query_context(
         query_context_revision,
         connections.body.into_iter().map(|connection| {
             (
-                connection.connection_id,
+                connection.connection_id.clone(),
                 query_sync_interval_millis(&connection.connector_type),
-                None,
+                next_due.get(&connection.connection_id).cloned(),
             )
         }),
     )
@@ -1791,7 +1854,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(status.connection.connection_id, connection_id.as_str());
-        assert_eq!(status.next_scheduled_at, None);
+        assert!(
+            status.next_scheduled_at.is_some()
+                && !status.next_scheduled_at.as_ref().unwrap().is_empty(),
+            "next_scheduled_at should be a real time from the scheduler"
+        );
+        let rt = state.runtime().lock().unwrap();
+        let entry = rt.scheduler().entry(&connection_id).unwrap();
+        let current_time = now().unwrap();
+        let tolerance = 5_000;
+        let expected_next = current_time.unix_millis() + 900_000;
+        assert!(
+            (entry.next_due_at.unix_millis() - expected_next).abs() < tolerance,
+            "scheduler next_due_at should be within tolerance of now+900_000"
+        );
+        drop(rt);
         assert!(state.query.get_health_summary().is_ok());
     }
 
