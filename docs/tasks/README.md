@@ -158,6 +158,8 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 52. [GATE-G7 Binding / Topology / Timeline 验收门](./GATE-G7-2026-08-06.md)
 53. [GATE-G8 Dokploy / Cloudflare / Cross-Provider Topology 验收门](./GATE-G8-2026-08-06.md)
 54. [当前项目交接文档（2026-08-07）](../HANDOFF-2026-08-07.md)
+55. [CON-G5-05 GitHub 发现路径与 config 契约修复验收记录](./CON-G5-05-2026-08-07.md)
+56. [P0 规划：旧快照清理与受限范围验收、Scheduler 接入](./P0-PLAN-2026-08-07.md)
 
 ## 6. 设计决策包
 
