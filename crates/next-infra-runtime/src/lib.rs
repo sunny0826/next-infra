@@ -777,6 +777,7 @@ mod tests {
             cursor_after: None,
             counts: SyncRunCounts::default(),
             errors: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 

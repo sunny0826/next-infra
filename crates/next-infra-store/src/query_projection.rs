@@ -20,7 +20,7 @@ const PROJECTED_RELATION_COLUMNS: &str = "r.relation_id, r.source_resource_id, r
 const CHANGE_COLUMNS: &str =
     "change_id, subject_type, subject_id, observed_at, fields_json, origin_json";
 const CONNECTION_COLUMNS: &str = "connection_id, connector_type, display_name, enabled, config_json, secret_ref, health, last_success_at, last_attempt_at, config_schema_version, deleted_at";
-const SYNC_RUN_COLUMNS: &str = "sync_run_id, connection_id, mode, trigger, started_at, finished_at, status, coverage_json, cursor_before, cursor_after, counts_json, errors_json";
+const SYNC_RUN_COLUMNS: &str = "sync_run_id, connection_id, mode, trigger, started_at, finished_at, status, coverage_json, cursor_before, cursor_after, counts_json, errors_json, warnings_json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProjectionMetadata {

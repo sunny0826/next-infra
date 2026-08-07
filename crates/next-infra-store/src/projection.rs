@@ -73,7 +73,7 @@ impl StoreReader for Store {
     fn get_sync_run(&self, id: &SyncRunId) -> Result<Option<SyncRun>, Self::Error> {
         self.connection
             .query_row(
-                "SELECT sync_run_id, connection_id, mode, trigger, started_at, finished_at, status, coverage_json, cursor_before, cursor_after, counts_json, errors_json FROM sync_runs WHERE sync_run_id = ?1",
+                "SELECT sync_run_id, connection_id, mode, trigger, started_at, finished_at, status, coverage_json, cursor_before, cursor_after, counts_json, errors_json, warnings_json FROM sync_runs WHERE sync_run_id = ?1",
                 params![id.as_str()],
                 read_sync_run,
             )
@@ -573,9 +573,9 @@ fn bump_projection_metadata(connection: &rusqlite::Connection) -> Result<(), Sto
 fn insert_sync_run(connection: &rusqlite::Connection, run: &SyncRun) -> Result<(), StoreError> {
     connection
         .execute(
-            "INSERT INTO sync_runs(sync_run_id, connection_id, mode, trigger, started_at, finished_at, status, coverage_json, cursor_before, cursor_after, counts_json, errors_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            "INSERT INTO sync_runs(sync_run_id, connection_id, mode, trigger, started_at, finished_at, status, coverage_json, cursor_before, cursor_after, counts_json, errors_json, warnings_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
-                run.sync_run_id.as_str(), run.connection_id.as_str(), enum_text(&run.mode)?, enum_text(&run.trigger)?, run.started_at.unix_millis(), timestamp_option(run.finished_at), enum_text(&run.status)?, json_text(&run.coverage)?, run.cursor_before.as_ref().map(SyncCursor::as_str), run.cursor_after.as_ref().map(SyncCursor::as_str), json_text(&run.counts)?, json_text(&run.errors)?,
+                run.sync_run_id.as_str(), run.connection_id.as_str(), enum_text(&run.mode)?, enum_text(&run.trigger)?, run.started_at.unix_millis(), timestamp_option(run.finished_at), enum_text(&run.status)?, json_text(&run.coverage)?, run.cursor_before.as_ref().map(SyncCursor::as_str), run.cursor_after.as_ref().map(SyncCursor::as_str), json_text(&run.counts)?, json_text(&run.errors)?, json_text(&run.warnings)?,
             ],
         )
         .map_err(StoreError::Sqlite)?;
@@ -585,8 +585,8 @@ fn insert_sync_run(connection: &rusqlite::Connection, run: &SyncRun) -> Result<(
 fn complete_sync_run(transaction: &Transaction<'_>, run: &SyncRun) -> Result<(), StoreError> {
     let updated = transaction
         .execute(
-            "UPDATE sync_runs SET finished_at=?2, status=?3, coverage_json=?4, cursor_after=?5, counts_json=?6, errors_json=?7 WHERE sync_run_id=?1 AND connection_id=?8",
-            params![run.sync_run_id.as_str(), timestamp_option(run.finished_at), enum_text(&run.status)?, json_text(&run.coverage)?, run.cursor_after.as_ref().map(SyncCursor::as_str), json_text(&run.counts)?, json_text(&run.errors)?, run.connection_id.as_str()],
+            "UPDATE sync_runs SET finished_at=?2, status=?3, coverage_json=?4, cursor_after=?5, counts_json=?6, errors_json=?7, warnings_json=?8 WHERE sync_run_id=?1 AND connection_id=?9",
+            params![run.sync_run_id.as_str(), timestamp_option(run.finished_at), enum_text(&run.status)?, json_text(&run.coverage)?, run.cursor_after.as_ref().map(SyncCursor::as_str), json_text(&run.counts)?, json_text(&run.errors)?, json_text(&run.warnings)?, run.connection_id.as_str()],
         )
         .map_err(StoreError::Sqlite)?;
     if updated != 1 {
@@ -757,6 +757,7 @@ pub(crate) fn read_sync_run(row: &Row<'_>) -> rusqlite::Result<SyncRun> {
         cursor_after: optional_wrapped(row.get(9)?)?,
         counts: json(row.get(10)?)?,
         errors: json(row.get(11)?)?,
+        warnings: json(row.get(12)?)?,
     })
 }
 
@@ -1021,6 +1022,7 @@ mod tests {
             cursor_after: Some(id("cursor-after", SyncCursor::new)),
             counts: SyncRunCounts::default(),
             errors: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 

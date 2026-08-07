@@ -133,6 +133,7 @@ mod tests {
                 cursor_after: None,
                 counts: next_infra_core::SyncRunCounts::default(),
                 errors: Vec::new(),
+                warnings: Vec::new(),
             },
             resources: Vec::new(),
             resource_versions: Vec::new(),

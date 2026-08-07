@@ -17,6 +17,7 @@ interface ConnectionRow {
   readonly nextScheduledAt: string | null;
   readonly recentStatus: string | null;
   readonly recentError: string | null;
+  readonly recentWarning: string | null;
 }
 
 interface PurgeConfirmation {
@@ -53,6 +54,9 @@ export function ConnectorsPage() {
           recentStatus: status.recent_runs[0]?.status ?? null,
           recentError: status.recent_runs[0]?.errors[0]
             ? `${status.recent_runs[0].errors[0].code}: ${status.recent_runs[0].errors[0].message}`
+            : null,
+          recentWarning: status.recent_runs[0]?.warnings[0]
+            ? `${status.recent_runs[0].warnings[0].code}: ${status.recent_runs[0].warnings[0].message}`
             : null,
         };
       }),
@@ -215,12 +219,12 @@ export function ConnectorsPage() {
         </form>
       </section>
       <section className="connectors-section" aria-labelledby="connection-state"><div><h2 id="connection-state">连接状态</h2><span>手动同步与页面刷新相互独立</span></div>
-        <div className="connectors-frame"><table><thead><tr><th>连接</th><th>健康度</th><th>最近成功</th><th>最近尝试</th><th>最近运行</th><th>最近错误</th><th>下次计划</th><th>操作</th></tr></thead><tbody>
-          {rows.map(({ connection, nextScheduledAt, recentStatus, recentError }) => <tr key={connection.connection_id}>
+        <div className="connectors-frame"><table><thead><tr><th>连接</th><th>健康度</th><th>最近成功</th><th>最近尝试</th><th>最近运行</th><th>最近错误</th><th>最近警告</th><th>下次计划</th><th>操作</th></tr></thead><tbody>
+          {rows.map(({ connection, nextScheduledAt, recentStatus, recentError, recentWarning }) => <tr key={connection.connection_id}>
             <td><strong>{connection.display_name}</strong><code>{connection.connector_type}</code></td>
             <td><span className={`connectors-status state-${connection.health}`}>{displayEnum(connection.health)}</span></td>
             <td><time>{connection.last_success_at ?? "从未"}</time></td><td><time>{connection.last_attempt_at ?? "从未"}</time></td>
-            <td><code>{recentStatus ? displayEnum(recentStatus) : "无"}</code></td><td><span>{recentError ?? "无"}</span></td><td><time>{nextScheduledAt ?? "未计划"}</time></td>
+            <td><code>{recentStatus ? displayEnum(recentStatus) : "无"}</code></td><td><span>{recentError ?? "无"}</span></td><td><span>{recentWarning ?? "无"}</span></td><td><time>{nextScheduledAt ?? "未计划"}</time></td>
             <td><div className="connectors-actions"><button disabled={!connection.enabled || connection.connector_type !== "github" || connecting || purging} onClick={() => startManualSync(connection)} type="button">手动同步</button><button disabled={connection.connector_type !== "github" || connecting || purging} onClick={() => previewGitHubConnectionPurge(connection)} type="button">删除本地数据</button></div></td>
           </tr>)}
         </tbody></table></div>

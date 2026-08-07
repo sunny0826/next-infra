@@ -300,6 +300,13 @@ pub struct SyncRunErrorDto {
     pub retryable: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct SyncRunWarningDto {
+    pub code: String,
+    pub message: String,
+}
+
 /// User-safe synchronization history row.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
@@ -316,6 +323,7 @@ pub struct SyncRunDto {
     pub cursor_after: Option<String>,
     pub counts: SyncRunCountsDto,
     pub errors: Vec<SyncRunErrorDto>,
+    pub warnings: Vec<SyncRunWarningDto>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

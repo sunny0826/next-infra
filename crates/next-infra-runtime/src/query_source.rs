@@ -21,8 +21,8 @@ use next_infra_query::dto::{
     FrontierDirectionDto, Lifecycle as QueryLifecycle, RelationDto, RelationEvidenceDto,
     ResourceDto, ResourceHealth as QueryResourceHealth, ResourceHealthCountsDto, SnapshotMetadata,
     SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto, SyncRunErrorDto, SyncRunStatusDto,
-    SyncTriggerDto, TimelineGroupDto, TimelineItemDto, TimelineOriginDto, TimelineVersionLinkDto,
-    TopologyFrontierDto,
+    SyncRunWarningDto, SyncTriggerDto, TimelineGroupDto, TimelineItemDto, TimelineOriginDto,
+    TimelineVersionLinkDto, TopologyFrontierDto,
 };
 use next_infra_query::service::{
     HealthSummaryBody, QuerySource, RecentChangesPlan, ResourceDetailBody, ResourceInclude,
@@ -1294,6 +1294,14 @@ fn sync_run_dto(run: &SyncRun) -> Result<SyncRunDto, QuerySourceError> {
                 retryable: error.retryable,
             })
             .collect(),
+        warnings: run
+            .warnings
+            .iter()
+            .map(|warning| SyncRunWarningDto {
+                code: domain_error_code_from_error_code(&warning.code),
+                message: warning.message.clone(),
+            })
+            .collect(),
     })
 }
 
@@ -1330,7 +1338,11 @@ fn coverage_gap_reason(reason: &CoverageGapReason) -> String {
 }
 
 fn domain_error_code(error: &DomainError) -> String {
-    format!("{:?}", error.code)
+    domain_error_code_from_error_code(&error.code)
+}
+
+fn domain_error_code_from_error_code(code: &next_infra_core::ErrorCode) -> String {
+    format!("{:?}", code)
         .chars()
         .enumerate()
         .flat_map(|(index, character)| {

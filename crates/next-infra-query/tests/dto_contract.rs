@@ -262,6 +262,7 @@ fn goal_two_history_and_coverage_dtos_are_tagged_and_clean() {
             ..SyncRunCountsDto::default()
         },
         errors: Vec::new(),
+        warnings: Vec::new(),
     };
     let coverage = ConnectorCoverageDto {
         connector_type: "fixture".into(),
@@ -313,6 +314,7 @@ fn goal_two_history_and_coverage_dtos_are_tagged_and_clean() {
             "status",
             "sync_run_id",
             "trigger",
+            "warnings",
         ]
     );
     assert_clean(&sync_run);

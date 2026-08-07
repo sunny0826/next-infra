@@ -200,6 +200,7 @@ mod tests {
             cursor_after: Some(id("cursor-before", SyncCursor::new)),
             counts: SyncRunCounts::default(),
             errors: Vec::new(),
+            warnings: Vec::new(),
         }
     }
 

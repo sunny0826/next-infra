@@ -81,6 +81,7 @@ fn run(status: SyncRunStatus, run_id: &str) -> SyncRun {
         cursor_after: Some(id("cursor-v1", next_infra_core::SyncCursor::new)),
         counts: SyncRunCounts::default(),
         errors: Vec::new(),
+        warnings: Vec::new(),
     }
 }
 

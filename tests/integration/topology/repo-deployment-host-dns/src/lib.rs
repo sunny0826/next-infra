@@ -100,6 +100,7 @@ mod tests {
             cursor_after: None,
             counts: SyncRunCounts::default(),
             errors: Vec::new(),
+            warnings: Vec::new(),
         };
         let mut running = run.clone();
         running.status = SyncRunStatus::Running;

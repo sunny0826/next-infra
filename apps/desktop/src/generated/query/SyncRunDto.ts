@@ -4,9 +4,10 @@ import type { SyncModeDto } from "./SyncModeDto";
 import type { SyncRunCountsDto } from "./SyncRunCountsDto";
 import type { SyncRunErrorDto } from "./SyncRunErrorDto";
 import type { SyncRunStatusDto } from "./SyncRunStatusDto";
+import type { SyncRunWarningDto } from "./SyncRunWarningDto";
 import type { SyncTriggerDto } from "./SyncTriggerDto";
 
 /**
  * User-safe synchronization history row.
  */
-export type SyncRunDto = { sync_run_id: string, connection_id: string, mode: SyncModeDto, trigger: SyncTriggerDto, status: SyncRunStatusDto, coverage: SyncCoverageDto, started_at: string, finished_at: string | null, cursor_before: string | null, cursor_after: string | null, counts: SyncRunCountsDto, errors: Array<SyncRunErrorDto>, };
+export type SyncRunDto = { sync_run_id: string, connection_id: string, mode: SyncModeDto, trigger: SyncTriggerDto, status: SyncRunStatusDto, coverage: SyncCoverageDto, started_at: string, finished_at: string | null, cursor_before: string | null, cursor_after: string | null, counts: SyncRunCountsDto, errors: Array<SyncRunErrorDto>, warnings: Array<SyncRunWarningDto>, };

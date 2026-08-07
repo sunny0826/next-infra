@@ -5,7 +5,7 @@ use next_infra_core::{
     Lifecycle, MissingEvidenceState, OriginRef, Relation, RelationId, RelationVersion, Resource,
     ResourceId, ResourceKey, ResourceVersion, Scope, StoreReader, StoreWriter, SyncCommit,
     SyncCoverage, SyncCursor, SyncMode, SyncRun, SyncRunCounts, SyncRunId, SyncRunStatus,
-    SyncTrigger, Timestamp,
+    SyncRunWarning, SyncTrigger, Timestamp,
 };
 use next_infra_normalizer::{ValidatedBatch, ValidatedRelation, ValidatedResource};
 use serde_json::{Value, json};
@@ -127,6 +127,7 @@ where
             cursor_after: None,
             counts: SyncRunCounts::default(),
             errors: Vec::new(),
+            warnings: Vec::new(),
         };
         self.writer
             .store_mut()
@@ -168,6 +169,7 @@ where
         run.status = SyncRunStatus::Failed;
         run.finished_at = Some(finished_at);
         run.errors = vec![error];
+        run.warnings = Vec::new();
         // Keep the last committed cursor visible to the Store writer. A
         // failed run must never clear or advance connector progress.
         run.cursor_after = run.cursor_before.clone();
@@ -396,6 +398,14 @@ where
         };
 
         run.counts = counts;
+        run.warnings = batch
+            .warnings
+            .iter()
+            .map(|w| SyncRunWarning {
+                code: w.code,
+                message: w.message.clone(),
+            })
+            .collect();
         Ok(SyncCommit {
             sync_run: run,
             resources,
@@ -1487,6 +1497,7 @@ mod tests {
                 cursor_after: None,
                 counts: SyncRunCounts::default(),
                 errors: Vec::new(),
+                warnings: Vec::new(),
             },
         );
         let mut engine = SyncEngine::new(store);

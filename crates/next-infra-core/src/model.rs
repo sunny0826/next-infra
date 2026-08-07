@@ -150,6 +150,12 @@ pub struct SyncRunCounts {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncRunWarning {
+    pub code: ErrorCode,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncRun {
     pub sync_run_id: SyncRunId,
     pub connection_id: ConnectionId,
@@ -163,6 +169,7 @@ pub struct SyncRun {
     pub cursor_after: Option<SyncCursor>,
     pub counts: SyncRunCounts,
     pub errors: Vec<DomainError>,
+    pub warnings: Vec<SyncRunWarning>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

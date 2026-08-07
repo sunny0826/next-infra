@@ -458,6 +458,7 @@ function syncRun(
       warnings: 0,
     },
     errors: [],
+    warnings: [],
     ...overrides,
   };
 }

@@ -13,13 +13,13 @@ use next_infra_query::dto::{
     HealthSummaryDto, Lifecycle, PageInfo, QueryViewState, RelationDto, RelationEvidenceDto,
     ResourceDetailDto, ResourceDto, ResourceHealth, ResourceHealthCountsDto, ResourcePageDto,
     SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto,
-    SyncRunErrorDto, SyncRunStatusDto, SyncStatusDto, SyncTriggerDto, TimelineGroupDto,
-    TimelineItemDto, TimelineOriginDto, TimelinePageDto, TimelineVersionLinkDto, TopologyDto,
-    TopologyFrontierDto, UpdateBindingCommandDto,
+    SyncRunErrorDto, SyncRunStatusDto, SyncRunWarningDto, SyncStatusDto, SyncTriggerDto,
+    TimelineGroupDto, TimelineItemDto, TimelineOriginDto, TimelinePageDto, TimelineVersionLinkDto,
+    TopologyDto, TopologyFrontierDto, UpdateBindingCommandDto,
 };
 use ts_rs::{Config, TS};
 
-const EXPECTED_BINDINGS: [&str; 52] = [
+const EXPECTED_BINDINGS: [&str; 53] = [
     "BindingCommandResultDto.ts",
     "BindingDto.ts",
     "BindingSnapshotDto.ts",
@@ -62,6 +62,7 @@ const EXPECTED_BINDINGS: [&str; 52] = [
     "SyncRunDto.ts",
     "SyncRunErrorDto.ts",
     "SyncRunStatusDto.ts",
+    "SyncRunWarningDto.ts",
     "SyncStatusDto.ts",
     "SyncTriggerDto.ts",
     "TimelineGroupDto.ts",
@@ -124,6 +125,7 @@ fn export_types() {
     ConnectorCoverageDto::export_all(&config).expect("failed to export connector coverage binding");
     SyncRunCountsDto::export_all(&config).expect("failed to export sync counts binding");
     SyncRunErrorDto::export_all(&config).expect("failed to export sync error binding");
+    SyncRunWarningDto::export_all(&config).expect("failed to export sync warning binding");
     SyncRunDto::export_all(&config).expect("failed to export sync run binding");
     ChangeSubjectDto::export_all(&config).expect("failed to export change subject binding");
     FieldChangeDto::export_all(&config).expect("failed to export field change binding");

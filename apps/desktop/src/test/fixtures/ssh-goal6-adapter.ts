@@ -130,6 +130,7 @@ function failedRun(
     cursor_after: null,
     counts: { read: 0, created: 0, updated: 0, unchanged: 0, warnings: 1 },
     errors: [{ code, message, retryable: false }],
+    warnings: [],
   };
 }
 

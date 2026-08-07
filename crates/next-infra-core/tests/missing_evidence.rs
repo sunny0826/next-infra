@@ -124,6 +124,7 @@ fn sync_commit_keeps_missing_state_in_the_same_connection_context() {
         cursor_after: None,
         counts: SyncRunCounts::default(),
         errors: Vec::new(),
+        warnings: Vec::new(),
     };
     let commit = SyncCommit {
         sync_run,
