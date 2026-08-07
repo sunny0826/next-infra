@@ -133,6 +133,20 @@ pub struct SyncStatusProjection {
     pub recent_runs: Vec<SyncRun>,
 }
 
+/// Per-repository GitHub Actions run counts derived from the relations chain:
+/// repository →(github.contains)→ workflow →(github.executes)→ workflow_run
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GitHubActionsSummaryRow {
+    pub connection_id: ConnectionId,
+    pub connection_name: String,
+    pub repository_id: ResourceId,
+    pub repository_name: String,
+    pub action_count: u64,
+    pub succeeded: u64,
+    pub failed: u64,
+    pub running: u64,
+}
+
 impl Store {
     pub fn query_resources(
         &self,
@@ -247,6 +261,12 @@ impl Store {
         &self,
     ) -> Result<ProjectionSnapshot<Vec<ProjectedConnection>>, StoreError> {
         self.with_projection_snapshot(read_connections)
+    }
+
+    pub fn query_github_actions_summary(
+        &self,
+    ) -> Result<ProjectionSnapshot<Vec<GitHubActionsSummaryRow>>, StoreError> {
+        self.with_projection_snapshot(read_github_actions_summary)
     }
 
     fn with_projection_snapshot<T>(
@@ -781,6 +801,137 @@ fn projected_connection(connection: Connection) -> ProjectedConnection {
         last_success_at: connection.last_success_at,
         last_attempt_at: connection.last_attempt_at,
     }
+}
+
+fn read_github_actions_summary(
+    connection: &SqliteConnection,
+) -> Result<Vec<GitHubActionsSummaryRow>, StoreError> {
+    let github_connections: BTreeMap<ConnectionId, String> = connection
+        .prepare(
+            "SELECT connection_id, display_name FROM connections
+             WHERE connector_type = 'github' AND deleted_at IS NULL
+             ORDER BY display_name",
+        )
+        .map_err(StoreError::Sqlite)?
+        .query_map([], |row| Ok((wrapped(row.get(0)?)?, row.get(1)?)))
+        .map_err(StoreError::Sqlite)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(StoreError::Sqlite)?
+        .into_iter()
+        .collect();
+
+    if github_connections.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let connection_ids: Vec<String> = github_connections
+        .keys()
+        .map(|id| id.as_str().to_owned())
+        .collect();
+    let placeholders = placeholders(connection_ids.len());
+    let mut statement = connection
+        .prepare(&format!(
+            "SELECT r_repo.connection_id, r_repo.resource_id, r_repo.display_name,
+                    r_wr.resource_id, r_wr.attributes_json
+             FROM resources r_wr
+             JOIN relations rel_exec ON rel_exec.target_resource_id = r_wr.resource_id
+                 AND rel_exec.kind = 'github.executes'
+             JOIN resources r_wf ON r_wf.resource_id = rel_exec.source_resource_id
+             JOIN relations rel_contains ON rel_contains.target_resource_id = r_wf.resource_id
+                 AND rel_contains.kind = 'github.contains'
+             JOIN resources r_repo ON r_repo.resource_id = rel_contains.source_resource_id
+             WHERE r_wr.kind = 'github.workflow_run'
+               AND r_repo.connection_id IN ({placeholders})
+             ORDER BY r_repo.connection_id, r_repo.display_name",
+            placeholders = placeholders
+        ))
+        .map_err(StoreError::Sqlite)?;
+
+    let rows = statement
+        .query_map(params_from_iter(connection_ids.iter()), |row| {
+            let connection_id_str: String = row.get(0)?;
+            let repository_id_str: String = row.get(1)?;
+            let repository_name: String = row.get(2)?;
+            let workflow_run_id: String = row.get(3)?;
+            let attributes_json: String = row.get(4)?;
+            Ok((
+                connection_id_str,
+                repository_id_str,
+                repository_name,
+                workflow_run_id,
+                attributes_json,
+            ))
+        })
+        .map_err(StoreError::Sqlite)?;
+
+    #[derive(Default)]
+    struct RepoCounts {
+        repository_name: String,
+        total: u64,
+        succeeded: u64,
+        failed: u64,
+        running: u64,
+    }
+
+    let mut repo_map: BTreeMap<(ConnectionId, ResourceId), RepoCounts> = BTreeMap::new();
+
+    for row in rows {
+        let (conn_id_str, repo_id_str, repo_name, _run_id, attrs_json) =
+            row.map_err(StoreError::Sqlite)?;
+        let conn_id: ConnectionId = wrapped(conn_id_str).map_err(StoreError::Sqlite)?;
+        let repo_id: ResourceId = wrapped(repo_id_str).map_err(StoreError::Sqlite)?;
+
+        let entry = repo_map
+            .entry((conn_id.clone(), repo_id))
+            .or_insert_with(|| RepoCounts {
+                repository_name: repo_name,
+                ..Default::default()
+            });
+        entry.total += 1;
+
+        let attrs: serde_json::Value = serde_json::from_str(&attrs_json)
+            .map_err(|_| StoreError::Contract("invalid workflow_run attributes_json".into()))?;
+
+        let status = attrs
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("completed");
+        let conclusion = attrs.get("conclusion").and_then(|v| v.as_str());
+
+        if status != "completed" {
+            entry.running += 1;
+        } else if conclusion == Some("success") {
+            entry.succeeded += 1;
+        } else if conclusion == Some("failure") {
+            entry.failed += 1;
+        }
+    }
+
+    let mut result: Vec<GitHubActionsSummaryRow> = Vec::new();
+    for ((conn_id, repo_id), counts) in repo_map {
+        let conn_name = github_connections
+            .get(&conn_id)
+            .cloned()
+            .unwrap_or_default();
+        result.push(GitHubActionsSummaryRow {
+            connection_id: conn_id,
+            connection_name: conn_name,
+            repository_id: repo_id,
+            repository_name: counts.repository_name,
+            action_count: counts.total,
+            succeeded: counts.succeeded,
+            failed: counts.failed,
+            running: counts.running,
+        });
+    }
+
+    result.sort_by(|a, b| {
+        a.connection_name
+            .cmp(&b.connection_name)
+            .then(a.repository_name.cmp(&b.repository_name))
+    });
+
+    Ok(result)
 }
 
 fn grouped_counts(
