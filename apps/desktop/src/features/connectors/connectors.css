@@ -5,8 +5,32 @@
 .connectors-eyebrow, .connectors-page header > span, .connectors-section > div > span { color: var(--label-muted) !important; font: 9px var(--font-mono); }
 .connectors-eyebrow { letter-spacing: .08em; text-transform: uppercase; }
 .connectors-notice { background: var(--rack-surface); border: 1px solid var(--telemetry-cyan-soft); color: var(--label-secondary); padding: var(--space-3); }
+.connectors-notice--error { border-color: var(--fault-vermilion); }
+.connectors-purge-confirmation { border: 1px solid var(--fault-vermilion); display: grid; gap: var(--space-3); padding: var(--space-3); }
+.connectors-purge-confirmation h2 { color: var(--fault-vermilion); font-size: 11px; letter-spacing: .055em; margin: 0; text-transform: uppercase; }
+.connectors-purge-confirmation p { color: var(--label-secondary); font-size: 11px; margin: var(--space-1) 0 0; }
+.connectors-purge-confirmation dl { display: grid; gap: 1px; grid-template-columns: repeat(7, minmax(72px, 1fr)); margin: 0; }
+.connectors-purge-confirmation dl div { background: var(--rack-surface); display: grid; gap: 3px; padding: var(--space-2); }
+.connectors-purge-confirmation dt { color: var(--label-muted); font: 9px var(--font-mono); text-transform: uppercase; }
+.connectors-purge-confirmation dd { color: var(--label-primary); font: 13px var(--font-mono); margin: 0; }
+.connectors-purge-actions, .connectors-actions { display: flex; gap: var(--space-2); }
+.connectors-purge-actions button:last-child, .connectors-actions button:last-child { border-color: var(--fault-vermilion); color: var(--fault-vermilion); }
 .connectors-section { border-top: 1px solid var(--aluminum-line); display: grid; gap: var(--space-3); padding-top: var(--space-3); }
 .connectors-section h2 { font-size: 11px; letter-spacing: .055em; margin: 0; text-transform: uppercase; }
+.connectors-form { align-items: end; display: grid; gap: var(--space-3); grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.5fr) auto; }
+.connectors-form label { color: var(--label-muted); display: grid; font: 9px var(--font-mono); gap: 5px; text-transform: uppercase; }
+.connectors-form input { background: var(--rack-surface); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-primary); font: 12px var(--font-mono); height: 30px; min-width: 0; padding: 0 var(--space-2); }
+.connectors-form input:focus { border-color: var(--telemetry-cyan); outline: none; }
+.connectors-form button { background: var(--rack-raised); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-secondary); font: 10px var(--font-mono); height: 30px; padding: 0 var(--space-3); }
+.connectors-form button:disabled, .connectors-frame button:disabled { cursor: not-allowed; opacity: .5; }
+.connectors-repository-picker { border: 1px solid var(--aluminum-line); display: grid; gap: var(--space-2); grid-column: 1 / -1; margin: 0; min-width: 0; padding: var(--space-3); }
+.connectors-repository-picker legend { color: var(--label-muted); font: 9px var(--font-mono); padding: 0 var(--space-1); text-transform: uppercase; }
+.connectors-repository-picker p { color: var(--label-secondary); font-size: 11px; margin: 0; }
+.connectors-repository-picker > button { justify-self: start; }
+.connectors-repository-list { border: 1px solid var(--aluminum-line); max-height: 230px; overflow-y: auto; }
+.connectors-repository-list label { align-items: center; border-bottom: 1px solid var(--aluminum-line); color: var(--label-secondary); display: flex; font: 11px var(--font-mono); gap: var(--space-2); min-height: 30px; padding: 0 var(--space-2); text-transform: none; }
+.connectors-repository-list label:last-child { border-bottom: 0; }
+.connectors-repository-list input { accent-color: var(--telemetry-cyan); height: auto; min-width: auto; }
 .connectors-frame { border: 1px solid var(--aluminum-line); overflow-x: auto; }
 .connectors-frame table { border-collapse: collapse; min-width: 920px; width: 100%; }
 .connectors-frame th { background: var(--rack-surface); color: var(--label-muted); font: 9px var(--font-mono); height: 30px; padding: 0 var(--space-2); text-align: left; text-transform: uppercase; }
@@ -21,10 +45,11 @@
 .connectors-status.state-auth_failed, .connectors-status.state-unreachable { color: var(--fault-vermilion); }
 .connectors-status.state-disabled, .connectors-level.level-unsupported { color: var(--cloud-unknown); }
 .connectors-coverage { border: 1px solid var(--aluminum-line); }
-.connectors-coverage article { align-items: center; border-bottom: 1px solid var(--aluminum-line); display: grid; gap: var(--space-3); grid-template-columns: minmax(180px, .6fr) 90px 1fr; min-height: 48px; padding: var(--space-2); }
+.connectors-coverage-head { background: var(--rack-surface); color: var(--label-muted); display: grid; font: 9px var(--font-mono); gap: var(--space-3); grid-template-columns: minmax(140px, .5fr) minmax(180px, .8fr) 90px 1fr; padding: var(--space-2); text-transform: uppercase; }
+.connectors-coverage article { align-items: center; border-bottom: 1px solid var(--aluminum-line); display: grid; gap: var(--space-3); grid-template-columns: minmax(140px, .5fr) minmax(180px, .8fr) 90px 1fr; min-height: 48px; padding: var(--space-2); }
 .connectors-coverage article:last-child { border-bottom: 0; }
 .connectors-coverage article > div { display: grid; gap: 2px; }
 .connectors-coverage code, .connectors-coverage p { color: var(--label-muted); font: 9px var(--font-mono); margin: 0; }
 .connectors-state { background: var(--rack-surface); border: 1px solid var(--aluminum-line); color: var(--label-secondary); margin: var(--space-5); padding: var(--space-4); }
 .connectors-state--error { border-color: var(--fault-vermilion); }
-@media (max-width: 560px) { .connectors-page { padding: 14px 14px 24px; } .connectors-page > header { align-items: flex-start; flex-direction: column; } .connectors-frame table { min-width: 660px; } .connectors-coverage article { grid-template-columns: 1fr; } }
+@media (max-width: 560px) { .connectors-page { padding: 14px 14px 24px; } .connectors-page > header { align-items: flex-start; flex-direction: column; } .connectors-form { grid-template-columns: 1fr; } .connectors-form button { width: 100%; } .connectors-purge-confirmation dl { grid-template-columns: repeat(2, minmax(0, 1fr)); } .connectors-frame table { min-width: 660px; } .connectors-coverage-head { display: none; } .connectors-coverage article { grid-template-columns: 1fr 90px; } .connectors-coverage article > p { grid-column: 1 / -1; } }

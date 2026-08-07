@@ -28,13 +28,13 @@ describe("EvidenceSpine", () => {
     const fixture = evidenceFixture();
     render(<EvidenceSpine {...fixture} />);
 
-    expect(screen.getByRole("heading", { name: "Evidence Spine" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Current Facts" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Evidence Path" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Source current fact")).toHaveTextContent(
+    expect(screen.getByRole("heading", { name: "证据链" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "当前事实" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "证据路径" })).toBeInTheDocument();
+    expect(screen.getByLabelText("来源 当前事实")).toHaveTextContent(
       "Fixture Compute Alpha",
     );
-    expect(screen.getByLabelText("Target current fact")).toHaveTextContent(
+    expect(screen.getByLabelText("目标 当前事实")).toHaveTextContent(
       "Fixture Database Beta",
     );
 
@@ -53,7 +53,7 @@ describe("EvidenceSpine", () => {
       />,
     );
 
-    const row = within(screen.getByLabelText("Provider evidence"));
+    const row = within(screen.getByLabelText("提供方 evidence"));
     expect(row.getByText("fixture")).toBeInTheDocument();
     expect(row.getByText("fixture-connection-alpha")).toBeInTheDocument();
     expect(row.getByText("fixture-sync-run-complete")).toBeInTheDocument();
@@ -71,7 +71,7 @@ describe("EvidenceSpine", () => {
       />,
     );
 
-    const row = within(screen.getByLabelText("Configured evidence"));
+    const row = within(screen.getByLabelText("已配置 evidence"));
     expect(row.getByText("fixture-binding-alpha-beta")).toBeInTheDocument();
     expect(row.getByText("1999-12-31T23:58:00Z")).toBeInTheDocument();
     expect(row.queryByText("SyncRun")).not.toBeInTheDocument();
@@ -86,7 +86,7 @@ describe("EvidenceSpine", () => {
       />,
     );
 
-    const row = within(screen.getByLabelText("Inferred evidence"));
+    const row = within(screen.getByLabelText("推断 evidence"));
     expect(row.getByText("fixture-rule-v1")).toBeInTheDocument();
     expect(row.getByText("fixture-resource-version-alpha")).toBeInTheDocument();
     expect(row.getByText("fixture-relation-version-alpha")).toBeInTheDocument();

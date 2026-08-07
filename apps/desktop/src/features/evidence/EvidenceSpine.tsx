@@ -2,6 +2,7 @@ import { useId } from "react";
 
 import type { RelationDto } from "../../generated/query/RelationDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
+import { displayEnum } from "../../i18n";
 
 import "./EvidenceSpine.css";
 
@@ -12,9 +13,9 @@ interface EvidenceSpineProps {
 }
 
 const evidenceLabels = {
-  provider: "Provider",
-  configured: "Configured",
-  inferred: "Inferred",
+  provider: "提供方",
+  configured: "已配置",
+  inferred: "推断",
 } as const;
 
 function CurrentFact({
@@ -25,14 +26,14 @@ function CurrentFact({
   readonly resource: ResourceDto;
 }) {
   return (
-    <article className="evidence-spine__fact" aria-label={`${label} current fact`}>
+    <article className="evidence-spine__fact" aria-label={`${label} 当前事实`}>
       <span className="evidence-spine__eyebrow">{label}</span>
       <strong>{resource.display_name}</strong>
       <code>{resource.resource_id}</code>
       <div className="evidence-spine__status-line">
-        <span><small>Health</small>{resource.health}</span>
-        <span><small>Freshness</small>{resource.freshness}</span>
-        <span><small>Lifecycle</small>{resource.lifecycle}</span>
+        <span><small>健康度</small>{displayEnum(resource.health)}</span>
+        <span><small>新鲜度</small>{displayEnum(resource.freshness)}</span>
+        <span><small>生命周期</small>{displayEnum(resource.lifecycle)}</span>
       </div>
       <time dateTime={resource.observed_at}>{resource.observed_at}</time>
     </article>
@@ -54,15 +55,15 @@ function EvidenceDetails({ relation }: { readonly relation: RelationDto }) {
   if (evidence.type === "provider") {
     return (
       <dl className="evidence-spine__details">
-        <dt>Provider</dt>
+        <dt>提供方</dt>
         <dd><code>{evidence.connector_type}</code></dd>
-        <dt>Connection</dt>
+        <dt>连接</dt>
         <dd><code>{evidence.connection_id}</code></dd>
         <dt>SyncRun</dt>
         <dd><code>{evidence.sync_run_id}</code></dd>
-        <dt>Field path</dt>
+        <dt>字段路径</dt>
         <dd><code>{evidence.field_path}</code></dd>
-        <dt>Last seen</dt>
+        <dt>最近观测</dt>
         <dd><time dateTime={relation.last_seen_at}>{relation.last_seen_at}</time></dd>
       </dl>
     );
@@ -71,11 +72,11 @@ function EvidenceDetails({ relation }: { readonly relation: RelationDto }) {
   if (evidence.type === "configured") {
     return (
       <dl className="evidence-spine__details">
-        <dt>Binding</dt>
+        <dt>绑定</dt>
         <dd><code>{evidence.binding_id}</code></dd>
-        <dt>Created</dt>
+        <dt>创建时间</dt>
         <dd><time dateTime={evidence.created_at}>{evidence.created_at}</time></dd>
-        <dt>Last seen</dt>
+        <dt>最近观测</dt>
         <dd><time dateTime={relation.last_seen_at}>{relation.last_seen_at}</time></dd>
       </dl>
     );
@@ -83,31 +84,31 @@ function EvidenceDetails({ relation }: { readonly relation: RelationDto }) {
 
   return (
     <dl className="evidence-spine__details">
-      <dt>Rule version</dt>
+        <dt>规则版本</dt>
       <dd><code>{evidence.rule_version}</code></dd>
-      <dt>Input versions</dt>
+        <dt>输入版本</dt>
       <dd>
-        <ul className="evidence-spine__inputs" aria-label="Input resource versions">
+        <ul className="evidence-spine__inputs" aria-label="输入资源版本">
           {evidence.input_resource_version_ids.map((versionId) => (
             <li key={versionId}><code>{versionId}</code></li>
           ))}
         </ul>
       </dd>
-      <dt>Relation inputs</dt>
+        <dt>关系输入</dt>
       <dd>
         {evidence.input_relation_version_ids.length === 0 ? (
-          <span>None</span>
+          <span>无</span>
         ) : (
-          <ul className="evidence-spine__inputs" aria-label="Input relation versions">
+          <ul className="evidence-spine__inputs" aria-label="输入关系版本">
             {evidence.input_relation_version_ids.map((versionId) => (
               <li key={versionId}><code>{versionId}</code></li>
             ))}
           </ul>
         )}
       </dd>
-      <dt>Confidence</dt>
+        <dt>置信度</dt>
       <dd><Confidence basisPoints={evidence.confidence_basis_points} /></dd>
-      <dt>Last seen</dt>
+        <dt>最近观测</dt>
       <dd><time dateTime={relation.last_seen_at}>{relation.last_seen_at}</time></dd>
     </dl>
   );
@@ -122,26 +123,26 @@ export function EvidenceSpine({ source, target, relations }: EvidenceSpineProps)
     <section className="evidence-spine" aria-labelledby={titleId}>
       <header className="evidence-spine__header">
         <div>
-          <span className="evidence-spine__eyebrow">Inspector</span>
-          <h2 id={titleId}>Evidence Spine</h2>
+          <span className="evidence-spine__eyebrow">检查器</span>
+          <h2 id={titleId}>证据链</h2>
         </div>
         <span className="evidence-spine__count">
-          {relations.length} {relations.length === 1 ? "source" : "sources"}
+          {relations.length} 个来源
         </span>
       </header>
 
       <section className="evidence-spine__section" aria-labelledby={factsId}>
-        <h3 id={factsId}>Current Facts</h3>
+        <h3 id={factsId}>当前事实</h3>
         <div className="evidence-spine__facts">
-          <CurrentFact label="Source" resource={source} />
-          <CurrentFact label="Target" resource={target} />
+          <CurrentFact label="来源" resource={source} />
+          <CurrentFact label="目标" resource={target} />
         </div>
       </section>
 
       <section className="evidence-spine__section" aria-labelledby={pathId}>
-        <h3 id={pathId}>Evidence Path</h3>
+        <h3 id={pathId}>证据路径</h3>
         {relations.length === 0 ? (
-          <p className="evidence-spine__empty">No evidence is available for these endpoints.</p>
+          <p className="evidence-spine__empty">这些端点没有可用证据。</p>
         ) : (
           <ol className="evidence-spine__path">
             {relations.map((relation) => {
@@ -155,7 +156,7 @@ export function EvidenceSpine({ source, target, relations }: EvidenceSpineProps)
                   <div className="evidence-spine__evidence-header">
                     <span className="evidence-spine__type">{evidenceLabels[type]}</span>
                     <code>{relation.kind}</code>
-                    <span>{relation.lifecycle}</span>
+                    <span>{displayEnum(relation.lifecycle)}</span>
                   </div>
                   <code className="evidence-spine__relation-id">{relation.relation_id}</code>
                   <EvidenceDetails relation={relation} />

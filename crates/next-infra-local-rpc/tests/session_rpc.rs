@@ -25,7 +25,8 @@ use next_infra_query::dto::{
 };
 use next_infra_query::service::{
     HealthSummaryBody, QueryService, QuerySource, RecentChangesPlan, ResourceDetailBody,
-    ResourceSearchPlan, SourcePage, SourceSnapshot, SyncStatusBody, TopologyBody, TopologyPlan,
+    ResourceSearchPlan, SourcePage, SourceSnapshot, SyncStatusBody, TimelinePlan,
+    TimelineSourcePage, TopologyBody, TopologyPlan,
 };
 use tempfile::tempdir;
 
@@ -348,6 +349,17 @@ impl QuerySource for FixtureSource {
             recent_runs: vec![],
             next_scheduled_at: None,
         })))
+    }
+
+    fn get_timeline(
+        &self,
+        _plan: &TimelinePlan,
+    ) -> Result<SourceSnapshot<TimelineSourcePage>, Self::Error> {
+        Ok(snapshot(TimelineSourcePage {
+            groups: vec![],
+            item_count: 0,
+            next_after: None,
+        }))
     }
 
     fn list_connector_coverage(

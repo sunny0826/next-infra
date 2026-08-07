@@ -27,6 +27,7 @@
 
 ## 文档索引
 
+1. [操作手册](../OPERATIONS.md)：面向单机自托管使用者的启动、浏览、安全边界和故障处理。
 1. [本地环境基线](./00-local-environment.md)：记录当前主机能力和由此产生的设计约束。
 2. [RFC-0001：单机架构](./RFC-0001-single-node-architecture.md)：项目定位、整体架构、进程模型和主要替代方案。
 3. [结构图](./architecture-diagrams.md)：系统上下文、进程所有权、Runtime 组件、读写路径和 Host 生命周期。

@@ -18,39 +18,39 @@ export interface ShellRoute {
 export const SHELL_ROUTES: readonly ShellRoute[] = [
   {
     id: "overview",
-    label: "Overview",
+    label: "概览",
     icon: "overview",
-    description: "Attention facts, connector observations, configured paths, and recent changes.",
+    description: "需要关注的事实、连接器观测、已配置路径和近期变更。",
   },
   {
     id: "inventory",
-    label: "Inventory",
+    label: "资源清单",
     icon: "inventory",
-    description: "Bounded resources with stable filtering, selection, and pagination.",
+    description: "可筛选、选择和分页浏览的受限资源。",
   },
   {
     id: "topology",
-    label: "Topology",
+    label: "拓扑",
     icon: "topology",
-    description: "A bounded focus-centered relation canvas with evidence labels and frontier limits.",
+    description: "以焦点资源为中心、带证据标签和边界限制的关系画布。",
   },
   {
     id: "timeline",
-    label: "Timeline",
+    label: "时间线",
     icon: "timeline",
-    description: "Structured changes are unavailable until Goal 7 delivers the Timeline query.",
+    description: "按持久化来源分组的已提交结构化变更。",
   },
   {
     id: "connectors",
-    label: "Connectors",
+    label: "连接器",
     icon: "connectors",
-    description: "Connection health, recent sync state, scheduling, and declared coverage.",
+    description: "连接健康度、最近同步状态、计划和声明覆盖范围。",
   },
   {
     id: "settings",
-    label: "Settings",
+    label: "设置",
     icon: "settings",
-    description: "Local lifecycle, retention, data budget, and capability controls.",
+    description: "本地生命周期、保留策略、数据预算和能力控制。",
   },
 ] as const;
 

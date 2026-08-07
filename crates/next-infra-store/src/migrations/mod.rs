@@ -1,7 +1,7 @@
 use crate::StoreError;
 use rusqlite::{Connection, TransactionBehavior, params};
 
-pub const LATEST_SCHEMA_VERSION: u32 = 2;
+pub const LATEST_SCHEMA_VERSION: u32 = 3;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE schema_migrations (
@@ -147,6 +147,35 @@ INSERT INTO projection_metadata(singleton_id, committed_revision, committed_at)
 VALUES (1, 0, CAST(unixepoch('subsec') * 1000 AS INTEGER));
 "#;
 
+const MIGRATION_3: &str = r#"
+CREATE INDEX bindings_source_status_idx
+ON bindings(source_resource_id, status);
+
+CREATE INDEX bindings_target_status_idx
+ON bindings(target_resource_id, status);
+
+CREATE TABLE inference_runs (
+    inference_run_id TEXT PRIMARY KEY,
+    rule_version TEXT NOT NULL,
+    started_at INTEGER NOT NULL,
+    finished_at INTEGER,
+    status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed')),
+    input_resource_version_ids_json TEXT NOT NULL,
+    input_relation_version_ids_json TEXT NOT NULL,
+    summary_json TEXT NOT NULL
+) STRICT;
+
+CREATE TABLE inference_outputs (
+    inference_run_id TEXT NOT NULL REFERENCES inference_runs(inference_run_id),
+    relation_id TEXT NOT NULL REFERENCES relations(relation_id),
+    evidence_key TEXT NOT NULL,
+    PRIMARY KEY(inference_run_id, relation_id)
+) STRICT;
+
+CREATE INDEX inference_runs_rule_started_idx
+ON inference_runs(rule_version, started_at DESC);
+"#;
+
 pub fn apply(connection: &mut Connection) -> Result<(), StoreError> {
     let current: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -192,6 +221,20 @@ pub fn apply(connection: &mut Connection) -> Result<(), StoreError> {
             .pragma_update(None, "user_version", 2_u32)
             .map_err(StoreError::Sqlite)?;
     }
+    if current < 3 {
+        transaction
+            .execute_batch(MIGRATION_3)
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, unixepoch('subsec') * 1000)",
+                params![3_u32],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .pragma_update(None, "user_version", 3_u32)
+            .map_err(StoreError::Sqlite)?;
+    }
     transaction.commit().map_err(StoreError::Sqlite)
 }
 
@@ -225,8 +268,65 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
         assert_eq!(metadata.0, 0);
         assert!(metadata.1 > 0);
+    }
+
+    #[test]
+    fn schema_two_upgrades_binding_and_inference_projection_without_data_loss() {
+        let mut connection = Connection::open_in_memory().unwrap();
+        connection.execute_batch(MIGRATION_1).unwrap();
+        connection.execute_batch(MIGRATION_2).unwrap();
+        connection
+            .execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (1, 1), (2, 2)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO connections(connection_id, connector_type, display_name, enabled, config_json, health, config_schema_version) VALUES ('fixture-connection', 'fixture', 'Fixture', 1, '{}', 'healthy', 1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sync_runs(sync_run_id, connection_id, mode, trigger, started_at, status, coverage_json, counts_json, errors_json) VALUES ('fixture-run', 'fixture-connection', 'full', 'schedule', 1, 'succeeded', '{}', '{}', '[]')",
+                [],
+            )
+            .unwrap();
+        for id in ["source", "target"] {
+            connection
+                .execute(
+                    "INSERT INTO resources(resource_id, connection_id, kind, external_id, name, display_name, scope, labels_json, lifecycle, health, attributes_json, attribute_schema_version, fingerprint, first_seen_at, last_seen_at, last_changed_at, last_sync_run_id) VALUES (?1, 'fixture-connection', 'fixture.resource', ?1, ?1, ?1, 'fixture-scope', '{}', 'active', 'unknown', '{}', 1, 'fingerprint', 1, 1, 1, 'fixture-run')",
+                    params![id],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO bindings(binding_id, source_resource_id, target_resource_id, kind, status, created_at, updated_at) VALUES ('fixture-binding', 'source', 'target', 'fixture.depends_on', 'active', 1, 1)",
+                [],
+            )
+            .unwrap();
+        connection
+            .pragma_update(None, "user_version", 2_u32)
+            .unwrap();
+
+        apply(&mut connection).unwrap();
+
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        let binding: String = connection
+            .query_row("SELECT binding_id FROM bindings", [], |row| row.get(0))
+            .unwrap();
+        let inference_table: i64 = connection
+            .query_row("SELECT COUNT(*) FROM inference_runs", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
+        assert_eq!(binding, "fixture-binding");
+        assert_eq!(inference_table, 0);
     }
 }

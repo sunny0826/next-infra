@@ -9,6 +9,8 @@ import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto"
 import type { ResourcePageDto } from "../../generated/query/ResourcePageDto";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TopologyDto } from "../../generated/query/TopologyDto";
+import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
+import type { BindingCommandResultDto } from "../../generated/query/BindingCommandResultDto";
 
 import type {
   DesktopAdapter,
@@ -21,6 +23,11 @@ import type {
   RuntimeCapabilities,
   SearchResourcesInput,
   SyncStatusInput,
+  TimelineInput,
+  CreateBindingInput,
+  CreateGitHubConnectionInput,
+  UpdateBindingInput,
+  DisableBindingInput,
   Unsubscribe,
 } from "./desktop-adapter";
 
@@ -116,12 +123,56 @@ export class RealDesktopAdapter implements DesktopAdapter {
     return this.#invoke<ChangePageDto>("query_recent_changes", { request: input });
   }
 
+  async getTimeline(input: TimelineInput = {}) {
+    return this.#invoke<TimelinePageDto>("query_timeline", { request: input });
+  }
+
+  async createBinding(input: CreateBindingInput) {
+    return this.#invoke<BindingCommandResultDto>("binding_create", { request: input });
+  }
+
+  async updateBinding(input: UpdateBindingInput) {
+    return this.#invoke<BindingCommandResultDto>("binding_update", { request: input });
+  }
+
+  async disableBinding(input: DisableBindingInput) {
+    return this.#invoke<BindingCommandResultDto>("binding_disable", { request: input });
+  }
+
   async getSyncStatus(input: SyncStatusInput) {
     return this.#invoke<SyncStatusDto>("query_sync_status", { request: input });
   }
 
   async listConnectorCoverage() {
     return this.#invoke<ConnectorCoverageSnapshotDto>("query_connector_coverage");
+  }
+
+  async discoverGitHubRepositories(token: string) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["discoverGitHubRepositories"]>>>(
+      "github_discover_repositories",
+      { request: { token } },
+    );
+  }
+
+  async createGitHubConnection(input: CreateGitHubConnectionInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["createGitHubConnection"]>>>(
+      "github_connect",
+      { request: input },
+    );
+  }
+
+  async previewGitHubConnectionPurge(connectionId: string) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["previewGitHubConnectionPurge"]>>>(
+      "github_connection_purge_preview",
+      { request: { connection_id: connectionId } },
+    );
+  }
+
+  async purgeGitHubConnection(connectionId: string) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["purgeGitHubConnection"]>>>(
+      "github_connection_purge",
+      { request: { connection_id: connectionId } },
+    );
   }
 
   async manualSync(connectionId: string) {

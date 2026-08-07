@@ -1,6 +1,6 @@
 # 串行 Goal 与并行任务
 
-本文定义已经获准的只读首版开发顺序。用户于 2026-08-02 授权初始化 Git 并按 [`docs/tasks/`](../tasks/README.md) 开始实现；授权不包含真实凭据、Agent 用户配置、发布、公证或外部基础设施写操作。Goal 验收门必须串行完成；前一 Goal 未达到验收标准时，不进入后一 Goal。一个 Goal 内部只有在共享契约冻结后，才可按依赖波次与独占文件所有权并行派发给 `luna_worker`。
+本文定义已经获准的只读首版开发顺序。用户于 2026-08-02 授权初始化 Git 并按 [`docs/tasks/`](../tasks/README.md) 开始实现；授权不包含真实凭据、Agent 用户配置、发布、公证或外部基础设施写操作。Goal 验收门必须串行完成；前一 Goal 未达到验收标准时，不进入后一 Goal。一个 Goal 内部只有在共享契约冻结后，才可按依赖波次与独占文件所有权并行派发给 `deepseek_worker`。
 
 ## 通用完成标准
 
@@ -140,7 +140,7 @@ rtk cargo clippy --workspace --all-targets -- -D warnings
 
 ## Goal 3：Tauri 生命周期、Query Adapter 与 UI 纵切
 
-**状态：** Authorized / In progress  
+**状态：** INTERNAL-PASS / EXTERNAL-DEFERRED（2026-08-04，见 `docs/tasks/GATE-G3-2026-08-04.md`）  
 **依赖：** Goal 2
 
 ### 范围
@@ -177,6 +177,7 @@ rtk test pnpm --dir apps/desktop test:desktop-smoke
 
 ## Goal 4：Unix Socket 与 STDIO MCP 纵切
 
+**状态：** INTERNAL-PASS / EXTERNAL-DEFERRED（2026-08-05，见 `docs/tasks/GATE-G4-2026-08-05.md`）
 **依赖：** Goal 3
 
 ### 范围
@@ -246,6 +247,8 @@ Hermes 的实际命令必须在安装后根据当时版本重新确认，不提�
 - MCP 和 Tauri Commands 均无法提交命令文本。
 - 远程不可达只影响 Freshness/Connector Health，不把主机伪装成 down。
 
+**内部状态（2026-08-06）：** `PASS`；fixed transport、Darwin/Linux parsers、ReadConnector、SQLite replay 与 synthetic UI acceptance 已通过。真实 SSH alias、MCP 与 Apple identity/signing 按用户决定未执行，保持 external/deferred，不得表述为 live PASS。
+
 ## Goal 7：Topology、Binding 与 Timeline
 
 **依赖：** Goal 6
@@ -283,6 +286,7 @@ Hermes 的实际命令必须在安装后根据当时版本重新确认，不提�
 
 ## Goal 9：Supabase 与云厂商基础覆盖
 
+**状态：** INTERNAL-PASS / EXTERNAL-DEFERRED（2026-08-06，见 `docs/tasks/GATE-G9-2026-08-06.md`）
 **依赖：** Goal 8
 
 ### 范围

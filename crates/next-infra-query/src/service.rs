@@ -12,6 +12,8 @@ pub const DEFAULT_TOPOLOGY_NODES: usize = 100;
 pub const DEFAULT_TOPOLOGY_EDGES: usize = 200;
 pub const MAX_TOPOLOGY_NODES: usize = 200;
 pub const MAX_TOPOLOGY_EDGES: usize = 400;
+pub const DEFAULT_TIMELINE_LIMIT: usize = 50;
+pub const MAX_TIMELINE_LIMIT: usize = 200;
 
 const CURSOR_PREFIX: &str = "niq1:";
 const MAX_CURSOR_LENGTH: usize = 512;
@@ -67,6 +69,12 @@ pub struct SyncStatusRequest {
     pub recent_run_limit: Option<usize>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TimelineRequest {
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResourceSearchPlan {
     pub query: Option<String>,
@@ -96,9 +104,22 @@ pub struct TopologyPlan {
     pub max_edges: usize,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimelinePlan {
+    pub limit: usize,
+    pub after: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourcePage<T> {
     pub items: Vec<T>,
+    pub next_after: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimelineSourcePage {
+    pub groups: Vec<TimelineGroupDto>,
+    pub item_count: usize,
     pub next_after: Option<String>,
 }
 
@@ -166,6 +187,10 @@ pub trait QuerySource {
         connection_id: &str,
         recent_run_limit: usize,
     ) -> Result<SourceSnapshot<Option<SyncStatusBody>>, Self::Error>;
+    fn get_timeline(
+        &self,
+        plan: &TimelinePlan,
+    ) -> Result<SourceSnapshot<TimelineSourcePage>, Self::Error>;
     fn list_connector_coverage(
         &self,
     ) -> Result<SourceSnapshot<Vec<ConnectorCoverageDto>>, Self::Error>;
@@ -345,6 +370,34 @@ where
             connection: body.connection,
             recent_runs: body.recent_runs,
             next_scheduled_at: body.next_scheduled_at,
+        })
+    }
+
+    pub fn get_timeline(&self, request: TimelineRequest) -> QueryResult<TimelinePageDto> {
+        let limit = bounded_limit(request.limit, DEFAULT_TIMELINE_LIMIT, MAX_TIMELINE_LIMIT)?;
+        let plan = TimelinePlan {
+            limit,
+            after: decode_cursor(request.cursor.as_deref())?,
+        };
+        let snapshot = self
+            .source
+            .get_timeline(&plan)
+            .map_err(|_| source_error())?;
+        let page = snapshot.body;
+        validate_page_size(page.item_count, limit)?;
+        if page
+            .groups
+            .iter()
+            .map(|group| group.items.len())
+            .sum::<usize>()
+            != page.item_count
+        {
+            return Err(contract_error("timeline group item count is inconsistent"));
+        }
+        Ok(TimelinePageDto {
+            metadata: snapshot.metadata,
+            groups: page.groups,
+            page_info: PageInfo::new(page.next_after.map(encode_cursor)),
         })
     }
 

@@ -61,6 +61,86 @@ describe("RealDesktopAdapter", () => {
     });
   });
 
+  it("sends a GitHub connection request only to the dedicated local command", async () => {
+    const { fake, invoke } = transport();
+    invoke.mockResolvedValue({ connection_id: "github-fixture", sync_run_id: "fixture-run" });
+    const adapter = new RealDesktopAdapter(fake);
+
+    await expect(adapter.createGitHubConnection({
+      display_name: "Personal GitHub",
+      token: "test-token",
+      selected_repository_ids: ["fixture-repository"],
+    })).resolves.toEqual({ connection_id: "github-fixture", sync_run_id: "fixture-run" });
+    expect(invoke).toHaveBeenCalledWith("github_connect", {
+      request: {
+        display_name: "Personal GitHub",
+        token: "test-token",
+        selected_repository_ids: ["fixture-repository"],
+      },
+    });
+  });
+
+  it("loads the bounded GitHub repository selection before connection creation", async () => {
+    const { fake, invoke } = transport();
+    invoke.mockResolvedValue([{ id: "fixture-repository", name: "fixture/repository" }]);
+    const adapter = new RealDesktopAdapter(fake);
+
+    await expect(adapter.discoverGitHubRepositories("test-token")).resolves.toEqual([
+      { id: "fixture-repository", name: "fixture/repository" },
+    ]);
+    expect(invoke).toHaveBeenCalledWith("github_discover_repositories", {
+      request: { token: "test-token" },
+    });
+  });
+
+  it("previews and purges one GitHub connection through dedicated local commands", async () => {
+    const { fake, invoke } = transport();
+    const summary = {
+      resources: 4,
+      relations: 3,
+      resource_versions: 2,
+      relation_versions: 1,
+      changes: 5,
+      bindings: 0,
+      sync_runs: 1,
+    };
+    invoke.mockResolvedValue(summary);
+    const adapter = new RealDesktopAdapter(fake);
+
+    await expect(adapter.previewGitHubConnectionPurge("github-fixture")).resolves.toEqual(summary);
+    await expect(adapter.purgeGitHubConnection("github-fixture")).resolves.toEqual(summary);
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "github_connection_purge_preview", {
+      request: { connection_id: "github-fixture" },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "github_connection_purge", {
+      request: { connection_id: "github-fixture" },
+    });
+  });
+
+  it("maps binding mutations to dedicated local commands", async () => {
+    const { fake, invoke } = transport();
+    invoke.mockResolvedValue({ binding: {} });
+    const adapter = new RealDesktopAdapter(fake);
+    const create = {
+      source_resource_id: "fixture-source",
+      target_resource_id: "fixture-target",
+      kind: "infra.depends_on",
+    };
+
+    await adapter.createBinding(create);
+    await adapter.updateBinding({ binding_id: "fixture-binding", ...create });
+    await adapter.disableBinding({ binding_id: "fixture-binding" });
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "binding_create", { request: create });
+    expect(invoke).toHaveBeenNthCalledWith(2, "binding_update", {
+      request: { binding_id: "fixture-binding", ...create },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "binding_disable", {
+      request: { binding_id: "fixture-binding" },
+    });
+  });
+
   it("cleans unknown transport failures and preserves safe envelopes", async () => {
     const { fake, invoke } = transport();
     const adapter = new RealDesktopAdapter(fake);

@@ -7,11 +7,11 @@
 use next_infra_query::dto::{
     ChangePageDto, ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, ErrorEnvelope, Freshness,
     HealthSummaryDto, ResourceDetailDto, ResourceHealth, ResourcePageDto, SyncStatusDto,
-    TopologyDto,
+    TimelinePageDto, TopologyDto,
 };
 use next_infra_query::service::{
     GetResourceRequest, GetTopologyRequest, QueryService, QuerySource, RecentChangesRequest,
-    ResourceInclude, SearchResourcesRequest, SyncStatusRequest,
+    ResourceInclude, SearchResourcesRequest, SyncStatusRequest, TimelineRequest,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -74,6 +74,12 @@ pub struct RecentChangesCommand {
     pub resource_id: Option<String>,
     #[serde(default)]
     pub kinds: BTreeSet<String>,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct TimelineCommand {
     pub limit: Option<usize>,
     pub cursor: Option<String>,
 }
@@ -153,6 +159,13 @@ where
             since: request.since,
             resource_id: request.resource_id,
             kinds: request.kinds,
+            limit: request.limit,
+            cursor: request.cursor,
+        })
+    }
+
+    pub fn get_timeline(&self, request: TimelineCommand) -> Result<TimelinePageDto, ErrorEnvelope> {
+        self.service.get_timeline(TimelineRequest {
             limit: request.limit,
             cursor: request.cursor,
         })

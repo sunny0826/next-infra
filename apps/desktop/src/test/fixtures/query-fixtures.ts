@@ -284,6 +284,29 @@ export function createConnectorCoverageFixtures(): readonly ConnectorCoverageDto
   ];
 }
 
+export function createGoal9ConnectorCoverageFixtures(): readonly ConnectorCoverageDto[] {
+  return [
+    { connector_type: "supabase-managed", connector_version: "1.0.0", module: "supabase.managed.organizations", level: "supported", reason: null },
+    { connector_type: "supabase-managed", connector_version: "1.0.0", module: "supabase.managed.projects", level: "supported", reason: null },
+    { connector_type: "supabase-self-hosted", connector_version: "1.0.0", module: "supabase.self_hosted.service_api", level: "partial", reason: "Installation-specific service exposure." },
+    { connector_type: "supabase-self-hosted", connector_version: "1.0.0", module: "supabase.self_hosted.postgres_metadata", level: "partial", reason: "Metadata only; no data or connection strings." },
+    { connector_type: "aliyun", connector_version: "1.0.0", module: "aliyun.compute.ecs", level: "supported", reason: null },
+    { connector_type: "aliyun", connector_version: "1.0.0", module: "aliyun.network.vpc", level: "supported", reason: null },
+    { connector_type: "aliyun", connector_version: "1.0.0", module: "aliyun.network.vswitch", level: "supported", reason: null },
+    { connector_type: "aliyun", connector_version: "1.0.0", module: "aliyun.network.security_group", level: "partial", reason: "Security group inventory depends on scoped permission." },
+    { connector_type: "aliyun", connector_version: "1.0.0", module: "aliyun.edge.slb", level: "partial", reason: "Region or permission scope may limit edge inventory." },
+    { connector_type: "aliyun", connector_version: "1.0.0", module: "aliyun.edge.public_ip", level: "partial", reason: "Public IP association is only reported when both IDs are present." },
+    { connector_type: "aliyun", connector_version: "1.0.0", module: "aliyun.edge.dns", level: "partial", reason: "DNS records are region/account scoped." },
+    { connector_type: "tencent", connector_version: "1.0.0", module: "tencent.compute.cvm", level: "supported", reason: null },
+    { connector_type: "tencent", connector_version: "1.0.0", module: "tencent.network.vpc", level: "supported", reason: null },
+    { connector_type: "tencent", connector_version: "1.0.0", module: "tencent.network.subnet", level: "supported", reason: null },
+    { connector_type: "tencent", connector_version: "1.0.0", module: "tencent.network.security_group", level: "partial", reason: "Security group inventory depends on scoped permission." },
+    { connector_type: "tencent", connector_version: "1.0.0", module: "tencent.edge.clb", level: "partial", reason: "Region or permission scope may limit edge inventory." },
+    { connector_type: "tencent", connector_version: "1.0.0", module: "tencent.edge.public_ip", level: "partial", reason: "Public IP association is only reported when both IDs are present." },
+    { connector_type: "tencent", connector_version: "1.0.0", module: "tencent.edge.dns", level: "partial", reason: "DNS records are region/account scoped." },
+  ];
+}
+
 export function createGitHubConnectorCoverageFixtures(): readonly ConnectorCoverageDto[] {
   const supported = [
     "github.repositories",

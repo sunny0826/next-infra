@@ -128,6 +128,18 @@ pub struct Binding {
     pub updated_at: Timestamp,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InferenceRun {
+    pub inference_run_id: InferenceRunId,
+    pub rule_version: RuleVersion,
+    pub started_at: Timestamp,
+    pub finished_at: Option<Timestamp>,
+    pub status: InferenceRunStatus,
+    pub input_resource_version_ids: Vec<ResourceVersionId>,
+    pub input_relation_version_ids: Vec<RelationVersionId>,
+    pub output_relation_ids: Vec<RelationId>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncRunCounts {
     pub read: u64,
@@ -158,6 +170,7 @@ pub struct SyncRun {
 pub enum ChangeSubject {
     Resource { resource_id: ResourceId },
     Relation { relation_id: RelationId },
+    Binding { binding_id: BindingId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

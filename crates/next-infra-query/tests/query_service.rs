@@ -117,6 +117,27 @@ impl QuerySource for FakeSource {
         )
     }
 
+    fn get_timeline(
+        &self,
+        plan: &TimelinePlan,
+    ) -> Result<SourceSnapshot<TimelineSourcePage>, Self::Error> {
+        self.snapshot(TimelineSourcePage {
+            groups: vec![TimelineGroupDto {
+                group_id: "timeline:sync_run:fixture-run:0".into(),
+                origin: TimelineOriginDto::SyncRun {
+                    sync_run_id: "fixture-run".into(),
+                },
+                occurred_at: "2000-01-01T00:00:00Z".into(),
+                items: vec![TimelineItemDto {
+                    change: change(),
+                    version_links: Vec::new(),
+                }],
+            }],
+            item_count: 1,
+            next_after: (plan.limit == 1).then(|| "fixture-change-cursor".into()),
+        })
+    }
+
     fn list_connector_coverage(
         &self,
     ) -> Result<SourceSnapshot<Vec<ConnectorCoverageDto>>, Self::Error> {
@@ -260,6 +281,31 @@ fn topology_defaults_are_bounded_and_frontier_is_preserved() {
     assert_eq!(plan.max_edges, DEFAULT_TOPOLOGY_EDGES);
     assert!(result.truncated);
     assert_eq!(result.frontier.len(), 1);
+}
+
+#[test]
+fn timeline_uses_its_own_bounds_and_preserves_opaque_pagination() {
+    let service = QueryService::new(FakeSource::default());
+    let page = service
+        .get_timeline(TimelineRequest {
+            limit: Some(1),
+            cursor: Some("niq1:prior-timeline-change".into()),
+        })
+        .unwrap();
+    assert_eq!(page.groups.len(), 1);
+    assert_eq!(page.groups[0].items.len(), 1);
+    assert_eq!(
+        page.page_info.next_cursor(),
+        Some("niq1:fixture-change-cursor")
+    );
+
+    let invalid = service
+        .get_timeline(TimelineRequest {
+            limit: Some(MAX_TIMELINE_LIMIT + 1),
+            cursor: None,
+        })
+        .unwrap_err();
+    assert_eq!(invalid.code, "invalid_request");
 }
 
 #[test]

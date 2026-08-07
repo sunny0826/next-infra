@@ -4,6 +4,7 @@ import type { RelationDto } from "../../generated/query/RelationDto";
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
+import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 
 import type { DesktopAdapter } from "./desktop-adapter";
 import type {
@@ -15,6 +16,11 @@ import type {
   RuntimeCapabilities,
   SearchResourcesInput,
   SyncStatusInput,
+  TimelineInput,
+  CreateBindingInput,
+  CreateGitHubConnectionInput,
+  DisableBindingInput,
+  UpdateBindingInput,
   Unsubscribe,
 } from "./desktop-adapter";
 
@@ -149,7 +155,27 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async getSyncStatus(input: SyncStatusInput) {
+  async getTimeline(_input: TimelineInput = {}) {
+    return {
+      metadata: this.#metadata(),
+      groups: [],
+      page_info: { next_cursor: null },
+    };
+  }
+
+  async createBinding(input: CreateBindingInput) {
+    return { metadata: this.#metadata(), binding: { binding_id: "fixture-binding", ...input, status: "active" as const, created_at: "2000-01-01T00:00:00Z", updated_at: "2000-01-01T00:00:00Z" } };
+  }
+
+  async updateBinding(input: UpdateBindingInput) {
+    return { metadata: this.#metadata(), binding: { ...input, status: "active" as const, created_at: "2000-01-01T00:00:00Z", updated_at: "2000-01-01T00:00:01Z" } };
+  }
+
+  async disableBinding(input: DisableBindingInput) {
+    return { metadata: this.#metadata(), binding: { binding_id: input.binding_id, source_resource_id: "fixture-source", target_resource_id: "fixture-target", kind: "fixture.depends_on", status: "disabled" as const, created_at: "2000-01-01T00:00:00Z", updated_at: "2000-01-01T00:00:01Z" } };
+  }
+
+  async getSyncStatus(input: SyncStatusInput): Promise<SyncStatusDto> {
     const connection = this.#snapshot.connections.find(
       (item) => item.connection_id === input.connection_id,
     );
@@ -164,6 +190,45 @@ export class MockDesktopAdapter implements DesktopAdapter {
 
   async listConnectorCoverage(): Promise<ConnectorCoverageSnapshotDto> {
     return { metadata: this.#metadata(), items: [] };
+  }
+
+  async discoverGitHubRepositories() {
+    return [
+      { id: "fixture-github-repository-1", name: "fixture/first-repository" },
+      { id: "fixture-github-repository-2", name: "fixture/second-repository" },
+    ];
+  }
+
+  async createGitHubConnection(input: CreateGitHubConnectionInput) {
+    return {
+      connection_id: `fixture-github-${input.display_name || "connection"}`,
+      sync_run_id: "fixture-github-sync",
+    };
+  }
+
+  async previewGitHubConnectionPurge(connectionId: string) {
+    const resourceIds = new Set(
+      this.#snapshot.resources
+        .filter((resource) => resource.connection_id === connectionId)
+        .map((resource) => resource.resource_id),
+    );
+    return {
+      resources: resourceIds.size,
+      relations: this.#snapshot.relations.filter(
+        (relation) =>
+          resourceIds.has(relation.source_resource_id) ||
+          resourceIds.has(relation.target_resource_id),
+      ).length,
+      resource_versions: 0,
+      relation_versions: 0,
+      changes: 0,
+      bindings: 0,
+      sync_runs: 0,
+    };
+  }
+
+  async purgeGitHubConnection(connectionId: string) {
+    return this.previewGitHubConnectionPurge(connectionId);
   }
 
   async manualSync(connectionId: string) {

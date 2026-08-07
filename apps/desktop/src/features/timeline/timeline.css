@@ -1,0 +1,17 @@
+.timeline-page { display: grid; gap: 16px; max-width: 960px; }
+.timeline-header { display: flex; justify-content: space-between; align-items: end; }
+.timeline-header h1 { margin: 0; font-size: 24px; letter-spacing: 0; }
+.timeline-eyebrow { margin: 0 0 4px; color: var(--muted-text); font-size: 12px; }
+.timeline-scroll { height: 620px; overflow: auto; border: 1px solid var(--line); background: var(--surface); }
+.timeline-group { border-bottom: 1px solid var(--line); }
+.timeline-group > header { display: flex; justify-content: space-between; gap: 16px; padding: 12px 14px; background: var(--surface-muted); font-size: 13px; }
+.timeline-group time { color: var(--muted-text); font-family: var(--mono); font-size: 12px; }
+.timeline-item { display: grid; gap: 10px; padding: 14px; border-top: 1px solid var(--line); }
+.timeline-subject, .timeline-links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted-text); font-size: 12px; }
+.timeline-diff { border-left: 2px solid var(--accent); padding-left: 10px; }
+.timeline-diff summary { cursor: pointer; font-family: var(--mono); font-size: 12px; }
+.timeline-diff > div { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; margin-top: 8px; }
+.timeline-diff pre { margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; color: var(--muted-text); font-size: 12px; }
+.timeline-load-more { justify-self: start; }
+.timeline-error { color: var(--danger); }
+.timeline-empty { padding: 16px; color: var(--muted-text); }

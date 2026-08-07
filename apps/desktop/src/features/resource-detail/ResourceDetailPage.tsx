@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
+import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { EvidenceSpine } from "../evidence/EvidenceSpine";
 
@@ -53,7 +54,7 @@ export function ResourceDetailPage({ resourceId }: ResourceDetailPageProps) {
         setState({ detail, resources: new Map(endpoints.map((item) => [item.resource_id, item])) });
       })
       .catch(() => {
-        if (active) setError("Resource detail could not be loaded from the local snapshot.");
+        if (active) setError("无法从本地快照加载资源详情。");
       });
     return () => { active = false; };
   }, [adapter, resourceId]);
@@ -69,28 +70,28 @@ export function ResourceDetailPage({ resourceId }: ResourceDetailPageProps) {
   }, [state]);
 
   if (error !== null) return <section className="resource-detail-state resource-detail-state--error" role="alert">{error}</section>;
-  if (state === null) return <section className="resource-detail-state" aria-busy="true">Reading resource detail…</section>;
+  if (state === null) return <section className="resource-detail-state" aria-busy="true">正在读取资源详情…</section>;
 
   const { detail } = state;
   const attributes = normalizedAttributes(detail.attributes);
   return (
     <div className="resource-detail-page">
       <header>
-        <p className="resource-detail-eyebrow">Resource verification</p>
+        <p className="resource-detail-eyebrow">资源核验</p>
         <h1>{detail.resource.display_name}</h1>
         <code>{detail.resource.resource_id}</code>
       </header>
 
-      <section className="resource-detail-facts" aria-label="Current resource facts">
-        <div><small>Health</small><strong>{detail.resource.health}</strong></div>
-        <div><small>Freshness</small><strong>{detail.resource.freshness}</strong></div>
-        <div><small>Lifecycle</small><strong>{detail.resource.lifecycle}</strong></div>
-        <div><small>Observed</small><time dateTime={detail.resource.observed_at}>{detail.resource.observed_at}</time></div>
+      <section className="resource-detail-facts" aria-label="当前资源事实">
+        <div><small>健康度</small><strong>{displayEnum(detail.resource.health)}</strong></div>
+        <div><small>新鲜度</small><strong>{displayEnum(detail.resource.freshness)}</strong></div>
+        <div><small>生命周期</small><strong>{displayEnum(detail.resource.lifecycle)}</strong></div>
+        <div><small>观测时间</small><time dateTime={detail.resource.observed_at}>{detail.resource.observed_at}</time></div>
       </section>
 
       <section className="resource-detail-section" aria-labelledby="detail-evidence">
-        <h2 id="detail-evidence">Evidence paths</h2>
-        {evidenceGroups.length === 0 ? <p>No relations were included in this snapshot.</p> : evidenceGroups.map((relations) => {
+        <h2 id="detail-evidence">证据路径</h2>
+        {evidenceGroups.length === 0 ? <p>此快照未包含关系。</p> : evidenceGroups.map((relations) => {
           const source = state.resources.get(relations[0].source_resource_id);
           const target = state.resources.get(relations[0].target_resource_id);
           return source && target ? <EvidenceSpine key={`${source.resource_id}-${target.resource_id}`} relations={relations} source={source} target={target} /> : null;
@@ -98,18 +99,18 @@ export function ResourceDetailPage({ resourceId }: ResourceDetailPageProps) {
       </section>
 
       <section className="resource-detail-section" aria-labelledby="detail-attributes">
-        <h2 id="detail-attributes">Normalized attributes</h2>
-        {attributes.length === 0 ? <p>No normalized scalar attributes were included.</p> : <dl>{attributes.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>}
+        <h2 id="detail-attributes">规范化属性</h2>
+        {attributes.length === 0 ? <p>未包含规范化的标量属性。</p> : <dl>{attributes.map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl>}
       </section>
 
       <section className="resource-detail-section" aria-labelledby="detail-changes">
-        <h2 id="detail-changes">Recent changes</h2>
-        <p>{detail.recent_changes.length} structured changes</p>
+        <h2 id="detail-changes">近期变更</h2>
+        <p>{detail.recent_changes.length} 项结构化变更</p>
       </section>
 
       <section className="resource-detail-section" aria-labelledby="detail-coverage">
-        <h2 id="detail-coverage">Connector coverage</h2>
-        <p>{detail.connector_coverage.length} declared modules</p>
+        <h2 id="detail-coverage">连接器覆盖范围</h2>
+        <p>{detail.connector_coverage.length} 个声明模块</p>
       </section>
     </div>
   );

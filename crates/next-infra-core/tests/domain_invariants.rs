@@ -1,8 +1,9 @@
 use next_infra_core::{
-    BindingId, Confidence, ConnectionId, ConnectorHealth, ConnectorType, EvidenceType, FieldPath,
-    Freshness, Lifecycle, RelationEvidence, RelationKind, RelationVersionId, ResourceHealth,
-    ResourceId, ResourceKind, ResourceVersionId, RuleVersion, Scope, SecretBackend, SecretKind,
-    SecretRef, SecretRefInput, SecretValue, SyncCoverage, SyncCursor, SyncRunId, Timestamp,
+    BindingId, BindingStatus, ChangeSubject, Confidence, ConnectionId, ConnectorHealth,
+    ConnectorType, EvidenceType, FieldPath, Freshness, Lifecycle, OriginRef, RelationEvidence,
+    RelationKind, RelationVersionId, ResourceHealth, ResourceId, ResourceKind, ResourceVersionId,
+    RuleVersion, Scope, SecretBackend, SecretKind, SecretRef, SecretRefInput, SecretValue,
+    SyncCoverage, SyncCursor, SyncRunId, Timestamp,
 };
 use std::any::TypeId;
 
@@ -124,6 +125,58 @@ fn inferred_relation_evidence_defaults_relation_inputs_for_legacy_payloads() {
         }
         other => panic!("expected inferred evidence, got {other:?}"),
     }
+}
+
+#[test]
+fn inference_origin_defaults_relation_inputs_for_legacy_payloads() {
+    let legacy = serde_json::json!({
+        "type": "inference",
+        "rule_version": "fixture-rule-v1",
+        "input_resource_version_ids": ["fixture-resource-version"],
+    });
+
+    let origin: OriginRef = serde_json::from_value(legacy).unwrap();
+    match origin {
+        OriginRef::Inference {
+            input_resource_version_ids,
+            input_relation_version_ids,
+            ..
+        } => {
+            assert_eq!(
+                input_resource_version_ids,
+                vec![id("fixture-resource-version", ResourceVersionId::new)]
+            );
+            assert!(input_relation_version_ids.is_empty());
+        }
+        other => panic!("expected inference origin, got {other:?}"),
+    }
+}
+
+#[test]
+fn binding_change_subject_round_trips_through_json() {
+    let subject = ChangeSubject::Binding {
+        binding_id: id("fixture-binding", BindingId::new),
+    };
+
+    let encoded = serde_json::to_value(&subject).unwrap();
+    assert_eq!(
+        encoded,
+        serde_json::json!({
+            "type": "binding",
+            "binding_id": "fixture-binding",
+        })
+    );
+    let decoded: ChangeSubject = serde_json::from_value(encoded).unwrap();
+    assert_eq!(decoded, subject);
+}
+
+#[test]
+fn disabled_binding_status_round_trips_through_json() {
+    let encoded = serde_json::to_string(&BindingStatus::Disabled).unwrap();
+    assert_eq!(encoded, r#""disabled""#);
+
+    let decoded: BindingStatus = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded, BindingStatus::Disabled);
 }
 
 #[test]

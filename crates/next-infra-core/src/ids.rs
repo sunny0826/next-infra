@@ -51,6 +51,7 @@ string_value!(ResourceVersionId);
 string_value!(RelationId);
 string_value!(RelationVersionId);
 string_value!(BindingId);
+string_value!(InferenceRunId);
 string_value!(SyncRunId);
 string_value!(ChangeId);
 string_value!(ExternalId);

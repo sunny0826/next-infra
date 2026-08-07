@@ -50,13 +50,22 @@ const allowedNormal = new Map([
   ],
   ["next-infra-connector-catalog", ["next-infra-connector-api", "next-infra-core"]],
   ["next-infra-connector-github", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-dokploy", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-cloudflare", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-supabase-managed", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-supabase-self-hosted", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-aliyun", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-tencent", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-connector-ssh", ["next-infra-connector-api", "next-infra-core"]],
+  ["next-infra-binding", ["next-infra-core"]],
+  ["next-infra-inference", ["next-infra-core"]],
   ["next-infra-sync", ["next-infra-connector-api", "next-infra-core", "next-infra-normalizer"]],
   ["next-infra-query", ["next-infra-core"]],
   ["next-infra-runtime", ["next-infra-connector-catalog", "next-infra-core", "next-infra-query", "next-infra-store", "next-infra-sync"]],
   ["next-infra-local-rpc", ["next-infra-query"]],
   ["next-infra-host-integration", ["next-infra-local-rpc"]],
   ["next-infra-mcp", ["next-infra-local-rpc"]],
-  ["next-infra-desktop-adapter", ["next-infra-core", "next-infra-host-integration", "next-infra-local-rpc", "next-infra-query", "next-infra-runtime"]],
+  ["next-infra-desktop-adapter", ["next-infra-binding", "next-infra-connector-api", "next-infra-connector-aliyun", "next-infra-connector-catalog", "next-infra-connector-cloudflare", "next-infra-connector-dokploy", "next-infra-connector-github", "next-infra-connector-supabase-managed", "next-infra-connector-supabase-self-hosted", "next-infra-connector-tencent", "next-infra-core", "next-infra-host-integration", "next-infra-local-rpc", "next-infra-normalizer", "next-infra-query", "next-infra-runtime", "next-infra-store", "next-infra-sync"]],
   ["next-infra-mcp-bridge", ["next-infra-host-integration", "next-infra-local-rpc", "next-infra-mcp"]],
   [
     "next-infra-store-sync-integration",
@@ -82,6 +91,18 @@ const allowedNormal = new Map([
       "next-infra-sync",
     ],
   ],
+  [
+    "next-infra-repo-deployment-host-dns-integration",
+    [
+      "next-infra-binding",
+      "next-infra-connector-catalog",
+      "next-infra-connector-github",
+      "next-infra-core",
+      "next-infra-query",
+      "next-infra-runtime",
+      "next-infra-store",
+    ],
+  ],
 ]);
 
 const allowedDev = new Map([
@@ -94,6 +115,21 @@ const allowedDev = new Map([
       "next-infra-sync",
     ],
   ],
+  [
+    "next-infra-connector-ssh",
+    [
+      "next-infra-connector-contract-tests",
+      "next-infra-normalizer",
+      "next-infra-store",
+      "next-infra-sync",
+    ],
+  ],
+  ["next-infra-connector-dokploy", ["next-infra-connector-contract-tests"]],
+  ["next-infra-connector-cloudflare", ["next-infra-connector-contract-tests"]],
+  ["next-infra-connector-supabase-managed", ["next-infra-connector-contract-tests"]],
+  ["next-infra-connector-supabase-self-hosted", ["next-infra-connector-contract-tests"]],
+  ["next-infra-connector-aliyun", ["next-infra-connector-contract-tests"]],
+  ["next-infra-connector-tencent", ["next-infra-connector-contract-tests"]],
 ]);
 
 function internalDependencies(item, kind) {
@@ -162,8 +198,8 @@ for (const item of packages) {
   }
 }
 
-if (packages.length !== 18) {
-  failures.push(`workspace package count ${packages.length} != 18`);
+if (packages.length !== 28) {
+  failures.push(`workspace package count ${packages.length} != 28`);
 }
 
 if (failures.length > 0) {

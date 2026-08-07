@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
 import type { ResourceDto } from "../../generated/query/ResourceDto";
+import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 
 import "./inventory.css";
@@ -50,7 +51,7 @@ export function InventoryPage({ onSelectResource }: InventoryPageProps) {
         if (active) {
           setState({
             type: "error",
-            message: "The bounded inventory query could not be completed.",
+            message: "无法完成受限资源清单查询。",
           });
         }
       });
@@ -81,22 +82,22 @@ export function InventoryPage({ onSelectResource }: InventoryPageProps) {
     <div className="inventory-page">
       <header className="inventory-header">
         <div>
-          <p className="inventory-eyebrow">Bounded local projection</p>
-          <h1>Inventory</h1>
-          <p>Filter current resources without recomputing provider state in the browser.</p>
+          <p className="inventory-eyebrow">受限本地投影</p>
+          <h1>资源清单</h1>
+          <p>在浏览器中筛选当前资源，不重新计算提供方状态。</p>
         </div>
-        <span>25 per page · maximum 100</span>
+        <span>每页 25 条 · 最多 100 条</span>
       </header>
 
       <div className="inventory-filters" role="search">
         <label>
-          <span>Resource filter</span>
+          <span>资源筛选</span>
           <input
             onChange={(event) => {
               setCursor(undefined);
               setQuery(event.currentTarget.value);
             }}
-            placeholder="Name, kind, or local identity"
+            placeholder="名称、类型或本地标识"
             type="search"
             value={query}
           />
@@ -107,13 +108,13 @@ export function InventoryPage({ onSelectResource }: InventoryPageProps) {
           onClick={() => setAttentionOnly((value) => !value)}
           type="button"
         >
-          Attention only
+          仅显示需关注项
         </button>
       </div>
 
       {state.type === "loading" ? (
         <section className="inventory-state" aria-busy="true">
-          Reading resource page…
+          正在读取资源页…
         </section>
       ) : null}
       {state.type === "error" ? (
@@ -124,15 +125,15 @@ export function InventoryPage({ onSelectResource }: InventoryPageProps) {
       {state.type === "ready" ? (
         <>
           <div className="inventory-summary">
-            <span>{visibleItems.length} visible resources</span>
-            <span>Health, Freshness, and Lifecycle remain independent</span>
+            <span>{visibleItems.length} 个可见资源</span>
+            <span>健康度、新鲜度和生命周期相互独立</span>
           </div>
           <div className="inventory-frame">
             <table>
               <thead>
                 <tr>
-                  <th>Name</th><th>Kind</th><th>Scope</th><th>Health</th><th>Freshness</th>
-                  <th>Connection</th><th>Observed</th><th>Lifecycle</th>
+                  <th>名称</th><th>类型</th><th>范围</th><th>健康度</th><th>新鲜度</th>
+                  <th>连接</th><th>观测时间</th><th>生命周期</th>
                 </tr>
               </thead>
               <tbody>
@@ -146,29 +147,29 @@ export function InventoryPage({ onSelectResource }: InventoryPageProps) {
                     <td><strong>{resource.display_name}</strong><code>{resource.resource_id}</code></td>
                     <td><code>{resource.kind}</code></td>
                     <td><code>{resource.scope}</code></td>
-                    <td><span className={`inventory-badge state-${resource.health}`}>{resource.health}</span></td>
-                    <td><span className={`inventory-badge state-${resource.freshness}`}>{resource.freshness}</span></td>
+                    <td><span className={`inventory-badge state-${resource.health}`}>{displayEnum(resource.health)}</span></td>
+                    <td><span className={`inventory-badge state-${resource.freshness}`}>{displayEnum(resource.freshness)}</span></td>
                     <td><code>{resource.connection_id}</code></td>
                     <td><time dateTime={resource.observed_at}>{resource.observed_at}</time></td>
-                    <td><span className={`inventory-badge state-${resource.lifecycle}`}>{resource.lifecycle}</span></td>
+                    <td><span className={`inventory-badge state-${resource.lifecycle}`}>{displayEnum(resource.lifecycle)}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
             {visibleItems.length === 0 ? (
-              <div className="inventory-empty">No resources match the current bounded filter.</div>
+              <div className="inventory-empty">没有资源匹配当前受限筛选条件。</div>
             ) : null}
           </div>
-          <nav className="inventory-pagination" aria-label="Inventory pagination">
+          <nav className="inventory-pagination" aria-label="资源清单分页">
             <button disabled={cursor === undefined} onClick={() => setCursor(undefined)} type="button">
-              First page
+              首页
             </button>
             <button
               disabled={state.nextCursor === null}
               onClick={() => setCursor(state.nextCursor ?? undefined)}
               type="button"
             >
-              Next page
+              下一页
             </button>
           </nav>
         </>

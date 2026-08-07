@@ -69,4 +69,13 @@ pub enum SyncRunStatus {
 pub enum BindingStatus {
     Active,
     Unresolved,
+    Disabled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InferenceRunStatus {
+    Running,
+    Completed,
+    Failed,
 }

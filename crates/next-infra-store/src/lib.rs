@@ -4,6 +4,7 @@ mod migrations;
 mod projection;
 mod query_projection;
 
+pub use projection::ConnectionPurgeSummary;
 pub use query_projection::*;
 
 use rusqlite::Connection;

@@ -324,6 +324,7 @@ pub struct SyncRunDto {
 pub enum ChangeSubjectDto {
     Resource { resource_id: String },
     Relation { relation_id: String },
+    Binding { binding_id: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -349,6 +350,7 @@ pub enum ChangeOriginDto {
     Inference {
         rule_version: String,
         input_resource_version_ids: Vec<String>,
+        input_relation_version_ids: Vec<String>,
     },
 }
 
@@ -408,6 +410,119 @@ pub struct TopologyDto {
     pub edges: Vec<RelationDto>,
     pub frontier: Vec<TopologyFrontierDto>,
     pub truncated: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub enum BindingStatusDto {
+    Active,
+    Unresolved,
+    Disabled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct BindingDto {
+    pub binding_id: String,
+    pub source_resource_id: String,
+    pub target_resource_id: String,
+    pub kind: String,
+    pub status: BindingStatusDto,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct CreateBindingCommandDto {
+    pub source_resource_id: String,
+    pub target_resource_id: String,
+    pub kind: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct UpdateBindingCommandDto {
+    pub binding_id: String,
+    pub source_resource_id: String,
+    pub target_resource_id: String,
+    pub kind: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct DisableBindingCommandDto {
+    pub binding_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct BindingCommandResultDto {
+    pub metadata: SnapshotMetadata,
+    pub binding: BindingDto,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct BindingSnapshotDto {
+    pub metadata: SnapshotMetadata,
+    pub items: Vec<BindingDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub enum TimelineOriginDto {
+    SyncRun {
+        sync_run_id: String,
+    },
+    Binding {
+        binding_id: String,
+    },
+    Inference {
+        rule_version: String,
+        input_resource_version_ids: Vec<String>,
+        input_relation_version_ids: Vec<String>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub enum TimelineVersionLinkDto {
+    Resource {
+        resource_id: String,
+        resource_version_id: String,
+    },
+    Relation {
+        relation_id: String,
+        relation_version_id: String,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct TimelineItemDto {
+    pub change: ChangeDto,
+    pub version_links: Vec<TimelineVersionLinkDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct TimelineGroupDto {
+    pub group_id: String,
+    pub origin: TimelineOriginDto,
+    pub occurred_at: String,
+    pub items: Vec<TimelineItemDto>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct TimelinePageDto {
+    pub metadata: SnapshotMetadata,
+    pub groups: Vec<TimelineGroupDto>,
+    pub page_info: PageInfo,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

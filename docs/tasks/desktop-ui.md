@@ -279,6 +279,7 @@ RHM-G3-01 + UI-G2-01
 
 ### `UI-G6-01` — SSH / Mac mini UI Acceptance
 
+- **状态：** `REVIEW / SYNTHETIC PASS`（见 [`UI-G6-01-2026-08-06.md`](./UI-G6-01-2026-08-06.md)）。
 - **目标：** 核实 SSH Host 的 Freshness 与 Connector Health 语义。
 - **依赖：** `CON-G6-02..04` 的清洗后 Query snapshots；不依赖尚未执行的 `CON-G6-05` 纵切汇合任务。
 - **独占路径：** `tests/acceptance/ssh/**`。

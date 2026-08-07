@@ -21,16 +21,18 @@ use next_infra_query::dto::{
     FrontierDirectionDto, Lifecycle as QueryLifecycle, RelationDto, RelationEvidenceDto,
     ResourceDto, ResourceHealth as QueryResourceHealth, ResourceHealthCountsDto, SnapshotMetadata,
     SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto, SyncRunErrorDto, SyncRunStatusDto,
-    SyncTriggerDto, TopologyFrontierDto,
+    SyncTriggerDto, TimelineGroupDto, TimelineItemDto, TimelineOriginDto, TimelineVersionLinkDto,
+    TopologyFrontierDto,
 };
 use next_infra_query::service::{
     HealthSummaryBody, QuerySource, RecentChangesPlan, ResourceDetailBody, ResourceInclude,
-    ResourceSearchPlan, SourcePage, SourceSnapshot, SyncStatusBody, TopologyBody, TopologyPlan,
+    ResourceSearchPlan, SourcePage, SourceSnapshot, SyncStatusBody, TimelinePlan,
+    TimelineSourcePage, TopologyBody, TopologyPlan,
 };
 use next_infra_store::{
     FreshnessCutoffs, HealthProjection, ProjectedConnection, ProjectedRelation, ProjectionMetadata,
     RecentChangesProjectionPlan, ResourceDetailProjection, ResourceProjectionPlan, StoreError,
-    SyncStatusProjection,
+    SyncStatusProjection, TimelineVersionLinkProjection,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -647,6 +649,56 @@ impl QuerySource for CommittedQuerySource {
         })
     }
 
+    fn get_timeline(
+        &self,
+        plan: &TimelinePlan,
+    ) -> Result<SourceSnapshot<TimelineSourcePage>, Self::Error> {
+        let context = self.context_snapshot()?;
+        let projection = self
+            .store
+            .read(|store| store.query_timeline(plan.limit, plan.after.clone()))
+            .map_err(QuerySourceError::from)?;
+        let mut groups = Vec::<TimelineGroupDto>::new();
+        for item in projection.body.items {
+            let origin = timeline_origin_dto(&item.change.origin);
+            let occurred_at = format_timestamp(item.change.observed_at);
+            let group_id = timeline_group_id(&item.change.origin, item.change.observed_at);
+            let item = TimelineItemDto {
+                change: change_dto(&item.change)?,
+                version_links: item
+                    .version_links
+                    .into_iter()
+                    .map(timeline_version_link_dto)
+                    .collect(),
+            };
+            if groups
+                .last()
+                .is_some_and(|group| group.group_id == group_id)
+            {
+                groups
+                    .last_mut()
+                    .expect("timeline group must exist")
+                    .items
+                    .push(item);
+            } else {
+                groups.push(TimelineGroupDto {
+                    group_id,
+                    origin,
+                    occurred_at,
+                    items: vec![item],
+                });
+            }
+        }
+        Ok(SourceSnapshot {
+            metadata: self.metadata(projection.metadata, &context),
+            body: TimelineSourcePage {
+                item_count: groups.iter().map(|group| group.items.len()).sum(),
+                groups,
+                next_after: projection.body.next_after,
+            },
+        })
+    }
+
     fn get_sync_status(
         &self,
         connection_id: &str,
@@ -1093,6 +1145,9 @@ fn change_dto(change: &Change) -> Result<next_infra_query::dto::ChangeDto, Query
         ChangeSubject::Relation { relation_id } => ChangeSubjectDto::Relation {
             relation_id: relation_id.as_str().to_owned(),
         },
+        ChangeSubject::Binding { binding_id } => ChangeSubjectDto::Binding {
+            binding_id: binding_id.as_str().to_owned(),
+        },
     };
     let origin = match &change.origin {
         OriginRef::SyncRun { sync_run_id } => ChangeOriginDto::SyncRun {
@@ -1104,9 +1159,14 @@ fn change_dto(change: &Change) -> Result<next_infra_query::dto::ChangeDto, Query
         OriginRef::Inference {
             rule_version,
             input_resource_version_ids,
+            input_relation_version_ids,
         } => ChangeOriginDto::Inference {
             rule_version: rule_version.as_str().to_owned(),
             input_resource_version_ids: input_resource_version_ids
+                .iter()
+                .map(|id| id.as_str().to_owned())
+                .collect(),
+            input_relation_version_ids: input_relation_version_ids
                 .iter()
                 .map(|id| id.as_str().to_owned())
                 .collect(),
@@ -1127,6 +1187,77 @@ fn change_dto(change: &Change) -> Result<next_infra_query::dto::ChangeDto, Query
             .collect(),
         origin,
     })
+}
+
+fn timeline_origin_dto(origin: &OriginRef) -> TimelineOriginDto {
+    match origin {
+        OriginRef::SyncRun { sync_run_id } => TimelineOriginDto::SyncRun {
+            sync_run_id: sync_run_id.as_str().to_owned(),
+        },
+        OriginRef::Binding { binding_id } => TimelineOriginDto::Binding {
+            binding_id: binding_id.as_str().to_owned(),
+        },
+        OriginRef::Inference {
+            rule_version,
+            input_resource_version_ids,
+            input_relation_version_ids,
+        } => TimelineOriginDto::Inference {
+            rule_version: rule_version.as_str().to_owned(),
+            input_resource_version_ids: input_resource_version_ids
+                .iter()
+                .map(|id| id.as_str().to_owned())
+                .collect(),
+            input_relation_version_ids: input_relation_version_ids
+                .iter()
+                .map(|id| id.as_str().to_owned())
+                .collect(),
+        },
+    }
+}
+
+fn timeline_group_id(origin: &OriginRef, observed_at: Timestamp) -> String {
+    let prefix = match origin {
+        OriginRef::SyncRun { sync_run_id } => format!("sync_run:{}", sync_run_id.as_str()),
+        OriginRef::Binding { binding_id } => format!("binding:{}", binding_id.as_str()),
+        OriginRef::Inference {
+            rule_version,
+            input_resource_version_ids,
+            input_relation_version_ids,
+        } => format!(
+            "inference:{}:resources={}:relations={}",
+            rule_version.as_str(),
+            input_resource_version_ids
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+            input_relation_version_ids
+                .iter()
+                .map(|id| id.as_str())
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
+    };
+    format!("timeline:{prefix}:{}", observed_at.unix_millis())
+}
+
+fn timeline_version_link_dto(link: TimelineVersionLinkProjection) -> TimelineVersionLinkDto {
+    match link {
+        TimelineVersionLinkProjection::Resource {
+            resource_id,
+            resource_version_id,
+        } => TimelineVersionLinkDto::Resource {
+            resource_id: resource_id.as_str().to_owned(),
+            resource_version_id: resource_version_id.as_str().to_owned(),
+        },
+        TimelineVersionLinkProjection::Relation {
+            relation_id,
+            relation_version_id,
+        } => TimelineVersionLinkDto::Relation {
+            relation_id: relation_id.as_str().to_owned(),
+            relation_version_id: relation_version_id.as_str().to_owned(),
+        },
+    }
 }
 
 fn sync_run_dto(run: &SyncRun) -> Result<SyncRunDto, QuerySourceError> {
@@ -1324,7 +1455,7 @@ fn coverage_level(value: ConnectorCoverageLevel) -> ConnectorCoverageLevelDto {
     }
 }
 
-fn format_timestamp(timestamp: Timestamp) -> String {
+pub fn format_timestamp(timestamp: Timestamp) -> String {
     let millis = timestamp.unix_millis();
     let seconds = millis.div_euclid(1_000);
     let milliseconds = millis.rem_euclid(1_000);

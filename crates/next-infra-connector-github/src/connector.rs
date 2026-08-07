@@ -243,7 +243,11 @@ where
             .await;
         let (pages, summary, failure) = required_pages(fetched)?;
         collector.add_summary(summary);
-        let repositories = deserialize_array::<RepositoryDto>(&pages)?;
+        let selected = selected_repository_ids(&request.connection.config)?;
+        let repositories = deserialize_array::<RepositoryDto>(&pages)?
+            .into_iter()
+            .filter(|repository| selected.contains(&repository.id.to_string()))
+            .collect::<Vec<_>>();
         map_repositories(
             &request.scope,
             collector.observed_at,
@@ -453,6 +457,28 @@ where
             },
         }
     }
+}
+
+fn selected_repository_ids(config: &serde_json::Value) -> ConnectorResult<BTreeSet<String>> {
+    let Some(values) = config
+        .get("selected_repository_ids")
+        .and_then(serde_json::Value::as_array)
+    else {
+        return Err(invalid_failure(
+            "GitHub sync requires selected repositories",
+        ));
+    };
+    let selected = values
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    if selected.is_empty() {
+        return Err(invalid_failure(
+            "GitHub sync requires selected repositories",
+        ));
+    }
+    Ok(selected)
 }
 
 struct Collector {

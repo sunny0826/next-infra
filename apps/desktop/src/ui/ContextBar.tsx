@@ -28,7 +28,7 @@ export function ContextBar({ contextLabel, routeId, searchInputRef, searchResult
 
       <div className="shell-search-wrap">
         <label className="shell-search" htmlFor="shell-search-input">
-          <span className="visually-hidden">Search local infrastructure</span>
+          <span className="visually-hidden">搜索本地基础设施</span>
           <Icon name="search" />
           <input
             aria-autocomplete="list"
@@ -45,7 +45,7 @@ export function ContextBar({ contextLabel, routeId, searchInputRef, searchResult
               onSearchClear();
               event.currentTarget.blur();
             }}
-            placeholder="Search bounded local resources"
+            placeholder="搜索受限的本地资源"
             ref={searchInputRef}
             role="combobox"
             type="search"
@@ -57,7 +57,7 @@ export function ContextBar({ contextLabel, routeId, searchInputRef, searchResult
         </label>
         {searchOpen ? (
           <div
-            aria-label="Search results"
+            aria-label="搜索结果"
             className="shell-search-results"
             id={searchResultsId}
             role="listbox"
@@ -78,10 +78,10 @@ export function ContextBar({ contextLabel, routeId, searchInputRef, searchResult
         ) : null}
       </div>
 
-      <div className="shell-context-status" aria-label="Snapshot context">
-        <span>local · read-only</span>
+      <div className="shell-context-status" aria-label="快照上下文">
+        <span>本地 · 只读</span>
         <span className="shell-status shell-status-unknown">
-          <span className="shell-status-dot" /> Query adapter
+          <span className="shell-status-dot" /> 查询适配器
         </span>
       </div>
     </header>

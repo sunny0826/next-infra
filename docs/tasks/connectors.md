@@ -167,6 +167,7 @@ RHM-G2-01
 
 ### `CON-G6-01` — OpenSSH Transport 与 Probe Registry
 
+- **状态：** `REVIEW`（冻结见 [`CON-G6-01-TASK-FREEZE-2026-08-06.md`](./CON-G6-01-TASK-FREEZE-2026-08-06.md)，证据见 [`CON-G6-01-2026-08-06.md`](./CON-G6-01-2026-08-06.md)）。
 - **目标：** 复用系统 OpenSSH，以固定 argv 调用版本化只读探针。
 - **依赖：** `GATE-G5`、`DEC-G6-01`。
 - **独占路径：** SSH crate `client.rs`、`descriptor.rs`、`probe_registry.rs`、`limits.rs`。
@@ -174,10 +175,12 @@ RHM-G2-01
 - **非目标：** 无任意命令文本、自动接受 Host Key 或展示名/IP 身份。
 - **验收：** 用户输入不能进入 command body；Host Key verification 不可关闭；连接/探针/批次有界。
 - **验证：** argv injection、host-key、timeout、descriptor tests + conformance。
+- **冻结补充：** stable identity、最终 v1 probe command、forwarding/LocalCommand/ControlMaster 禁用项和精确预算以 [`DEC-G6-01`](../design/decisions/DEC-G6-01-ssh-identity-and-probe-budget.md) 为准。
 - **风险/停止：** stable external ID 未冻结时不得开始 mapper。
 
 ### `CON-G6-02` — 通用主机探针
 
+- **状态：** `REVIEW / INTERNAL PASS`（见 [`CON-G6-02-2026-08-06.md`](./CON-G6-02-2026-08-06.md)）。
 - **目标：** 收集 identity、uptime、filesystem 和 process summary。
 - **依赖：** `CON-G6-01`。
 - **独占路径：** SSH crate `probes/identity/**`、`uptime/**`、`filesystems/**`、`process_summary/**`。
@@ -188,6 +191,7 @@ RHM-G2-01
 
 ### `CON-G6-03` — macOS / Mac mini 探针
 
+- **状态：** `REVIEW / INTERNAL PASS`（见 [`CON-G6-03-2026-08-06.md`](./CON-G6-03-2026-08-06.md)）。
 - **目标：** 提供 macOS host 与 launchd service 摘要。
 - **依赖：** `CON-G6-01`；可与通用/Linux probes 并行。
 - **独占路径：** SSH crate `probes/macos/**`。
@@ -199,6 +203,7 @@ RHM-G2-01
 
 ### `CON-G6-04` — Linux systemd 探针
 
+- **状态：** `REVIEW / INTERNAL PASS`（见 [`CON-G6-04-2026-08-06.md`](./CON-G6-04-2026-08-06.md)）。
 - **目标：** 提供 Linux host 与 systemd service 摘要。
 - **依赖：** `CON-G6-01`；可与通用/macOS probes 并行。
 - **独占路径：** SSH crate `probes/linux/**`。
@@ -210,6 +215,7 @@ RHM-G2-01
 
 ### `CON-G6-05` — SSH Security 与 Partial 纵切
 
+- **状态：** `REVIEW / INTERNAL PASS`（冻结见 [`CON-G6-05-TASK-FREEZE-2026-08-06.md`](./CON-G6-05-TASK-FREEZE-2026-08-06.md)，证据见 [`CON-G6-05-2026-08-06.md`](./CON-G6-05-2026-08-06.md)）。
 - **目标：** 合并 probes 并证明安全边界及部分成功语义。
 - **依赖：** `CON-G6-02..04`、`UI-G6-01`。
 - **独占路径：** SSH `tests/security/**` 和 Goal 6 integration tests；registry 由 `GATE-G6` Captain 修改。
@@ -400,3 +406,12 @@ Goal 9 入口可同时派发四条主线：Supabase managed、Supabase self-host
 - **验收：** 每个已配置 Provider 的真实路径可证明；未配置时明确 `credential_unavailable/BLOCKED`。
 - **验证：** Provider-specific live read-only commands，以实施时官方文档为准。
 - **风险/停止：** 绝不把 Fixture 通过写成 live account 通过；不打印 account ID、repo、host、IP 或 response body。
+
+### Goal 9 implementation evidence (2026-08-06)
+
+`CON-G9-S1..S3`, `CON-G9-A0..A3` and `CON-G9-T0..T3` now have local
+descriptor, fixed-origin request boundary, allowlisted DTO/normalization and
+contract tests in the four Goal 9 crates. The Desktop Connector Coverage Matrix
+renders synthetic rows for managed/self-hosted Supabase and each Aliyun/Tencent
+module. This is internal evidence only; `CON-G9-05` remains
+`BLOCKED-EXTERNAL` until the user authorizes configured read-only accounts.

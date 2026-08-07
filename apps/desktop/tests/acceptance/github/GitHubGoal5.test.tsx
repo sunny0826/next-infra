@@ -25,13 +25,13 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
     renderWithGitHubFixture(<ConnectorsPage />);
 
     expect(await screen.findByText("GitHub Fixture Connection")).toBeInTheDocument();
-    expect(screen.getByText("degraded")).toBeInTheDocument();
+    expect(screen.getByText("降级")).toBeInTheDocument();
     const repositories = screen.getByText("github.repositories").closest("article");
     expect(repositories).not.toBeNull();
-    expect(within(repositories!).getByText("supported")).toBeInTheDocument();
+    expect(within(repositories!).getByText("支持")).toBeInTheDocument();
     const deployments = screen.getByText("github.deployments").closest("article");
     expect(deployments).not.toBeNull();
-    expect(within(deployments!).getByText("partial")).toBeInTheDocument();
+    expect(within(deployments!).getByText("部分覆盖")).toBeInTheDocument();
     expect(within(deployments!).getByText(/status is not collected/i)).toBeInTheDocument();
   });
 
@@ -40,10 +40,10 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
     renderWithGitHubFixture(<InventoryPage />);
 
     expect(await screen.findByText("Fixture Repository")).toBeInTheDocument();
-    await user.type(screen.getByRole("searchbox", { name: "Resource filter" }), "github.workflow_run");
+    await user.type(screen.getByRole("searchbox", { name: "资源筛选" }), "github.workflow_run");
     expect(await screen.findByText("Fixture Run")).toBeInTheDocument();
     expect(screen.queryByText("Fixture Repository")).not.toBeInTheDocument();
-    expect(screen.getByText("1 visible resources")).toBeInTheDocument();
+    expect(screen.getByText("1 个可见资源")).toBeInTheDocument();
   });
 
   it("renders repository evidence paths to workflow and deployment with provider provenance", async () => {
@@ -54,18 +54,18 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
     expect(await screen.findByRole("heading", { name: "Fixture Repository" })).toBeInTheDocument();
     expect(screen.getByText("Fixture Workflow")).toBeInTheDocument();
     expect(screen.getAllByText("Fixture Environment").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Provider").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("提供方").length).toBeGreaterThan(0);
     expect(screen.getByText("visibility")).toBeInTheDocument();
     expect(screen.getByText("private")).toBeInTheDocument();
-    expect(screen.getByText("11 declared modules")).toBeInTheDocument();
+    expect(screen.getByText("11 个声明模块")).toBeInTheDocument();
   });
 
   it("keeps workflow run and job health visible without inventing a critical path", async () => {
     renderWithGitHubFixture(<OverviewPage />);
 
-    expect(await screen.findByText("6 bounded resources")).toBeInTheDocument();
+    expect(await screen.findByText("6 个受限资源")).toBeInTheDocument();
     expect(screen.getByText("GitHub Fixture Connection")).toBeInTheDocument();
-    expect(screen.getByText("No critical path is pinned. Next Infra will not infer importance from display names or recent activity.")).toBeInTheDocument();
+    expect(screen.getByText("当前没有固定关键路径。Next Infra 不会根据展示名称或近期活动推断重要性。")).toBeInTheDocument();
 
     cleanup();
     renderWithGitHubFixture(
@@ -73,7 +73,7 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
     );
     expect(await screen.findByRole("heading", { name: "Fixture Run" })).toBeInTheDocument();
     expect(screen.getByText("Fixture Job")).toBeInTheDocument();
-    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("健康").length).toBeGreaterThan(0);
     expect(screen.getByText("run_attempt")).toBeInTheDocument();
   });
 });

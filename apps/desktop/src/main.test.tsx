@@ -57,17 +57,17 @@ describe("React app shell", () => {
     renderShell();
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+      await screen.findByRole("heading", { level: 1, name: "概览" }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", { level: 2, name: "Attention queue" }),
+      await screen.findByRole("heading", { level: 2, name: "关注队列" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("Saved fact is expired")).not.toHaveLength(0);
+    expect(screen.getAllByText("已保存事实已过期")).not.toHaveLength(0);
     expect(screen.queryByRole("heading", { name: "Goal 1 placeholder" })).not.toBeInTheDocument();
-    const runtime = screen.getByRole("contentinfo", { name: "Control Plane Runtime" });
-    expect(within(runtime).getByText("Goal 3 query surface")).toBeInTheDocument();
-    expect(within(runtime).getByText("provider writes disabled")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute(
+    const runtime = screen.getByRole("contentinfo", { name: "控制平面运行时" });
+    expect(within(runtime).getByText("Goal 3 查询界面")).toBeInTheDocument();
+    expect(within(runtime).getByText("已禁用提供方写入")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "概览" })).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -79,12 +79,7 @@ describe("React app shell", () => {
 
     const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
     for (const label of [
-      "Overview",
-      "Inventory",
-      "Topology",
-      "Timeline",
-      "Connectors",
-      "Settings",
+      "概览", "资源清单", "拓扑", "时间线", "连接器", "设置",
     ]) {
       const button = within(navigation).getByRole("button", { name: label });
       await user.click(button);
@@ -100,34 +95,29 @@ describe("React app shell", () => {
     }
   });
 
-  it("marks Timeline as explicitly unavailable until Goal 7", async () => {
+  it("renders Timeline as a committed change surface", async () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Timeline" }));
+    await user.click(screen.getByRole("button", { name: "时间线" }));
 
     expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "Timeline unavailable until Goal 7",
-      }),
+      await screen.findByRole("heading", { level: 1, name: "时间线" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("This route is intentionally unavailable, not an empty query result."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("没有已持久化的变更。")).toBeInTheDocument();
   });
 
   it("closes and reopens the Inspector while releasing its desktop column", async () => {
     const user = userEvent.setup();
     const { container } = renderShell();
 
-    const inspector = screen.getByRole("complementary", { name: "Evidence inspector" });
-    await user.click(within(inspector).getByRole("button", { name: "Close inspector" }));
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    await user.click(within(inspector).getByRole("button", { name: "关闭检查器" }));
 
     expect(inspector).toHaveAttribute("hidden");
     expect(container.firstElementChild).toHaveClass("inspector-closed");
 
-    await user.click(screen.getByRole("button", { name: "Open inspector" }));
+    await user.click(screen.getByRole("button", { name: "打开检查器" }));
     expect(inspector).not.toHaveAttribute("hidden");
     expect(container.firstElementChild).not.toHaveClass("inspector-closed");
   });
@@ -136,27 +126,27 @@ describe("React app shell", () => {
     const user = userEvent.setup();
     const { container } = renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(screen.getByRole("button", { name: "设置" }));
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Settings" }),
+      await screen.findByRole("heading", { level: 1, name: "设置" }),
     ).toBeInTheDocument();
-    const inspector = screen.getByLabelText("Evidence inspector");
+    const inspector = screen.getByLabelText("证据检查器");
     expect(inspector).toHaveAttribute("hidden");
-    expect(screen.getByRole("button", { name: "Open inspector" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开检查器" })).toBeInTheDocument();
     expect(container.firstElementChild).toHaveClass("inspector-closed");
 
-    await user.click(screen.getByRole("button", { name: "Overview" }));
+    await user.click(screen.getByRole("button", { name: "概览" }));
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Overview" }),
+      await screen.findByRole("heading", { level: 1, name: "概览" }),
     ).toBeInTheDocument();
     expect(inspector).toHaveAttribute("hidden");
-    expect(screen.getByRole("button", { name: "Open inspector" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开检查器" })).toBeInTheDocument();
   });
 
   it("focuses the writable search with Meta+K and Control+K", () => {
     renderShell();
     const search = screen.getByRole("combobox", {
-      name: "Search local infrastructure",
+      name: "搜索本地基础设施",
     });
 
     expect(search).not.toHaveAttribute("readonly");
@@ -173,11 +163,11 @@ describe("React app shell", () => {
     const user = userEvent.setup();
     renderShell();
     const search = screen.getByRole("combobox", {
-      name: "Search local infrastructure",
+      name: "搜索本地基础设施",
     });
 
     await user.type(search, "alpha");
-    const results = await screen.findByRole("listbox", { name: "Search results" });
+    const results = await screen.findByRole("listbox", { name: "搜索结果" });
     expect(within(results).getAllByRole("option")).not.toHaveLength(0);
     expect(search).toHaveAttribute("aria-expanded", "true");
 
@@ -187,7 +177,7 @@ describe("React app shell", () => {
       expect(search).toHaveValue("");
       expect(search).not.toHaveFocus();
       expect(search).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByRole("listbox", { name: "Search results" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("listbox", { name: "搜索结果" })).not.toBeInTheDocument();
     });
   });
 
@@ -195,7 +185,7 @@ describe("React app shell", () => {
     const user = userEvent.setup();
     renderShell();
     const search = screen.getByRole("combobox", {
-      name: "Search local infrastructure",
+      name: "搜索本地基础设施",
     });
 
     await user.type(search, "alpha");
@@ -206,14 +196,14 @@ describe("React app shell", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Fixture Compute Alpha" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Inventory" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "资源清单" })).toHaveAttribute(
       "aria-current",
       "page",
     );
     expect(search).toHaveValue("");
-    expect(screen.queryByRole("listbox", { name: "Search results" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("listbox", { name: "搜索结果" })).not.toBeInTheDocument();
 
-    const inspector = screen.getByRole("complementary", { name: "Evidence inspector" });
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
     await waitFor(() => {
       expect(
         within(inspector).getByRole("heading", {
@@ -222,14 +212,14 @@ describe("React app shell", () => {
         }),
       ).toBeInTheDocument();
     });
-    expect(within(inspector).getByText("Resource")).toBeInTheDocument();
+    expect(within(inspector).getByText("资源")).toBeInTheDocument();
   });
 
   it("remembers a selected resource as a reachable bounded Topology focus", async () => {
     const user = userEvent.setup();
     renderShell();
     const search = screen.getByRole("combobox", {
-      name: "Search local infrastructure",
+      name: "搜索本地基础设施",
     });
 
     await user.type(search, "alpha");
@@ -238,21 +228,21 @@ describe("React app shell", () => {
     );
     await screen.findByRole("heading", { level: 1, name: "Fixture Compute Alpha" });
 
-    await user.click(screen.getByRole("button", { name: "Topology" }));
+    await user.click(screen.getByRole("button", { name: "拓扑" }));
 
     expect(
-      await screen.findByRole("heading", { level: 1, name: "Topology" }),
+      await screen.findByRole("heading", { level: 1, name: "拓扑" }),
     ).toBeInTheDocument();
-    expect(await screen.findByLabelText("Bounded relation edges")).toBeInTheDocument();
+    expect(await screen.findByLabelText("受限关系边")).toBeInTheDocument();
     expect(await screen.findByText("fixture-resource-alpha")).toBeInTheDocument();
-    expect(screen.getByText("bounded")).toBeInTheDocument();
+    expect(screen.getByText("受限")).toBeInTheDocument();
   });
 
   it("routes topology node and relation selection into the Inspector", async () => {
     const user = userEvent.setup();
     renderShell();
     const search = screen.getByRole("combobox", {
-      name: "Search local infrastructure",
+      name: "搜索本地基础设施",
     });
 
     await user.type(search, "alpha");
@@ -260,9 +250,9 @@ describe("React app shell", () => {
       await screen.findByRole("option", { name: /Fixture Compute Alpha/ }),
     );
     await screen.findByRole("heading", { level: 1, name: "Fixture Compute Alpha" });
-    await user.click(screen.getByRole("button", { name: "Topology" }));
+    await user.click(screen.getByRole("button", { name: "拓扑" }));
 
-    const inspector = screen.getByRole("complementary", { name: "Evidence inspector" });
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
     await user.click(await screen.findByRole("button", { name: /Fixture Database Beta/ }));
     await waitFor(() => {
       expect(
@@ -275,7 +265,7 @@ describe("React app shell", () => {
 
     await user.click(
       await screen.findByRole("button", {
-        name: "provider relation fixture.depends_on",
+        name: "提供方关系 fixture.depends_on",
       }),
     );
     await waitFor(() => {
@@ -293,7 +283,7 @@ describe("React app shell", () => {
     const adapter = new TrackingAdapter(createQueryEvidenceLifecycleSnapshotFixture());
     const { unmount } = renderShell(adapter);
 
-    expect(await screen.findAllByText("Saved fact is expired")).not.toHaveLength(0);
+    expect(await screen.findAllByText("已保存事实已过期")).not.toHaveLength(0);
     await waitFor(() => expect(adapter.invalidationListener).not.toBeNull());
 
     const initialSearchCount = adapter.searchRequests.length;
@@ -324,10 +314,10 @@ describe("React app shell", () => {
     );
 
     const { container } = renderShell();
-    const inspector = screen.getByLabelText("Evidence inspector");
+    const inspector = screen.getByLabelText("证据检查器");
 
     expect(inspector).toHaveAttribute("hidden");
-    expect(screen.getByRole("button", { name: "Open inspector" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "打开检查器" })).toBeInTheDocument();
     expect(container.firstElementChild).toHaveClass("inspector-closed");
   });
 });

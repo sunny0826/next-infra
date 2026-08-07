@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { LocalSettings, RuntimeCapabilities } from "../../platform/desktop-adapter/desktop-adapter";
+import { displayRuntimeReason } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 
 import "./settings.css";
@@ -16,7 +17,7 @@ export function SettingsPage() {
     let active = true;
     Promise.all([adapter.getLocalSettings(), adapter.getRuntimeCapabilities()])
       .then(([settings, capabilities]) => { if (active) setState({ settings, capabilities }); })
-      .catch(() => { if (active) setError("Local settings could not be queried."); });
+      .catch(() => { if (active) setError("无法查询本地设置。"); });
     return () => { active = false; };
   }, [adapter]);
 
@@ -26,27 +27,27 @@ export function SettingsPage() {
       const saved = await adapter.updateLocalSettings(settings);
       setState({ ...state, settings: saved });
     } catch {
-      setError("Local settings could not be updated.");
+      setError("无法更新本地设置。");
     }
   }
 
   if (error !== null) return <section className="settings-state settings-state--error" role="alert">{error}</section>;
-  if (state === null) return <section className="settings-state" aria-busy="true">Reading local settings…</section>;
+  if (state === null) return <section className="settings-state" aria-busy="true">正在读取本地设置…</section>;
 
   const { settings, capabilities } = state;
   return (
     <div className="settings-page">
-      <header><p className="settings-eyebrow">Local control plane</p><h1>Settings</h1><p>Configure this Mac without changing provider resources.</p></header>
-      <section aria-labelledby="settings-lifecycle"><h2 id="settings-lifecycle">Lifecycle</h2>
-        <div className="settings-row"><div><strong>Start at login</strong><p>Launch the signed Desktop Host for this user session.</p></div><button aria-pressed={settings.start_at_login} className="settings-switch" disabled={!capabilities.start_at_login} onClick={() => save({ ...settings, start_at_login: !settings.start_at_login })} type="button"><span />{settings.start_at_login ? "On" : "Off"}</button></div>
-        <div className="settings-row"><div><strong>MCP auto-launch</strong><p>Separate trusted Host availability capability; it is not start-at-login.</p><p className="settings-guidance">{capabilities.mcp_auto_launch_reason}</p></div><output className={capabilities.mcp_auto_launch ? "settings-status settings-status--available" : "settings-status"}>{capabilities.mcp_auto_launch ? "available" : "unavailable"}</output></div>
-        <div className="settings-row"><div><strong>User quit latch</strong><p>Agents and MCP requests cannot clear an explicit user quit.</p><p className="settings-guidance">{settings.user_quit ? "Reopen Next Infra interactively or at the next enabled login to clear suppression." : "No explicit Quit suppression is active."}</p></div><output className={settings.user_quit ? "settings-status settings-status--suppressed" : "settings-status settings-status--available"}>{settings.user_quit ? "latched" : "clear"}</output></div>
+      <header><p className="settings-eyebrow">本地控制平面</p><h1>设置</h1><p>配置此 Mac，不改变提供方资源。</p></header>
+      <section aria-labelledby="settings-lifecycle"><h2 id="settings-lifecycle">生命周期</h2>
+        <div className="settings-row"><div><strong>登录时启动</strong><p>为当前用户会话启动已签名的 Desktop Host。</p></div><button aria-pressed={settings.start_at_login} className="settings-switch" disabled={!capabilities.start_at_login} onClick={() => save({ ...settings, start_at_login: !settings.start_at_login })} type="button"><span />{settings.start_at_login ? "开启" : "关闭"}</button></div>
+        <div className="settings-row"><div><strong>MCP 自动启动</strong><p>独立的受信 Host 可用性能力，不等于登录时启动。</p><p className="settings-guidance">{displayRuntimeReason(capabilities.mcp_auto_launch_reason)}</p></div><output className={capabilities.mcp_auto_launch ? "settings-status settings-status--available" : "settings-status"}>{capabilities.mcp_auto_launch ? "可用" : "不可用"}</output></div>
+        <div className="settings-row"><div><strong>用户退出锁定</strong><p>Agent 和 MCP 请求不能清除用户的明确退出。</p><p className="settings-guidance">{settings.user_quit ? "请交互式重新打开 Next Infra，或等待下一次启用的登录启动以解除抑制。" : "当前没有明确退出抑制。"}</p></div><output className={settings.user_quit ? "settings-status settings-status--suppressed" : "settings-status settings-status--available"}>{settings.user_quit ? "已锁定" : "未锁定"}</output></div>
       </section>
-      <section aria-labelledby="settings-storage"><h2 id="settings-storage">Local data</h2>
-        <label className="settings-row"><div><strong>Data budget</strong><p>Maximum local projection budget in megabytes.</p></div><input min="64" onChange={(event) => save({ ...settings, data_budget_mb: Number(event.currentTarget.value) })} type="number" value={settings.data_budget_mb} /></label>
-        <label className="settings-row"><div><strong>Retention</strong><p>Days to retain bounded local history.</p></div><input min="1" onChange={(event) => save({ ...settings, retention_days: Number(event.currentTarget.value) })} type="number" value={settings.retention_days} /></label>
+      <section aria-labelledby="settings-storage"><h2 id="settings-storage">本地数据</h2>
+        <label className="settings-row"><div><strong>数据预算</strong><p>本地投影预算上限（MB）。</p></div><input min="64" onChange={(event) => save({ ...settings, data_budget_mb: Number(event.currentTarget.value) })} type="number" value={settings.data_budget_mb} /></label>
+        <label className="settings-row"><div><strong>保留期限</strong><p>保留受限本地历史的天数。</p></div><input min="1" onChange={(event) => save({ ...settings, retention_days: Number(event.currentTarget.value) })} type="number" value={settings.retention_days} /></label>
       </section>
-      <section aria-labelledby="settings-boundary"><h2 id="settings-boundary">Security boundary</h2><div className="settings-notice">Credentials remain in macOS Keychain. Existing Secret values and SecretRef identifiers are not rendered by this page.</div></section>
+      <section aria-labelledby="settings-boundary"><h2 id="settings-boundary">安全边界</h2><div className="settings-notice">GitHub MVP 凭据保存在受限本地文件中；本页面不会显示 Secret 值或 SecretRef 标识符。</div></section>
     </div>
   );
 }

@@ -11,19 +11,19 @@ afterEach(cleanup);
 describe("SettingsPage", () => {
   it("keeps start-at-login and MCP auto-launch separate", async () => {
     render(<DesktopAdapterProvider adapter={new MockDesktopAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><SettingsPage /></DesktopAdapterProvider>);
-    expect(await screen.findByText("Start at login")).toBeInTheDocument();
-    expect(screen.getByText("MCP auto-launch")).toBeInTheDocument();
-    expect(screen.getByText("unavailable")).toBeInTheDocument();
-    expect(screen.getByText(/not installed, enabled, or verified/)).toBeInTheDocument();
-    expect(screen.getByText("clear")).toBeInTheDocument();
+    expect(await screen.findByText("登录时启动")).toBeInTheDocument();
+    expect(screen.getByText("MCP 自动启动")).toBeInTheDocument();
+    expect(screen.getByText("不可用")).toBeInTheDocument();
+    expect(screen.getByText(/尚未安装、启用或验证/)).toBeInTheDocument();
+    expect(screen.getByText("未锁定")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /MCP/i })).not.toBeInTheDocument();
   });
 
   it("updates local start-at-login state without secret controls", async () => {
     render(<DesktopAdapterProvider adapter={new MockDesktopAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><SettingsPage /></DesktopAdapterProvider>);
-    const toggle = await screen.findByRole("button", { name: "Off" });
+    const toggle = await screen.findByRole("button", { name: "关闭" });
     fireEvent.click(toggle);
-    expect(await screen.findByRole("button", { name: "On" })).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByRole("button", { name: "开启" })).toHaveAttribute("aria-pressed", "true");
     expect(document.body.textContent).not.toContain("fixture-binding-alpha-beta");
   });
 
@@ -32,8 +32,8 @@ describe("SettingsPage", () => {
     const settings = await adapter.getLocalSettings();
     await adapter.updateLocalSettings({ ...settings, user_quit: true });
     render(<DesktopAdapterProvider adapter={adapter}><SettingsPage /></DesktopAdapterProvider>);
-    expect(await screen.findByText("latched")).toBeInTheDocument();
-    expect(screen.getByText(/Reopen Next Infra interactively/)).toBeInTheDocument();
+    expect(await screen.findByText("已锁定")).toBeInTheDocument();
+    expect(screen.getByText(/请交互式重新打开 Next Infra/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /clear/i })).not.toBeInTheDocument();
   });
 });

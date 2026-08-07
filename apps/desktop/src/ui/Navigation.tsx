@@ -35,8 +35,8 @@ export function Navigation({ activeRoute, onNavigate }: NavigationProps) {
       </nav>
 
       <div className="shell-navigation-foot">
-        <strong>Local workspace</strong>
-        <span>single user · this Mac</span>
+        <strong>本地工作区</strong>
+        <span>单用户 · 此 Mac</span>
       </div>
     </aside>
   );

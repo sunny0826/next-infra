@@ -5,19 +5,25 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use next_infra_query::dto::{
-    ChangeDto, ChangeOriginDto, ChangePageDto, ChangeSubjectDto, ConnectionDto,
-    ConnectionSnapshotDto, ConnectorCoverageDto, ConnectorCoverageLevelDto,
-    ConnectorCoverageSnapshotDto, ConnectorHealth, ConnectorHealthCountsDto, ErrorEnvelope,
+    BindingCommandResultDto, BindingDto, BindingSnapshotDto, BindingStatusDto, ChangeDto,
+    ChangeOriginDto, ChangePageDto, ChangeSubjectDto, ConnectionDto, ConnectionSnapshotDto,
+    ConnectorCoverageDto, ConnectorCoverageLevelDto, ConnectorCoverageSnapshotDto, ConnectorHealth,
+    ConnectorHealthCountsDto, CreateBindingCommandDto, DisableBindingCommandDto, ErrorEnvelope,
     EvidenceType, FieldChangeDto, Freshness, FreshnessCountsDto, FrontierDirectionDto,
     HealthSummaryDto, Lifecycle, PageInfo, QueryViewState, RelationDto, RelationEvidenceDto,
     ResourceDetailDto, ResourceDto, ResourceHealth, ResourceHealthCountsDto, ResourcePageDto,
     SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto,
-    SyncRunErrorDto, SyncRunStatusDto, SyncStatusDto, SyncTriggerDto, TopologyDto,
-    TopologyFrontierDto,
+    SyncRunErrorDto, SyncRunStatusDto, SyncStatusDto, SyncTriggerDto, TimelineGroupDto,
+    TimelineItemDto, TimelineOriginDto, TimelinePageDto, TimelineVersionLinkDto, TopologyDto,
+    TopologyFrontierDto, UpdateBindingCommandDto,
 };
 use ts_rs::{Config, TS};
 
-const EXPECTED_BINDINGS: [&str; 40] = [
+const EXPECTED_BINDINGS: [&str; 52] = [
+    "BindingCommandResultDto.ts",
+    "BindingDto.ts",
+    "BindingSnapshotDto.ts",
+    "BindingStatusDto.ts",
     "ChangeDto.ts",
     "ChangeOriginDto.ts",
     "ChangePageDto.ts",
@@ -29,6 +35,8 @@ const EXPECTED_BINDINGS: [&str; 40] = [
     "ConnectorCoverageSnapshotDto.ts",
     "ConnectorHealth.ts",
     "ConnectorHealthCountsDto.ts",
+    "CreateBindingCommandDto.ts",
+    "DisableBindingCommandDto.ts",
     "ErrorEnvelope.ts",
     "EvidenceType.ts",
     "FieldChangeDto.ts",
@@ -56,8 +64,14 @@ const EXPECTED_BINDINGS: [&str; 40] = [
     "SyncRunStatusDto.ts",
     "SyncStatusDto.ts",
     "SyncTriggerDto.ts",
+    "TimelineGroupDto.ts",
+    "TimelineItemDto.ts",
+    "TimelineOriginDto.ts",
+    "TimelinePageDto.ts",
+    "TimelineVersionLinkDto.ts",
     "TopologyDto.ts",
     "TopologyFrontierDto.ts",
+    "UpdateBindingCommandDto.ts",
 ];
 
 fn output_directory() -> PathBuf {
@@ -121,6 +135,23 @@ fn export_types() {
     FrontierDirectionDto::export_all(&config).expect("failed to export frontier direction binding");
     TopologyFrontierDto::export_all(&config).expect("failed to export topology frontier binding");
     TopologyDto::export_all(&config).expect("failed to export topology binding");
+    BindingStatusDto::export_all(&config).expect("failed to export binding status binding");
+    BindingDto::export_all(&config).expect("failed to export binding binding");
+    CreateBindingCommandDto::export_all(&config)
+        .expect("failed to export create binding command binding");
+    UpdateBindingCommandDto::export_all(&config)
+        .expect("failed to export update binding command binding");
+    DisableBindingCommandDto::export_all(&config)
+        .expect("failed to export disable binding command binding");
+    BindingCommandResultDto::export_all(&config)
+        .expect("failed to export binding command result binding");
+    BindingSnapshotDto::export_all(&config).expect("failed to export binding snapshot binding");
+    TimelineOriginDto::export_all(&config).expect("failed to export timeline origin binding");
+    TimelineVersionLinkDto::export_all(&config)
+        .expect("failed to export timeline version link binding");
+    TimelineItemDto::export_all(&config).expect("failed to export timeline item binding");
+    TimelineGroupDto::export_all(&config).expect("failed to export timeline group binding");
+    TimelinePageDto::export_all(&config).expect("failed to export timeline page binding");
     ResourceHealthCountsDto::export_all(&config)
         .expect("failed to export resource health counts binding");
     FreshnessCountsDto::export_all(&config).expect("failed to export freshness counts binding");

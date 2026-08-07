@@ -10,6 +10,11 @@ import type {
   RuntimeCapabilities,
   SearchResourcesInput,
   SyncStatusInput,
+  TimelineInput,
+  CreateBindingInput,
+  CreateGitHubConnectionInput,
+  DisableBindingInput,
+  UpdateBindingInput,
   Unsubscribe,
 } from "./desktop-adapter";
 
@@ -38,12 +43,44 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
     throw new Error("Desktop query service is unavailable.");
   }
 
+  async getTimeline(_input?: TimelineInput): Promise<never> {
+    throw new Error("Desktop query service is unavailable.");
+  }
+
+  async createBinding(_input: CreateBindingInput): Promise<never> {
+    throw new Error("Binding is unavailable.");
+  }
+
+  async updateBinding(_input: UpdateBindingInput): Promise<never> {
+    throw new Error("Binding is unavailable.");
+  }
+
+  async disableBinding(_input: DisableBindingInput): Promise<never> {
+    throw new Error("Binding is unavailable.");
+  }
+
   async getSyncStatus(_input: SyncStatusInput): Promise<never> {
     throw new Error("Desktop query service is unavailable.");
   }
 
   async listConnectorCoverage(): Promise<never> {
     throw new Error("Desktop query service is unavailable.");
+  }
+
+  async discoverGitHubRepositories(_token: string): Promise<never> {
+    throw new Error("GitHub repository discovery is unavailable.");
+  }
+
+  async createGitHubConnection(_input: CreateGitHubConnectionInput): Promise<never> {
+    throw new Error("GitHub connection creation is unavailable.");
+  }
+
+  async previewGitHubConnectionPurge(_connectionId: string): Promise<never> {
+    throw new Error("GitHub connection cleanup is unavailable.");
+  }
+
+  async purgeGitHubConnection(_connectionId: string): Promise<never> {
+    throw new Error("GitHub connection cleanup is unavailable.");
   }
 
   async manualSync(_connectionId: string): Promise<never> {

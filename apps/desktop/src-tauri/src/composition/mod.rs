@@ -3,31 +3,57 @@
 use crate::adapter::{
     DesktopQueryAdapter, GetResourceCommand, GetTopologyCommand, LocalSettings,
     RecentChangesCommand, RuntimeCapabilities, SearchResourcesCommand, SyncStatusCommand,
-    manual_sync_unavailable, validate_settings_update,
+    TimelineCommand, validate_settings_update,
 };
+use crate::github_live::GitHubSecretFiles;
 use crate::host::authorization::authorize_launch;
 use crate::host::lifecycle::LaunchSource;
 use crate::host::local_rpc::LocalRpcHost;
-use next_infra_core::Timestamp;
+use next_infra_binding::{BindingInput, BindingService};
+use next_infra_connector_aliyun::descriptor as aliyun_descriptor;
+use next_infra_connector_api::{
+    ConnectionInput, ReadConnector, SyncOutcome, SyncRequest, ValidationRequest, ValidationStatus,
+};
+use next_infra_connector_catalog::ConnectorCoverageSnapshot;
+use next_infra_connector_cloudflare::cloudflare_descriptor;
+use next_infra_connector_dokploy::dokploy_descriptor;
+use next_infra_connector_github::{
+    GitHubClient, GitHubConnector, GitHubEndpoint, GitHubFetch, GitHubFetchBudget,
+    ReqwestGitHubTransport, github_descriptor, repository::RepositoryDto,
+};
+use next_infra_connector_supabase_managed::descriptor as supabase_managed_descriptor;
+use next_infra_connector_supabase_self_hosted::descriptor as supabase_self_hosted_descriptor;
+use next_infra_connector_tencent::descriptor as tencent_descriptor;
+use next_infra_core::{
+    Connection, ConnectionId, ConnectorHealth, ConnectorType, DomainError, ErrorCode, ResourceKind,
+    SchemaVersion, Scope, SecretValue, StoreReader, StoreWriter, SyncMode, SyncRunId, SyncTrigger,
+    Timestamp,
+};
 use next_infra_host_integration::{
     IntegrationPaths, UserQuitInspection, authorize_mcp_host_launch, inspect_user_quit,
     persist_user_quit,
 };
 use next_infra_local_rpc::session::QueryServiceHandler;
+use next_infra_normalizer::{AttributeSchema, Normalizer, RelationSchema};
 use next_infra_query::dto::{
-    ChangePageDto, ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, ErrorEnvelope,
-    HealthSummaryDto, ResourceDetailDto, ResourcePageDto, SyncStatusDto, TopologyDto,
+    BindingCommandResultDto, BindingDto, ChangePageDto, ConnectionSnapshotDto,
+    ConnectorCoverageSnapshotDto, CreateBindingCommandDto, DisableBindingCommandDto, ErrorEnvelope,
+    HealthSummaryDto, ResourceDetailDto, ResourcePageDto, SyncStatusDto, TimelinePageDto,
+    TopologyDto, UpdateBindingCommandDto,
 };
 use next_infra_query::service::QueryService;
 use next_infra_runtime::{
-    CommittedQuerySource, ConnectorCatalogSnapshot, QueryContextSnapshot, Runtime, Scheduler,
-    SharedStore, SqliteRuntimeBackend,
+    CommittedQuerySource, ConnectorCatalogSnapshot, QueryContextRefreshHandle,
+    QueryContextSnapshot, Runtime, Scheduler, SharedStore, SqliteRuntimeBackend,
 };
+use next_infra_sync::{SyncEngine, SyncRunStart};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -36,11 +62,17 @@ use tauri_plugin_autostart::ManagerExt;
 
 type DesktopRuntime = Runtime<SqliteRuntimeBackend, CommittedQuerySource>;
 
+const DEFAULT_QUERY_SYNC_INTERVAL_MILLIS: u64 = 15 * 60 * 1_000;
+
 pub struct AppState {
     runtime: Mutex<DesktopRuntime>,
+    store: SharedStore,
     query: DesktopQueryAdapter<CommittedQuerySource>,
+    query_context: QueryContextRefreshHandle,
     settings: Mutex<LocalSettings>,
     settings_path: PathBuf,
+    github_secrets: GitHubSecretFiles,
+    github_sync_running: Arc<AtomicBool>,
     integration_paths: IntegrationPaths,
     current_app_bundle: PathBuf,
     local_rpc: Mutex<Option<LocalRpcHost>>,
@@ -71,12 +103,12 @@ impl AppState {
         let shared = SharedStore::open(&data_directory.join("next-infra.db"))
             .map_err(|_| "desktop store unavailable")?;
         let evaluated_at = now()?;
-        let context = QueryContextSnapshot::empty(evaluated_at, 0);
-        let query_source =
-            CommittedQuerySource::new(shared.clone(), ConnectorCatalogSnapshot::default(), context);
+        let context = committed_query_context(&shared, evaluated_at, 0)?;
+        let query_source = CommittedQuerySource::new(shared.clone(), goal9_catalog(), context);
+        let query_context = query_source.context_handle();
         let query = DesktopQueryAdapter::new(QueryService::new(query_source.clone()));
         let rpc_handler = QueryServiceHandler::new(QueryService::new(query_source.clone()));
-        let backend = SqliteRuntimeBackend::from_shared_store(shared);
+        let backend = SqliteRuntimeBackend::from_shared_store(shared.clone());
         let mut runtime = Runtime::new(
             backend,
             QueryService::new(query_source),
@@ -100,11 +132,17 @@ impl AppState {
 
         let settings_path = data_directory.join("settings-v1.json");
         let settings = load_settings(&settings_path)?;
+        let github_secrets = GitHubSecretFiles::open(data_directory)
+            .map_err(|_| "GitHub secret storage unavailable")?;
         Ok(Self {
             runtime: Mutex::new(runtime),
+            store: shared,
             query,
+            query_context,
             settings: Mutex::new(settings),
             settings_path,
+            github_secrets,
+            github_sync_running: Arc::new(AtomicBool::new(false)),
             integration_paths: paths.clone(),
             current_app_bundle: current_app_bundle.to_path_buf(),
             local_rpc: Mutex::new(Some(local_rpc)),
@@ -115,6 +153,38 @@ impl AppState {
 
     pub fn runtime(&self) -> &Mutex<DesktopRuntime> {
         &self.runtime
+    }
+
+    fn refresh_query_context(&self, evaluated_at: Timestamp) -> Result<(), ErrorEnvelope> {
+        let revision = self
+            .query_context
+            .revision()
+            .map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?
+            .checked_add(1)
+            .ok_or_else(|| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?;
+        let context =
+            committed_query_context(&self.store, evaluated_at, revision).map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?;
+        self.query_context.refresh(context).map_err(|_| {
+            safe_error(
+                "query_context_unavailable",
+                "Local query context is unavailable.",
+            )
+        })
     }
 
     fn user_quit_latched(&self) -> bool {
@@ -134,7 +204,7 @@ impl AppState {
         };
         RuntimeCapabilities {
             start_at_login: true,
-            manual_sync: false,
+            manual_sync: true,
             mcp_auto_launch: configured,
             mcp_auto_launch_reason: reason.into(),
         }
@@ -192,6 +262,422 @@ impl AppState {
     pub fn system_shutdown_requested(&self) -> bool {
         self.system_shutdown.load(Ordering::Acquire)
     }
+
+    async fn create_github_connection(
+        &self,
+        request: GitHubConnectCommand,
+    ) -> Result<GitHubConnectResult, ErrorEnvelope> {
+        let display_name = request.display_name.trim();
+        if display_name.is_empty() || display_name.len() > 120 {
+            return Err(safe_error(
+                "invalid_connection",
+                "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        if request.token.trim().is_empty() || request.token.len() > 16 * 1024 {
+            return Err(safe_error(
+                "invalid_credential",
+                "GitHub token is required.",
+            ));
+        }
+        self.begin_github_sync()?;
+        let result = async {
+            let connection_id = ConnectionId::new(format!("github-{}", uuid::Uuid::new_v4()))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "GitHub connection could not be created.",
+                    )
+                })?;
+            if request.selected_repository_ids.is_empty() { return Err(safe_error("sync_scope_required", "Select at least one GitHub repository.")); }
+            let input = github_connection_input(&connection_id, &request.selected_repository_ids);
+            let secret = SecretValue::new(request.token.into_bytes());
+            let connector = github_connector()?;
+            let validation = connector
+                .validate(
+                    ValidationRequest {
+                        connection: input.clone(),
+                    },
+                    Some(&secret),
+                )
+                .await
+                .map_err(|_| {
+                    safe_error(
+                        "github_validation_failed",
+                        "GitHub token could not be validated.",
+                    )
+                })?;
+            if validation.status != ValidationStatus::Valid {
+                return Err(validation_error(
+                    validation.errors.first().map(|issue| issue.code),
+                ));
+            }
+
+            self.github_secrets
+                .replace(&connection_id, &secret)
+                .map_err(|_| {
+                    safe_error(
+                        "secret_storage_unavailable",
+                        "GitHub token could not be stored locally.",
+                    )
+                })?;
+            let connection = Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("github").expect("static connector type"),
+                display_name: display_name.into(),
+                enabled: true,
+                config: serde_json::json!({ "selected_repository_ids": request.selected_repository_ids }),
+                secret_ref: None,
+                health: ConnectorHealth::Degraded,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+                deleted_at: None,
+            };
+            if self
+                .store
+                .write(|store| store.upsert_connection(connection.clone()))
+                .is_err()
+            {
+                let _ = self.github_secrets.remove(&connection_id);
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "GitHub connection could not be saved.",
+                ));
+            }
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            let sync_run_id = self.enqueue_github_sync(connection, SyncTrigger::User)?;
+            Ok(GitHubConnectResult {
+                connection_id: connection_id.as_str().to_owned(),
+                sync_run_id,
+            })
+        }
+        .await;
+        if result.is_err() {
+            self.github_sync_running.store(false, Ordering::Release);
+        }
+        result
+    }
+
+    async fn manual_github_sync(&self, connection_id: String) -> Result<String, ErrorEnvelope> {
+        let connection_id = ConnectionId::new(connection_id)
+            .map_err(|_| safe_error("invalid_connection", "Connection identifier is invalid."))?;
+        let connection = self
+            .store
+            .read(|store| store.get_connection(&connection_id))
+            .map_err(|_| {
+                safe_error(
+                    "connection_unavailable",
+                    "GitHub connection is unavailable.",
+                )
+            })?
+            .filter(|connection| {
+                connection.enabled && connection.connector_type.as_str() == "github"
+            })
+            .ok_or_else(|| {
+                safe_error(
+                    "connection_unavailable",
+                    "GitHub connection is unavailable.",
+                )
+            })?;
+        self.begin_github_sync()?;
+        self.enqueue_github_sync(connection, SyncTrigger::User)
+    }
+
+    fn preview_github_connection_purge(
+        &self,
+        connection_id: String,
+    ) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
+        let connection_id = self.github_connection_id(&connection_id)?;
+        let summary = self
+            .store
+            .read(|store| store.preview_connection_purge(&connection_id))
+            .map_err(|_| {
+                safe_error(
+                    "connection_purge_unavailable",
+                    "The local connection snapshot could not be inspected.",
+                )
+            })?
+            .ok_or_else(|| {
+                safe_error(
+                    "connection_unavailable",
+                    "GitHub connection is unavailable.",
+                )
+            })?;
+        Ok(summary.into())
+    }
+
+    fn purge_github_connection(
+        &self,
+        connection_id: String,
+    ) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
+        if self.github_sync_running.swap(true, Ordering::AcqRel) {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "A GitHub synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        let result = (|| {
+            let connection_id = self.github_connection_id(&connection_id)?;
+            self.github_secrets.remove(&connection_id).map_err(|_| {
+                safe_error(
+                    "secret_cleanup_unavailable",
+                    "The local GitHub credential could not be removed.",
+                )
+            })?;
+            let summary = self
+                .store
+                .write(|store| store.purge_connection(&connection_id))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_purge_unavailable",
+                        "The local connection snapshot could not be removed.",
+                    )
+                })?;
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            Ok(summary.into())
+        })();
+        self.github_sync_running.store(false, Ordering::Release);
+        result
+    }
+
+    fn github_connection_id(&self, connection_id: &str) -> Result<ConnectionId, ErrorEnvelope> {
+        let connection_id = ConnectionId::new(connection_id.to_owned())
+            .map_err(|_| safe_error("invalid_connection", "Connection identifier is invalid."))?;
+        self.store
+            .read(|store| store.get_connection(&connection_id))
+            .map_err(|_| {
+                safe_error(
+                    "connection_unavailable",
+                    "GitHub connection is unavailable.",
+                )
+            })?
+            .filter(|connection| connection.connector_type.as_str() == "github")
+            .ok_or_else(|| {
+                safe_error(
+                    "connection_unavailable",
+                    "GitHub connection is unavailable.",
+                )
+            })?;
+        Ok(connection_id)
+    }
+
+    fn begin_github_sync(&self) -> Result<(), ErrorEnvelope> {
+        if self.github_sync_running.swap(true, Ordering::AcqRel) {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "A GitHub synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn enqueue_github_sync(
+        &self,
+        connection: Connection,
+        trigger: SyncTrigger,
+    ) -> Result<String, ErrorEnvelope> {
+        let sync_run_id =
+            SyncRunId::new(format!("github-sync-{}", uuid::Uuid::new_v4())).map_err(|_| {
+                safe_error(
+                    "sync_unavailable",
+                    "GitHub synchronization could not start.",
+                )
+            })?;
+        let store = self.store.clone();
+        let github_secrets = self.github_secrets.clone();
+        let running = self.github_sync_running.clone();
+        let queued_id = sync_run_id.as_str().to_owned();
+        tauri::async_runtime::spawn(async move {
+            let _ = sync_github(store, github_secrets, connection, trigger, sync_run_id).await;
+            running.store(false, Ordering::Release);
+        });
+        Ok(queued_id)
+    }
+}
+
+async fn sync_github(
+    store: SharedStore,
+    github_secrets: GitHubSecretFiles,
+    mut connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: SyncRunId,
+) -> Result<(), ErrorEnvelope> {
+    let started_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "GitHub synchronization could not start.",
+        )
+    })?;
+    connection.last_attempt_at = Some(started_at);
+    store
+        .write(|store| store.upsert_connection(connection.clone()))
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "GitHub synchronization could not start.",
+            )
+        })?;
+    let request = SyncRequest {
+        sync_run_id: sync_run_id.clone(),
+        connection: ConnectionInput {
+            connection_id: connection.connection_id.clone(),
+            connector_type: ConnectorType::new("github").expect("static connector type"),
+            config: connection.config.clone(),
+            config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(format!("github:{}", connection.connection_id.as_str())).map_err(
+            |_| {
+                safe_error(
+                    "sync_unavailable",
+                    "GitHub synchronization could not start.",
+                )
+            },
+        )?,
+        cursor: None,
+        targeted_resources: Vec::new(),
+    };
+    let secret = github_secrets
+        .read(&connection.connection_id)
+        .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "GitHub token is unavailable from local storage.",
+            )
+        })?;
+    let connector = github_connector()?;
+    let mut engine = SyncEngine::new(store.clone());
+    let handle = engine
+        .start(
+            &connection,
+            SyncRunStart {
+                sync_run_id: sync_run_id.clone(),
+                mode: SyncMode::Full,
+                trigger,
+                scope: request.scope.clone(),
+                started_at,
+                targeted_resources: Vec::new(),
+            },
+        )
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "GitHub synchronization could not start.",
+            )
+        })?;
+    let outcome = connector.sync(request.clone(), Some(&secret)).await;
+    let finished_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "GitHub synchronization could not finish.",
+        )
+    })?;
+
+    let health = match outcome {
+        Ok(outcome) => {
+            let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
+                ConnectorHealth::Degraded
+            } else {
+                ConnectorHealth::Healthy
+            };
+            let normalized = match github_normalizer().normalize(&request, outcome.batch().clone())
+            {
+                Ok(normalized) => normalized,
+                Err(_) => {
+                    let _ = engine.fail(
+                        handle,
+                        DomainError {
+                            code: ErrorCode::Internal,
+                            message: "GitHub data normalization failed.".into(),
+                            retryable: false,
+                        },
+                        finished_at,
+                    );
+                    return Err(safe_error(
+                        "sync_unavailable",
+                        "GitHub data could not be saved.",
+                    ));
+                }
+            };
+            engine
+                .commit(handle, normalized, finished_at)
+                .map_err(|_| safe_error("sync_unavailable", "GitHub data could not be saved."))?;
+            connection.last_success_at = Some(finished_at);
+            health
+        }
+        Err(failure) => {
+            let health = connector_health(failure.code);
+            engine
+                .fail(
+                    handle,
+                    DomainError {
+                        code: failure.code,
+                        message: "GitHub synchronization failed.".into(),
+                        retryable: failure.retryable,
+                    },
+                    finished_at,
+                )
+                .map_err(|_| {
+                    safe_error(
+                        "sync_unavailable",
+                        "GitHub synchronization could not finish.",
+                    )
+                })?;
+            connection.health = health;
+            store
+                .write(|store| store.upsert_connection(connection))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "GitHub connection status could not be saved.",
+                    )
+                })?;
+            return Err(sync_error(failure.code));
+        }
+    };
+    connection.health = health;
+    store
+        .write(|store| store.upsert_connection(connection))
+        .map_err(|_| {
+            safe_error(
+                "connection_unavailable",
+                "GitHub connection status could not be saved.",
+            )
+        })?;
+    Ok(())
+}
+
+fn goal9_catalog() -> ConnectorCatalogSnapshot {
+    let descriptors = [
+        github_descriptor(),
+        dokploy_descriptor(),
+        cloudflare_descriptor(),
+        supabase_managed_descriptor(),
+        supabase_self_hosted_descriptor(),
+        aliyun_descriptor(),
+        tencent_descriptor(),
+    ];
+    ConnectorCatalogSnapshot::from(
+        descriptors
+            .into_iter()
+            .filter_map(|descriptor| ConnectorCoverageSnapshot::from_descriptor(&descriptor).ok())
+            .collect::<Vec<_>>(),
+    )
 }
 
 pub fn setup(
@@ -274,13 +760,164 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         query_get_topology,
         query_health_summary,
         query_recent_changes,
+        query_timeline,
+        binding_create,
+        binding_update,
+        binding_disable,
         query_sync_status,
         query_connector_coverage,
+        github_discover_repositories,
+        github_connect,
+        github_connection_purge_preview,
+        github_connection_purge,
         runtime_manual_sync,
         local_settings_get,
         local_settings_update,
         runtime_capabilities,
     ]
+}
+
+#[derive(Deserialize)]
+struct GitHubConnectCommand {
+    display_name: String,
+    token: String,
+    selected_repository_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct GitHubRepositoryDiscoveryCommand {
+    token: String,
+}
+
+#[derive(Serialize)]
+struct GitHubRepositoryOption {
+    id: String,
+    name: String,
+}
+
+#[derive(Serialize)]
+struct GitHubConnectResult {
+    connection_id: String,
+    sync_run_id: String,
+}
+
+#[derive(Deserialize)]
+struct GitHubConnectionPurgeCommand {
+    connection_id: String,
+}
+
+#[derive(Serialize)]
+struct GitHubConnectionPurgeSummary {
+    resources: u64,
+    relations: u64,
+    resource_versions: u64,
+    relation_versions: u64,
+    changes: u64,
+    bindings: u64,
+    sync_runs: u64,
+}
+
+impl From<next_infra_store::ConnectionPurgeSummary> for GitHubConnectionPurgeSummary {
+    fn from(value: next_infra_store::ConnectionPurgeSummary) -> Self {
+        Self {
+            resources: value.resources,
+            relations: value.relations,
+            resource_versions: value.resource_versions,
+            relation_versions: value.relation_versions,
+            changes: value.changes,
+            bindings: value.bindings,
+            sync_runs: value.sync_runs,
+        }
+    }
+}
+
+#[tauri::command]
+async fn github_connect(
+    state: State<'_, AppState>,
+    request: GitHubConnectCommand,
+) -> Result<GitHubConnectResult, ErrorEnvelope> {
+    state.create_github_connection(request).await
+}
+
+#[tauri::command]
+async fn github_discover_repositories(
+    request: GitHubRepositoryDiscoveryCommand,
+) -> Result<Vec<GitHubRepositoryOption>, ErrorEnvelope> {
+    let secret = SecretValue::new(request.token.into_bytes());
+    let client = GitHubClient::new(
+        ReqwestGitHubTransport::new()
+            .map_err(|_| safe_error("github_unavailable", "GitHub is unavailable."))?,
+    );
+    let endpoint = GitHubEndpoint::new(
+        "repository_discovery",
+        "/user/repos",
+        &[
+            ("visibility", "all"),
+            ("affiliation", "owner,collaborator,organization_member"),
+            ("sort", "full_name"),
+            ("direction", "asc"),
+            ("per_page", "100"),
+        ],
+    )
+    .map_err(|_| safe_error("github_unavailable", "GitHub is unavailable."))?;
+    let fetched = client
+        .fetch_pages_with_budget(
+            &endpoint,
+            &secret,
+            None,
+            GitHubFetchBudget::new(1, 1).expect("static budget"),
+        )
+        .await
+        .map_err(|_| {
+            safe_error(
+                "github_validation_failed",
+                "GitHub repositories could not be loaded.",
+            )
+        })?;
+    let GitHubFetch::Pages(pages) = fetched else {
+        return Err(safe_error(
+            "github_validation_failed",
+            "GitHub repositories could not be loaded.",
+        ));
+    };
+    let repositories = pages
+        .pages
+        .into_iter()
+        .map(|page| page.deserialize::<Vec<RepositoryDto>>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| {
+            safe_error(
+                "github_validation_failed",
+                "GitHub repositories could not be loaded.",
+            )
+        })?
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+    Ok(repositories
+        .into_iter()
+        .take(100)
+        .map(|repo| GitHubRepositoryOption {
+            id: repo.id.to_string(),
+            name: format!("{}/{}", repo.owner.login, repo.name),
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn github_connection_purge_preview(
+    state: State<'_, AppState>,
+    request: GitHubConnectionPurgeCommand,
+) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
+    state.preview_github_connection_purge(request.connection_id)
+}
+
+#[tauri::command]
+fn github_connection_purge(
+    state: State<'_, AppState>,
+    request: GitHubConnectionPurgeCommand,
+) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
+    state.purge_github_connection(request.connection_id)
 }
 
 #[tauri::command]
@@ -328,6 +965,151 @@ fn query_recent_changes(
 }
 
 #[tauri::command]
+fn query_timeline(
+    state: State<'_, AppState>,
+    request: TimelineCommand,
+) -> Result<TimelinePageDto, ErrorEnvelope> {
+    state.query.get_timeline(request)
+}
+
+#[tauri::command]
+fn binding_create(
+    state: State<'_, AppState>,
+    request: CreateBindingCommandDto,
+) -> Result<BindingCommandResultDto, ErrorEnvelope> {
+    let input = binding_input(
+        request.source_resource_id,
+        request.target_resource_id,
+        request.kind,
+    )?;
+    let binding = state
+        .store
+        .write(|store| {
+            BindingService::new(store)
+                .create(
+                    input,
+                    now().map_err(|_| {
+                        next_infra_store::StoreError::Contract("clock unavailable".into())
+                    })?,
+                )
+                .map_err(binding_store_error)
+        })
+        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?;
+    binding_result(&state, binding)
+}
+
+#[tauri::command]
+fn binding_update(
+    state: State<'_, AppState>,
+    request: UpdateBindingCommandDto,
+) -> Result<BindingCommandResultDto, ErrorEnvelope> {
+    let binding_id = next_infra_core::BindingId::new(request.binding_id)
+        .map_err(|_| binding_error("invalid_binding", "Binding identifier is invalid.", false))?;
+    let input = binding_input(
+        request.source_resource_id,
+        request.target_resource_id,
+        request.kind,
+    )?;
+    let binding = state
+        .store
+        .write(|store| {
+            BindingService::new(store)
+                .update(
+                    &binding_id,
+                    input,
+                    now().map_err(|_| {
+                        next_infra_store::StoreError::Contract("clock unavailable".into())
+                    })?,
+                )
+                .map_err(binding_store_error)
+        })
+        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?;
+    binding_result(&state, binding)
+}
+
+#[tauri::command]
+fn binding_disable(
+    state: State<'_, AppState>,
+    request: DisableBindingCommandDto,
+) -> Result<BindingCommandResultDto, ErrorEnvelope> {
+    let binding_id = next_infra_core::BindingId::new(request.binding_id)
+        .map_err(|_| binding_error("invalid_binding", "Binding identifier is invalid.", false))?;
+    let binding = state
+        .store
+        .write(|store| {
+            BindingService::new(store)
+                .disable(
+                    &binding_id,
+                    now().map_err(|_| {
+                        next_infra_store::StoreError::Contract("clock unavailable".into())
+                    })?,
+                )
+                .map_err(binding_store_error)
+        })
+        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?;
+    binding_result(&state, binding)
+}
+
+fn binding_input(
+    source_resource_id: String,
+    target_resource_id: String,
+    kind: String,
+) -> Result<BindingInput, ErrorEnvelope> {
+    Ok(BindingInput {
+        source_resource_id: next_infra_core::ResourceId::new(source_resource_id)
+            .map_err(|_| binding_error("invalid_binding", "Binding source is invalid.", false))?,
+        target_resource_id: next_infra_core::ResourceId::new(target_resource_id)
+            .map_err(|_| binding_error("invalid_binding", "Binding target is invalid.", false))?,
+        kind: next_infra_core::RelationKind::new(kind)
+            .map_err(|_| binding_error("invalid_binding", "Binding kind is invalid.", false))?,
+    })
+}
+
+fn binding_store_error(
+    error: next_infra_binding::BindingError<next_infra_store::StoreError>,
+) -> next_infra_store::StoreError {
+    next_infra_store::StoreError::Contract(error.to_string())
+}
+
+fn binding_result(
+    state: &AppState,
+    binding: next_infra_core::Binding,
+) -> Result<BindingCommandResultDto, ErrorEnvelope> {
+    let metadata = state.query.list_connections()?.metadata;
+    Ok(BindingCommandResultDto {
+        metadata,
+        binding: BindingDto {
+            binding_id: binding.binding_id.as_str().to_owned(),
+            source_resource_id: binding.source_resource_id.as_str().to_owned(),
+            target_resource_id: binding.target_resource_id.as_str().to_owned(),
+            kind: binding.kind.as_str().to_owned(),
+            status: match binding.status {
+                next_infra_core::BindingStatus::Active => {
+                    next_infra_query::dto::BindingStatusDto::Active
+                }
+                next_infra_core::BindingStatus::Unresolved => {
+                    next_infra_query::dto::BindingStatusDto::Unresolved
+                }
+                next_infra_core::BindingStatus::Disabled => {
+                    next_infra_query::dto::BindingStatusDto::Disabled
+                }
+            },
+            created_at: next_infra_runtime::format_timestamp(binding.created_at),
+            updated_at: next_infra_runtime::format_timestamp(binding.updated_at),
+        },
+    })
+}
+
+fn binding_error(code: &str, message: &str, retryable: bool) -> ErrorEnvelope {
+    ErrorEnvelope {
+        schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+        code: code.into(),
+        message: message.into(),
+        retryable,
+    }
+}
+
+#[tauri::command]
 fn query_sync_status(
     state: State<'_, AppState>,
     request: SyncStatusCommand,
@@ -343,12 +1125,214 @@ fn query_connector_coverage(
 }
 
 #[tauri::command]
-fn runtime_manual_sync(
-    _state: State<'_, AppState>,
+async fn runtime_manual_sync(
+    state: State<'_, AppState>,
     connection_id: String,
 ) -> Result<crate::adapter::ManualSyncResult, ErrorEnvelope> {
-    let _ = connection_id;
-    manual_sync_unavailable()
+    state
+        .manual_github_sync(connection_id)
+        .await
+        .map(|sync_run_id| crate::adapter::ManualSyncResult { sync_run_id })
+}
+
+fn github_connection_input(
+    connection_id: &ConnectionId,
+    selected_repository_ids: &[String],
+) -> ConnectionInput {
+    ConnectionInput {
+        connection_id: connection_id.clone(),
+        connector_type: ConnectorType::new("github").expect("static connector type"),
+        config: serde_json::json!({ "selected_repository_ids": selected_repository_ids }),
+        config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+    }
+}
+
+fn github_connector() -> Result<GitHubConnector<ReqwestGitHubTransport>, ErrorEnvelope> {
+    ReqwestGitHubTransport::new()
+        .map(GitHubConnector::new)
+        .map_err(|_| safe_error("sync_unavailable", "GitHub transport is unavailable."))
+}
+
+fn validation_error(code: Option<ErrorCode>) -> ErrorEnvelope {
+    let health = code
+        .map(connector_health)
+        .unwrap_or(ConnectorHealth::Degraded);
+    let (code, message, retryable) = match health {
+        ConnectorHealth::AuthFailed => (
+            "github_auth_failed",
+            "GitHub token was not accepted.",
+            false,
+        ),
+        ConnectorHealth::RateLimited => (
+            "github_rate_limited",
+            "GitHub validation is rate limited. Try again later.",
+            true,
+        ),
+        ConnectorHealth::Unreachable => (
+            "github_unreachable",
+            "GitHub could not be reached. Try again later.",
+            true,
+        ),
+        _ => (
+            "github_validation_failed",
+            "GitHub token could not be validated.",
+            false,
+        ),
+    };
+    ErrorEnvelope {
+        schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+        code: code.into(),
+        message: message.into(),
+        retryable,
+    }
+}
+
+fn sync_error(code: ErrorCode) -> ErrorEnvelope {
+    let health = connector_health(code);
+    let (code, message, retryable) = match health {
+        ConnectorHealth::AuthFailed => (
+            "github_auth_failed",
+            "GitHub token was not accepted.",
+            false,
+        ),
+        ConnectorHealth::RateLimited => (
+            "github_rate_limited",
+            "GitHub is rate limited. Try again later.",
+            true,
+        ),
+        ConnectorHealth::Unreachable => (
+            "github_unreachable",
+            "GitHub could not be reached. Try again later.",
+            true,
+        ),
+        _ => (
+            "github_sync_failed",
+            "GitHub synchronization failed.",
+            false,
+        ),
+    };
+    ErrorEnvelope {
+        schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+        code: code.into(),
+        message: message.into(),
+        retryable,
+    }
+}
+
+fn connector_health(code: ErrorCode) -> ConnectorHealth {
+    match code {
+        ErrorCode::AuthenticationFailed | ErrorCode::CredentialUnavailable => {
+            ConnectorHealth::AuthFailed
+        }
+        ErrorCode::RateLimited => ConnectorHealth::RateLimited,
+        ErrorCode::NetworkUnreachable | ErrorCode::ProviderUnavailable => {
+            ConnectorHealth::Unreachable
+        }
+        _ => ConnectorHealth::Degraded,
+    }
+}
+
+fn github_normalizer() -> Normalizer {
+    Normalizer::new(
+        [
+            github_schema(
+                "github.repository",
+                &[
+                    "repository_id",
+                    "visibility",
+                    "default_branch",
+                    "archived",
+                    "disabled",
+                    "created_at",
+                    "updated_at",
+                ],
+            ),
+            github_schema(
+                "github.environment",
+                &[
+                    "environment_id",
+                    "repository_id",
+                    "protected_branches",
+                    "custom_branch_policies",
+                ],
+            ),
+            github_schema(
+                "github.deployment",
+                &[
+                    "deployment_id",
+                    "repository_id",
+                    "environment",
+                    "task",
+                    "transient_environment",
+                    "production_environment",
+                    "created_at",
+                    "updated_at",
+                ],
+            ),
+            github_schema(
+                "github.workflow",
+                &["workflow_id", "path", "state", "created_at", "updated_at"],
+            ),
+            github_schema(
+                "github.workflow_run",
+                &[
+                    "run_id",
+                    "workflow_id",
+                    "run_number",
+                    "run_attempt",
+                    "event",
+                    "status",
+                    "conclusion",
+                    "head_branch",
+                    "created_at",
+                    "updated_at",
+                    "run_started_at",
+                ],
+            ),
+            github_schema(
+                "github.workflow_job",
+                &[
+                    "job_id",
+                    "run_id",
+                    "status",
+                    "conclusion",
+                    "started_at",
+                    "completed_at",
+                ],
+            ),
+        ],
+        [
+            github_relation("github.contains", "github.repository", "github.environment"),
+            github_relation("github.contains", "github.repository", "github.deployment"),
+            github_relation("github.contains", "github.repository", "github.workflow"),
+            github_relation("github.executes", "github.workflow", "github.workflow_run"),
+            github_relation(
+                "github.contains",
+                "github.workflow_run",
+                "github.workflow_job",
+            ),
+        ],
+    )
+    .expect("static GitHub schemas are valid")
+}
+
+fn github_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    AttributeSchema {
+        kind: ResourceKind::new(kind).expect("static resource kind"),
+        schema_version: SchemaVersion::new(1).expect("static schema version"),
+        allowed_attributes: fields
+            .iter()
+            .map(|field| (*field).into())
+            .collect::<BTreeSet<_>>(),
+    }
+}
+
+fn github_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
+    RelationSchema {
+        kind: next_infra_core::RelationKind::new(kind).expect("static relation kind"),
+        source_kind: ResourceKind::new(source).expect("static resource kind"),
+        target_kind: ResourceKind::new(target).expect("static resource kind"),
+    }
 }
 
 #[tauri::command]
@@ -431,6 +1415,37 @@ fn now() -> Result<Timestamp, String> {
     Timestamp::from_unix_millis(millis).map_err(|_| "system clock unavailable".into())
 }
 
+fn committed_query_context(
+    store: &SharedStore,
+    evaluated_at: Timestamp,
+    query_context_revision: u64,
+) -> Result<QueryContextSnapshot, String> {
+    let connections = store
+        .read(|store| store.query_connections())
+        .map_err(|_| "desktop query context unavailable")?;
+    QueryContextSnapshot::from_intervals(
+        evaluated_at,
+        query_context_revision,
+        connections.body.into_iter().map(|connection| {
+            (
+                connection.connection_id,
+                query_sync_interval_millis(&connection.connector_type),
+                None,
+            )
+        }),
+    )
+    .map_err(|_| "desktop query context unavailable".into())
+}
+
+fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 {
+    if connector_type.as_str() == "github" {
+        return github_descriptor()
+            .recommended_sync_interval_secs
+            .saturating_mul(1_000);
+    }
+    DEFAULT_QUERY_SYNC_INTERVAL_MILLIS
+}
+
 fn safe_error(code: &str, message: &str) -> ErrorEnvelope {
     ErrorEnvelope {
         schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
@@ -444,6 +1459,29 @@ fn safe_error(code: &str, message: &str) -> ErrorEnvelope {
 mod tests {
     use super::*;
     use tempfile::{Builder, TempDir};
+
+    #[test]
+    fn catalog_registers_goal9_modules_for_desktop_queries() {
+        let catalog = goal9_catalog();
+        let modules = catalog
+            .connectors
+            .iter()
+            .flat_map(|connector| {
+                connector
+                    .modules
+                    .iter()
+                    .map(|module| module.module.as_str())
+            })
+            .collect::<Vec<_>>();
+        for expected in [
+            "supabase.managed.projects",
+            "supabase.self_hosted.service_api",
+            "aliyun.network.security_group",
+            "tencent.edge.public_ip",
+        ] {
+            assert!(modules.contains(&expected), "missing {expected}");
+        }
+    }
 
     #[test]
     fn composition_opens_one_runtime_and_persists_safe_settings() {
@@ -485,6 +1523,91 @@ mod tests {
     }
 
     #[test]
+    fn composition_rehydrates_query_context_for_persisted_connections() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        ensure_data_directory(&paths.root).unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+        let connection_id = ConnectionId::new("github-persisted-connection").unwrap();
+        store
+            .write(|store| {
+                store.upsert_connection(Connection {
+                    connection_id: connection_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "Persisted GitHub".into(),
+                    enabled: true,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Degraded,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+        drop(store);
+
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let status = state
+            .query
+            .get_sync_status(SyncStatusCommand {
+                connection_id: connection_id.as_str().into(),
+                recent_run_limit: Some(1),
+            })
+            .unwrap();
+
+        assert_eq!(status.connection.connection_id, connection_id.as_str());
+        assert_eq!(status.next_scheduled_at, None);
+        assert!(state.query.get_health_summary().is_ok());
+    }
+
+    #[test]
+    fn github_connection_purge_removes_the_scoped_snapshot_and_credential() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let connection_id = ConnectionId::new("github-purge-fixture").unwrap();
+        state
+            .store
+            .write(|store| {
+                store.upsert_connection(Connection {
+                    connection_id: connection_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "Purge fixture".into(),
+                    enabled: true,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Degraded,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+        state
+            .github_secrets
+            .replace(&connection_id, &SecretValue::new("fixture-token"))
+            .unwrap();
+
+        let preview = state
+            .preview_github_connection_purge(connection_id.as_str().into())
+            .unwrap();
+        assert_eq!(preview.resources, 0);
+        let result = state
+            .purge_github_connection(connection_id.as_str().into())
+            .unwrap();
+
+        assert_eq!(result.resources, 0);
+        assert_eq!(state.store.get_connection(&connection_id).unwrap(), None);
+        assert!(state.github_secrets.read(&connection_id).is_err());
+        assert!(state.query.list_connections().unwrap().items.is_empty());
+    }
+
+    #[test]
     fn host_mcp_state_reports_unavailable_and_explicit_quit_without_clearing_it() {
         let directory = test_home();
         let paths = IntegrationPaths::from_home(directory.path());
@@ -514,6 +1637,24 @@ mod tests {
             state.runtime().lock().unwrap().state(),
             next_infra_runtime::RuntimeState::Stopped
         );
+    }
+
+    #[test]
+    fn binding_commands_reject_malformed_identifiers_without_exposing_store_errors() {
+        let error = binding_input(
+            " ".into(),
+            "fixture-target".into(),
+            "infra.depends_on".into(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "invalid_binding");
+        assert!(!error.retryable);
+        assert_eq!(error.message, "Binding source is invalid.");
+
+        let error = binding_error("binding_unavailable", "Binding could not be saved.", true);
+        assert_eq!(error.code, "binding_unavailable");
+        assert!(error.retryable);
+        assert!(!error.message.contains("StoreError"));
     }
 
     fn test_home() -> TempDir {

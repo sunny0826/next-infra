@@ -1,17 +1,19 @@
 use next_infra_core::{
-    Change, ChangeId, ChangeSubject, Connection, ConnectionId, ConnectorHealth, ConnectorType,
-    DomainError, EvidenceKey, ExternalId, FieldChange, FieldPath, Fingerprint, Lifecycle,
-    OriginRef, Relation, RelationEvidence, RelationId, RelationKind, Resource, ResourceHealth,
-    ResourceId, ResourceKind, SchemaVersion, Scope, SecretBackend, SecretKind, SecretRef,
+    BindingId, Change, ChangeId, ChangeSubject, Connection, ConnectionId, ConnectorHealth,
+    ConnectorType, DomainError, EvidenceKey, ExternalId, FieldChange, FieldPath, Fingerprint,
+    Lifecycle, OriginRef, Relation, RelationEvidence, RelationId, RelationKind, RelationVersion,
+    RelationVersionId, Resource, ResourceHealth, ResourceId, ResourceKind, ResourceVersion,
+    ResourceVersionId, RuleVersion, SchemaVersion, Scope, SecretBackend, SecretKind, SecretRef,
     SecretRefInput, StoreWriter, SyncCommit, SyncCoverage, SyncMode, SyncRun, SyncRunCounts,
     SyncRunId, SyncRunStatus, SyncTrigger, Timestamp,
 };
 use next_infra_query::dto::{
-    ConnectorCoverageLevelDto, EvidenceType, Freshness, RelationEvidenceDto,
+    ConnectorCoverageLevelDto, EvidenceType, Freshness, RelationEvidenceDto, TimelineItemDto,
+    TimelineOriginDto, TimelineVersionLinkDto,
 };
 use next_infra_query::service::{
     GetResourceRequest, GetTopologyRequest, QueryService, ResourceInclude, SearchResourcesRequest,
-    SyncStatusRequest,
+    SyncStatusRequest, TimelineRequest,
 };
 use next_infra_runtime::{
     CommittedQuerySource, ConnectorCatalogSnapshot, QueryContextSnapshot, QuerySchedule,
@@ -524,4 +526,258 @@ fn resource_detail_rejects_store_truncation_instead_of_returning_partial_relatio
     assert_eq!(error.code, "query_source_unavailable");
     assert!(!error.message.contains("truncated"));
     assert!(!error.message.contains("SQL"));
+}
+
+#[test]
+fn timeline_groups_origins_links_versions_and_paginates_without_duplicates() {
+    let run_id = "fixture-run";
+    let resources = vec![
+        resource("fixture-focus", 1_000, run_id),
+        resource("fixture-target", 1_000, run_id),
+    ];
+    let relations = vec![
+        provider_relation(
+            "fixture-relation",
+            "fixture-focus",
+            "fixture-target",
+            run_id,
+        ),
+        provider_relation(
+            "fixture-binding-relation",
+            "fixture-focus",
+            "fixture-target",
+            run_id,
+        ),
+    ];
+    let resource_version = ResourceVersion {
+        version_id: id("fixture-resource-version", ResourceVersionId::new),
+        resource_id: id("fixture-focus", ResourceId::new),
+        observed_at: timestamp(1_000),
+        sync_run_id: id(run_id, SyncRunId::new),
+        normalized_snapshot: json!({"state": "ready"}),
+        fingerprint: id("fingerprint-resource-version", Fingerprint::new),
+        schema_version: SchemaVersion::new(1).unwrap(),
+        change_summary: vec![],
+    };
+    let sync_run_origin = OriginRef::SyncRun {
+        sync_run_id: id(run_id, SyncRunId::new),
+    };
+    let relation_version = RelationVersion {
+        relation_version_id: id("fixture-relation-version", RelationVersionId::new),
+        relation_id: id("fixture-relation", RelationId::new),
+        observed_at: timestamp(1_000),
+        normalized_snapshot: json!({"kind": "fixture.depends_on"}),
+        fingerprint: id("fingerprint-relation-version", Fingerprint::new),
+        schema_version: SchemaVersion::new(1).unwrap(),
+        origin: sync_run_origin.clone(),
+    };
+    let binding_origin = OriginRef::Binding {
+        binding_id: id("fixture-binding", BindingId::new),
+    };
+    let binding_relation_version = RelationVersion {
+        relation_version_id: id("fixture-binding-relation-version", RelationVersionId::new),
+        relation_id: id("fixture-binding-relation", RelationId::new),
+        observed_at: timestamp(2_000),
+        normalized_snapshot: json!({"kind": "fixture.depends_on"}),
+        fingerprint: id("fingerprint-binding-relation-version", Fingerprint::new),
+        schema_version: SchemaVersion::new(1).unwrap(),
+        origin: binding_origin.clone(),
+    };
+    let changes = vec![
+        Change {
+            change_id: id("fixture-change-resource", ChangeId::new),
+            subject: ChangeSubject::Resource {
+                resource_id: id("fixture-focus", ResourceId::new),
+            },
+            observed_at: timestamp(1_000),
+            fields: vec![],
+            origin: sync_run_origin.clone(),
+        },
+        Change {
+            change_id: id("fixture-change-relation", ChangeId::new),
+            subject: ChangeSubject::Relation {
+                relation_id: id("fixture-relation", RelationId::new),
+            },
+            observed_at: timestamp(1_000),
+            fields: vec![],
+            origin: sync_run_origin,
+        },
+        Change {
+            change_id: id("fixture-change-binding", ChangeId::new),
+            subject: ChangeSubject::Binding {
+                binding_id: id("fixture-binding", BindingId::new),
+            },
+            observed_at: timestamp(2_000),
+            fields: vec![],
+            origin: binding_origin,
+        },
+        Change {
+            change_id: id("fixture-change-inference", ChangeId::new),
+            subject: ChangeSubject::Resource {
+                resource_id: id("fixture-focus", ResourceId::new),
+            },
+            observed_at: timestamp(3_000),
+            fields: vec![],
+            origin: OriginRef::Inference {
+                rule_version: id("fixture-rule-v1", RuleVersion::new),
+                input_resource_version_ids: vec![id(
+                    "fixture-resource-version",
+                    ResourceVersionId::new,
+                )],
+                input_relation_version_ids: vec![id(
+                    "fixture-relation-version",
+                    RelationVersionId::new,
+                )],
+            },
+        },
+    ];
+
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join("data").join("runtime-query.db");
+    let mut store = Store::open(&database).unwrap();
+    store.upsert_connection(connection()).unwrap();
+    store
+        .start_sync_run(run(SyncRunStatus::Running, run_id))
+        .unwrap();
+    store
+        .commit_sync(SyncCommit {
+            sync_run: run(SyncRunStatus::Succeeded, run_id),
+            resources,
+            resource_versions: vec![resource_version],
+            relations,
+            relation_versions: vec![relation_version, binding_relation_version],
+            changes,
+            cursor_after: Some(id("cursor-v1", next_infra_core::SyncCursor::new)),
+            missing_evidence: None,
+        })
+        .unwrap();
+    let service = service(SharedStore::new(store), 3_000, 1);
+
+    let page = service
+        .get_timeline(TimelineRequest {
+            limit: None,
+            cursor: None,
+        })
+        .unwrap();
+    assert_eq!(page.metadata.generated_at, "1970-01-01T00:00:03.000Z");
+    assert_eq!(page.groups.len(), 3);
+    assert_eq!(
+        &page.groups[0].origin,
+        &TimelineOriginDto::Inference {
+            rule_version: "fixture-rule-v1".into(),
+            input_resource_version_ids: vec!["fixture-resource-version".into()],
+            input_relation_version_ids: vec!["fixture-relation-version".into()],
+        }
+    );
+    assert_eq!(
+        &page.groups[1].origin,
+        &TimelineOriginDto::Binding {
+            binding_id: "fixture-binding".into(),
+        }
+    );
+    assert_eq!(
+        &page.groups[2].origin,
+        &TimelineOriginDto::SyncRun {
+            sync_run_id: "fixture-run".into(),
+        }
+    );
+    assert_eq!(page.groups[2].items.len(), 2);
+
+    let find_item = |change_id: &str| -> TimelineItemDto {
+        page.groups
+            .iter()
+            .flat_map(|group| group.items.iter())
+            .find(|item| item.change.change_id == change_id)
+            .unwrap_or_else(|| panic!("missing timeline item {change_id}"))
+            .clone()
+    };
+    let resource_item = find_item("fixture-change-resource");
+    assert_eq!(
+        resource_item.version_links,
+        vec![TimelineVersionLinkDto::Resource {
+            resource_id: "fixture-focus".into(),
+            resource_version_id: "fixture-resource-version".into(),
+        }]
+    );
+    let relation_item = find_item("fixture-change-relation");
+    assert_eq!(
+        relation_item.version_links,
+        vec![TimelineVersionLinkDto::Relation {
+            relation_id: "fixture-relation".into(),
+            relation_version_id: "fixture-relation-version".into(),
+        }]
+    );
+    let binding_item = find_item("fixture-change-binding");
+    assert_eq!(
+        binding_item.version_links,
+        vec![TimelineVersionLinkDto::Relation {
+            relation_id: "fixture-binding-relation".into(),
+            relation_version_id: "fixture-binding-relation-version".into(),
+        }]
+    );
+    assert!(
+        find_item("fixture-change-inference")
+            .version_links
+            .is_empty()
+    );
+
+    let first = service
+        .get_timeline(TimelineRequest {
+            limit: Some(3),
+            cursor: None,
+        })
+        .unwrap();
+    assert_eq!(
+        first
+            .groups
+            .iter()
+            .map(|group| group.items.len())
+            .sum::<usize>(),
+        3
+    );
+    let cursor = first.page_info.next_cursor().unwrap().to_owned();
+    let second = service
+        .get_timeline(TimelineRequest {
+            limit: Some(3),
+            cursor: Some(cursor),
+        })
+        .unwrap();
+    assert_eq!(
+        second
+            .groups
+            .iter()
+            .map(|group| group.items.len())
+            .sum::<usize>(),
+        1
+    );
+    assert!(second.page_info.next_cursor().is_none());
+    let first_ids = first
+        .groups
+        .iter()
+        .flat_map(|group| group.items.iter())
+        .map(|item| item.change.change_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let second_ids = second
+        .groups
+        .iter()
+        .flat_map(|group| group.items.iter())
+        .map(|item| item.change.change_id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert!(first_ids.is_disjoint(&second_ids));
+    assert_eq!(first_ids.len() + second_ids.len(), 4);
+
+    let over_limit = service
+        .get_timeline(TimelineRequest {
+            limit: Some(next_infra_query::service::MAX_TIMELINE_LIMIT + 1),
+            cursor: None,
+        })
+        .unwrap_err();
+    assert_eq!(over_limit.code, "invalid_request");
+    let zero_limit = service
+        .get_timeline(TimelineRequest {
+            limit: Some(0),
+            cursor: None,
+        })
+        .unwrap_err();
+    assert_eq!(zero_limit.code, "invalid_request");
 }

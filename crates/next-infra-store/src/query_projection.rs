@@ -3,8 +3,9 @@ use crate::projection::{
 };
 use crate::{Store, StoreError};
 use next_infra_core::{
-    Change, Connection, ConnectionId, ConnectorHealth, ConnectorType, Freshness, Relation,
-    Resource, ResourceHealth, ResourceId, SyncRun, Timestamp,
+    Change, ChangeSubject, Connection, ConnectionId, ConnectorHealth, ConnectorType, Freshness,
+    OriginRef, Relation, RelationVersionId, Resource, ResourceHealth, ResourceId,
+    ResourceVersionId, SyncRun, Timestamp,
 };
 use rusqlite::types::{Type, Value};
 use rusqlite::{Connection as SqliteConnection, OptionalExtension, params, params_from_iter};
@@ -109,6 +110,24 @@ pub struct RecentChangesProjectionPlan {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimelineVersionLinkProjection {
+    Resource {
+        resource_id: ResourceId,
+        resource_version_id: ResourceVersionId,
+    },
+    Relation {
+        relation_id: next_infra_core::RelationId,
+        relation_version_id: RelationVersionId,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimelineProjectionItem {
+    pub change: Change,
+    pub version_links: Vec<TimelineVersionLinkProjection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyncStatusProjection {
     pub connection: ProjectedConnection,
     pub recent_runs: Vec<SyncRun>,
@@ -166,6 +185,41 @@ impl Store {
     ) -> Result<ProjectionSnapshot<ProjectionPage<Change>>, StoreError> {
         validate_limit(plan.limit)?;
         self.with_projection_snapshot(|connection| read_recent_changes(connection, plan))
+    }
+
+    pub fn query_timeline(
+        &self,
+        limit: usize,
+        after: Option<String>,
+    ) -> Result<ProjectionSnapshot<ProjectionPage<TimelineProjectionItem>>, StoreError> {
+        validate_limit(limit)?;
+        self.with_projection_snapshot(|connection| {
+            let page = read_recent_changes(
+                connection,
+                &RecentChangesProjectionPlan {
+                    since_millis: None,
+                    resource_id: None,
+                    kinds: BTreeSet::new(),
+                    limit,
+                    after,
+                },
+            )?;
+            let items = page
+                .items
+                .into_iter()
+                .map(|change| {
+                    let version_links = read_timeline_version_links(connection, &change)?;
+                    Ok(TimelineProjectionItem {
+                        change,
+                        version_links,
+                    })
+                })
+                .collect::<Result<Vec<_>, StoreError>>()?;
+            Ok(ProjectionPage {
+                items,
+                next_after: page.next_after,
+            })
+        })
     }
 
     pub fn query_sync_status(
@@ -537,6 +591,90 @@ fn read_recent_changes(
     }
     let next_after = truncated.then(|| items.last().map(change_cursor)).flatten();
     Ok(ProjectionPage { items, next_after })
+}
+
+fn read_timeline_version_links(
+    connection: &SqliteConnection,
+    change: &Change,
+) -> Result<Vec<TimelineVersionLinkProjection>, StoreError> {
+    match &change.subject {
+        ChangeSubject::Resource { resource_id } => {
+            let OriginRef::SyncRun { sync_run_id } = &change.origin else {
+                return Ok(Vec::new());
+            };
+            let version_id = connection
+                .query_row(
+                    "SELECT version_id FROM resource_versions WHERE resource_id = ?1 AND observed_at = ?2 AND sync_run_id = ?3 ORDER BY version_id DESC LIMIT 1",
+                    params![resource_id.as_str(), change.observed_at.unix_millis(), sync_run_id.as_str()],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(StoreError::Sqlite)?;
+            version_id
+                .map(|value| {
+                    Ok(TimelineVersionLinkProjection::Resource {
+                        resource_id: resource_id.clone(),
+                        resource_version_id: wrapped(value).map_err(StoreError::Sqlite)?,
+                    })
+                })
+                .transpose()
+                .map(|value| value.into_iter().collect())
+        }
+        ChangeSubject::Relation { relation_id } => {
+            read_relation_version_links(connection, relation_id, change.observed_at, &change.origin)
+        }
+        ChangeSubject::Binding { .. } => {
+            let OriginRef::Binding { .. } = &change.origin else {
+                return Ok(Vec::new());
+            };
+            let mut statement = connection
+                .prepare(
+                    "SELECT relation_id, relation_version_id FROM relation_versions WHERE observed_at = ?1 AND origin_json = ?2 ORDER BY relation_id, relation_version_id",
+                )
+                .map_err(StoreError::Sqlite)?;
+            let origin = serde_json::to_string(&change.origin).map_err(StoreError::Json)?;
+            statement
+                .query_map(params![change.observed_at.unix_millis(), origin], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(StoreError::Sqlite)?
+                .map(|row| {
+                    let (relation_id, relation_version_id) = row.map_err(StoreError::Sqlite)?;
+                    Ok(TimelineVersionLinkProjection::Relation {
+                        relation_id: wrapped(relation_id).map_err(StoreError::Sqlite)?,
+                        relation_version_id: wrapped(relation_version_id)
+                            .map_err(StoreError::Sqlite)?,
+                    })
+                })
+                .collect()
+        }
+    }
+}
+
+fn read_relation_version_links(
+    connection: &SqliteConnection,
+    relation_id: &next_infra_core::RelationId,
+    observed_at: Timestamp,
+    origin: &OriginRef,
+) -> Result<Vec<TimelineVersionLinkProjection>, StoreError> {
+    let origin = serde_json::to_string(origin).map_err(StoreError::Json)?;
+    let version_id = connection
+        .query_row(
+            "SELECT relation_version_id FROM relation_versions WHERE relation_id = ?1 AND observed_at = ?2 AND origin_json = ?3 ORDER BY relation_version_id DESC LIMIT 1",
+            params![relation_id.as_str(), observed_at.unix_millis(), origin],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(StoreError::Sqlite)?;
+    version_id
+        .map(|value| {
+            Ok(TimelineVersionLinkProjection::Relation {
+                relation_id: relation_id.clone(),
+                relation_version_id: wrapped(value).map_err(StoreError::Sqlite)?,
+            })
+        })
+        .transpose()
+        .map(|value| value.into_iter().collect())
 }
 
 fn read_sync_status(

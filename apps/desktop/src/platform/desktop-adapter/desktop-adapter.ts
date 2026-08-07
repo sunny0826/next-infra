@@ -8,6 +8,8 @@ import type { ResourceHealth } from "../../generated/query/ResourceHealth";
 import type { ResourcePageDto } from "../../generated/query/ResourcePageDto";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TopologyDto } from "../../generated/query/TopologyDto";
+import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
+import type { BindingCommandResultDto } from "../../generated/query/BindingCommandResultDto";
 
 export interface SearchResourcesInput {
   readonly query?: string;
@@ -50,8 +52,53 @@ export interface SyncStatusInput {
   readonly recent_run_limit?: number;
 }
 
+export interface TimelineInput {
+  readonly limit?: number;
+  readonly cursor?: string;
+}
+
+export interface CreateBindingInput {
+  readonly source_resource_id: string;
+  readonly target_resource_id: string;
+  readonly kind: string;
+}
+
+export interface UpdateBindingInput extends CreateBindingInput {
+  readonly binding_id: string;
+}
+
+export interface DisableBindingInput {
+  readonly binding_id: string;
+}
+
 export interface ManualSyncResult {
   readonly sync_run_id: string;
+}
+
+export interface CreateGitHubConnectionInput {
+  readonly display_name: string;
+  readonly token: string;
+  readonly selected_repository_ids: readonly string[];
+}
+
+export interface GitHubRepositoryOption {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface CreateGitHubConnectionResult {
+  readonly connection_id: string;
+  readonly sync_run_id: string;
+}
+
+export interface ConnectionPurgeSummary {
+  readonly resources: number;
+  readonly relations: number;
+  readonly resource_versions: number;
+  readonly relation_versions: number;
+  readonly changes: number;
+  readonly bindings: number;
+  readonly sync_runs: number;
 }
 
 export interface LocalSettings {
@@ -75,6 +122,12 @@ export interface QueryInvalidation {
 
 export type Unsubscribe = () => void;
 
+export function desktopErrorCode(error: unknown): string {
+  return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+    ? error.code
+    : "desktop_transport_failed";
+}
+
 export interface DesktopAdapter {
   listConnections(): Promise<ConnectionSnapshotDto>;
   searchResources(input?: SearchResourcesInput): Promise<ResourcePageDto>;
@@ -82,8 +135,16 @@ export interface DesktopAdapter {
   getTopology(input: GetTopologyInput): Promise<TopologyDto>;
   getHealthSummary(): Promise<HealthSummaryDto>;
   getRecentChanges(input?: RecentChangesInput): Promise<ChangePageDto>;
+  getTimeline(input?: TimelineInput): Promise<TimelinePageDto>;
+  createBinding(input: CreateBindingInput): Promise<BindingCommandResultDto>;
+  updateBinding(input: UpdateBindingInput): Promise<BindingCommandResultDto>;
+  disableBinding(input: DisableBindingInput): Promise<BindingCommandResultDto>;
   getSyncStatus(input: SyncStatusInput): Promise<SyncStatusDto>;
   listConnectorCoverage(): Promise<ConnectorCoverageSnapshotDto>;
+  discoverGitHubRepositories(token: string): Promise<readonly GitHubRepositoryOption[]>;
+  createGitHubConnection(input: CreateGitHubConnectionInput): Promise<CreateGitHubConnectionResult>;
+  previewGitHubConnectionPurge(connectionId: string): Promise<ConnectionPurgeSummary>;
+  purgeGitHubConnection(connectionId: string): Promise<ConnectionPurgeSummary>;
   manualSync(connectionId: string): Promise<ManualSyncResult>;
   getLocalSettings(): Promise<LocalSettings>;
   updateLocalSettings(settings: LocalSettings): Promise<LocalSettings>;

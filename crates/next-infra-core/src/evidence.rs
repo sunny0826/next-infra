@@ -68,5 +68,7 @@ pub enum OriginRef {
     Inference {
         rule_version: RuleVersion,
         input_resource_version_ids: Vec<ResourceVersionId>,
+        #[serde(default)]
+        input_relation_version_ids: Vec<RelationVersionId>,
     },
 }

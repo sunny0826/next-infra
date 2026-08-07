@@ -16,10 +16,23 @@ tauri-build = { workspace = true }
 [dependencies]
 libc = { workspace = true }
 next-infra-core = { workspace = true }
+next-infra-connector-catalog = { workspace = true }
+next-infra-connector-cloudflare = { workspace = true }
+next-infra-connector-dokploy = { workspace = true }
+next-infra-connector-github = { workspace = true }
+next-infra-connector-api = { workspace = true }
+next-infra-connector-supabase-managed = { workspace = true }
+next-infra-connector-supabase-self-hosted = { workspace = true }
+next-infra-connector-aliyun = { workspace = true }
+next-infra-connector-tencent = { workspace = true }
+next-infra-binding = { workspace = true }
 next-infra-host-integration = { workspace = true }
 next-infra-local-rpc = { workspace = true }
+next-infra-normalizer = { workspace = true }
 next-infra-query = { workspace = true }
 next-infra-runtime = { workspace = true }
+next-infra-store = { workspace = true }
+next-infra-sync = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
@@ -36,6 +49,7 @@ objc2-foundation = { workspace = true }
 objc2-local-authentication = { workspace = true }
 security-framework = { workspace = true }
 security-framework-sys = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

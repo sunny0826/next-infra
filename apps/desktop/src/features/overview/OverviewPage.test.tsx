@@ -21,16 +21,16 @@ function renderPage() {
 describe("OverviewPage", () => {
   it("separates expired facts from resource health and connector failures", async () => {
     renderPage();
-    expect(await screen.findAllByText("Saved fact is expired")).not.toHaveLength(0);
-    expect(screen.getByText("unreachable")).toBeInTheDocument();
-    expect(screen.getAllByText("Health").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Freshness").length).toBeGreaterThan(0);
+    expect(await screen.findAllByText("已保存事实已过期")).not.toHaveLength(0);
+    expect(screen.getByText("不可达")).toBeInTheDocument();
+    expect(screen.getAllByText("健康度").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("新鲜度").length).toBeGreaterThan(0);
   });
 
   it("does not invent a critical path from fixture activity", async () => {
     renderPage();
     expect(
-      await screen.findByText(/No critical path is pinned/),
+      await screen.findByText(/当前没有固定关键路径/),
     ).toBeInTheDocument();
   });
 

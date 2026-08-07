@@ -8,6 +8,15 @@ members = [
   "crates/next-infra-connector-contract-tests",
   "crates/next-infra-connector-catalog",
   "crates/next-infra-connector-github",
+  "crates/next-infra-connector-dokploy",
+  "crates/next-infra-connector-cloudflare",
+  "crates/next-infra-connector-supabase-managed",
+  "crates/next-infra-connector-supabase-self-hosted",
+  "crates/next-infra-connector-aliyun",
+  "crates/next-infra-connector-tencent",
+  "crates/next-infra-connector-ssh",
+  "crates/next-infra-binding",
+  "crates/next-infra-inference",
   "crates/next-infra-sync",
   "crates/next-infra-query",
   "crates/next-infra-runtime",
@@ -18,6 +27,7 @@ members = [
   "apps/mcp-bridge",
   "tests/integration/store-sync",
   "tests/integration/connector-pipeline",
+  "tests/integration/topology/repo-deployment-host-dns",
 ]
 resolver = "3"
 
@@ -36,6 +46,15 @@ next-infra-connector-fixture = { path = "crates/next-infra-connector-fixture", v
 next-infra-connector-contract-tests = { path = "crates/next-infra-connector-contract-tests", version = "=0.1.0" }
 next-infra-connector-catalog = { path = "crates/next-infra-connector-catalog", version = "=0.1.0" }
 next-infra-connector-github = { path = "crates/next-infra-connector-github", version = "=0.1.0" }
+next-infra-connector-dokploy = { path = "crates/next-infra-connector-dokploy", version = "=0.1.0" }
+next-infra-connector-cloudflare = { path = "crates/next-infra-connector-cloudflare", version = "=0.1.0" }
+next-infra-connector-aliyun = { path = "crates/next-infra-connector-aliyun", version = "=0.1.0" }
+next-infra-connector-tencent = { path = "crates/next-infra-connector-tencent", version = "=0.1.0" }
+next-infra-connector-supabase-managed = { path = "crates/next-infra-connector-supabase-managed", version = "=0.1.0" }
+next-infra-connector-supabase-self-hosted = { path = "crates/next-infra-connector-supabase-self-hosted", version = "=0.1.0" }
+next-infra-connector-ssh = { path = "crates/next-infra-connector-ssh", version = "=0.1.0" }
+next-infra-binding = { path = "crates/next-infra-binding", version = "=0.1.0" }
+next-infra-inference = { path = "crates/next-infra-inference", version = "=0.1.0" }
 next-infra-sync = { path = "crates/next-infra-sync", version = "=0.1.0" }
 next-infra-query = { path = "crates/next-infra-query", version = "=0.1.0" }
 next-infra-runtime = { path = "crates/next-infra-runtime", version = "=0.1.0" }
@@ -58,6 +77,9 @@ async-trait = { version = "=0.1.91" }
 rusqlite = { version = "=0.39.0", features = ["bundled"] }
 tempfile = { version = "=3.27.0" }
 sha2 = { version = "=0.11.0" }
+hmac = { version = "=0.12.1" }
+sha2-hmac = { package = "sha2", version = "=0.10.9" }
+sha1-hmac = { package = "sha1", version = "=0.10.6" }
 core-foundation = { version = "=0.10.1" }
 block2 = { version = "=0.6.2" }
 objc2 = { version = "=0.6.4" }
@@ -68,3 +90,4 @@ security-framework = { version = "=3.7.0", features = ["OSX_10_15"] }
 security-framework-sys = { version = "=2.17.0", features = ["OSX_10_15"] }
 reqwest = { version = "=0.12.24", default-features = false, features = ["json", "rustls-tls"] }
 url = { version = "=2.5.8" }
+uuid = { version = "=1.24.0", features = ["v4"] }

@@ -11,39 +11,34 @@ describe("Goal 3 shell semantics", () => {
     renderDesktopFixture();
 
     const navigation = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(navigation).getByRole("button", { name: "Overview" })).toHaveAttribute(
+    expect(within(navigation).getByRole("button", { name: "概览" })).toHaveAttribute(
       "aria-current",
       "page",
     );
-    expect(screen.getByRole("combobox", { name: "Search local infrastructure" })).toHaveAttribute(
+    expect(screen.getByRole("combobox", { name: "搜索本地基础设施" })).toHaveAttribute(
       "aria-keyshortcuts",
       "Meta+K Control+K",
     );
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.getByRole("complementary", { name: "Evidence inspector" })).toBeInTheDocument();
-    expect(screen.getByRole("contentinfo", { name: "Control Plane Runtime" })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "证据检查器" })).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo", { name: "控制平面运行时" })).toBeInTheDocument();
     expect(
       await screen.findByRole("button", {
-        name: /Fixture Database Beta.*Freshness expired/,
+        name: /Fixture Database Beta.*已过期/,
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("unreachable")).toBeInTheDocument();
-    expect(screen.getByText("disabled")).toBeInTheDocument();
+    expect(screen.getByText("不可达")).toBeInTheDocument();
+    expect(screen.getByText("已禁用")).toBeInTheDocument();
   });
 
-  it("labels Timeline as unavailable instead of an empty result", async () => {
+  it("labels Timeline as a structured committed-change result", async () => {
     const user = userEvent.setup();
     renderDesktopFixture();
 
-    await user.click(screen.getByRole("button", { name: "Timeline" }));
+    await user.click(screen.getByRole("button", { name: "时间线" }));
     expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "Timeline unavailable until Goal 7",
-      }),
+      await screen.findByRole("heading", { level: 1, name: "时间线" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("This route is intentionally unavailable, not an empty query result."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("没有已持久化的变更。")).toBeInTheDocument();
   });
 });

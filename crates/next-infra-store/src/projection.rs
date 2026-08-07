@@ -4,6 +4,17 @@ use rusqlite::{OptionalExtension, Row, Transaction, params};
 use serde::{Serialize, de::DeserializeOwned};
 use std::collections::BTreeMap;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ConnectionPurgeSummary {
+    pub resources: u64,
+    pub relations: u64,
+    pub resource_versions: u64,
+    pub relation_versions: u64,
+    pub changes: u64,
+    pub bindings: u64,
+    pub sync_runs: u64,
+}
+
 impl StoreReader for Store {
     type Error = StoreError;
 
@@ -124,6 +135,314 @@ impl StoreReader for Store {
             .map_err(StoreError::Sqlite)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StoreError::Sqlite)
+    }
+}
+
+impl Store {
+    pub fn preview_connection_purge(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Result<Option<ConnectionPurgeSummary>, StoreError> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(StoreError::Sqlite)?;
+        let summary = connection_purge_summary(&transaction, connection_id)?;
+        transaction.commit().map_err(StoreError::Sqlite)?;
+        Ok(summary)
+    }
+
+    pub fn purge_connection(
+        &mut self,
+        connection_id: &ConnectionId,
+    ) -> Result<ConnectionPurgeSummary, StoreError> {
+        let transaction = self.connection.transaction().map_err(StoreError::Sqlite)?;
+        let summary = connection_purge_summary(&transaction, connection_id)?
+            .ok_or_else(|| StoreError::Contract("connection does not exist for purge".into()))?;
+
+        transaction
+            .execute(
+                "DELETE FROM inference_outputs WHERE relation_id IN (SELECT relation_id FROM relations WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1))",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM relation_versions WHERE relation_id IN (SELECT relation_id FROM relations WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1))",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM changes WHERE (subject_type = 'resource' AND subject_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)) OR (subject_type = 'relation' AND subject_id IN (SELECT relation_id FROM relations WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1))) OR (subject_type = 'binding' AND subject_id IN (SELECT binding_id FROM bindings WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)))",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM bindings WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM relations WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM resource_versions WHERE resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM resources WHERE connection_id = ?1",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM connector_state WHERE connection_id = ?1",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "DELETE FROM sync_runs WHERE connection_id = ?1",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        let removed = transaction
+            .execute(
+                "DELETE FROM connections WHERE connection_id = ?1",
+                params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        if removed != 1 {
+            return Err(StoreError::Contract(
+                "connection disappeared during purge".into(),
+            ));
+        }
+        bump_projection_metadata(&transaction)?;
+        transaction.commit().map_err(StoreError::Sqlite)?;
+        Ok(summary)
+    }
+}
+
+fn connection_purge_summary(
+    connection: &rusqlite::Connection,
+    connection_id: &ConnectionId,
+) -> Result<Option<ConnectionPurgeSummary>, StoreError> {
+    let exists = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM connections WHERE connection_id = ?1)",
+            params![connection_id.as_str()],
+            |row| row.get::<_, bool>(0),
+        )
+        .map_err(StoreError::Sqlite)?;
+    if !exists {
+        return Ok(None);
+    }
+    Ok(Some(ConnectionPurgeSummary {
+        resources: purge_count(
+            connection,
+            "SELECT COUNT(*) FROM resources WHERE connection_id = ?1",
+            connection_id,
+        )?,
+        relations: purge_count(
+            connection,
+            "SELECT COUNT(*) FROM relations WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)",
+            connection_id,
+        )?,
+        resource_versions: purge_count(
+            connection,
+            "SELECT COUNT(*) FROM resource_versions WHERE resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)",
+            connection_id,
+        )?,
+        relation_versions: purge_count(
+            connection,
+            "SELECT COUNT(*) FROM relation_versions WHERE relation_id IN (SELECT relation_id FROM relations WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1))",
+            connection_id,
+        )?,
+        changes: purge_count(
+            connection,
+            "SELECT COUNT(*) FROM changes WHERE (subject_type = 'resource' AND subject_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)) OR (subject_type = 'relation' AND subject_id IN (SELECT relation_id FROM relations WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1))) OR (subject_type = 'binding' AND subject_id IN (SELECT binding_id FROM bindings WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)))",
+            connection_id,
+        )?,
+        bindings: purge_count(
+            connection,
+            "SELECT COUNT(*) FROM bindings WHERE source_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1) OR target_resource_id IN (SELECT resource_id FROM resources WHERE connection_id = ?1)",
+            connection_id,
+        )?,
+        sync_runs: purge_count(
+            connection,
+            "SELECT COUNT(*) FROM sync_runs WHERE connection_id = ?1",
+            connection_id,
+        )?,
+    }))
+}
+
+fn purge_count(
+    connection: &rusqlite::Connection,
+    sql: &str,
+    connection_id: &ConnectionId,
+) -> Result<u64, StoreError> {
+    let count: i64 = connection
+        .query_row(sql, params![connection_id.as_str()], |row| row.get(0))
+        .map_err(StoreError::Sqlite)?;
+    u64::try_from(count).map_err(|_| StoreError::Contract("negative purge count".into()))
+}
+
+impl BindingStore for Store {
+    fn get_binding(&self, id: &BindingId) -> Result<Option<Binding>, Self::Error> {
+        self.connection
+            .query_row(
+                "SELECT binding_id, source_resource_id, target_resource_id, kind, status, created_at, updated_at FROM bindings WHERE binding_id = ?1",
+                params![id.as_str()],
+                read_binding,
+            )
+            .optional()
+            .map_err(StoreError::Sqlite)
+    }
+
+    fn list_bindings(&self) -> Result<Vec<Binding>, Self::Error> {
+        let mut statement = self
+            .connection
+            .prepare("SELECT binding_id, source_resource_id, target_resource_id, kind, status, created_at, updated_at FROM bindings ORDER BY binding_id")
+            .map_err(StoreError::Sqlite)?;
+        statement
+            .query_map([], read_binding)
+            .map_err(StoreError::Sqlite)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::Sqlite)
+    }
+
+    fn commit_binding(&mut self, commit: BindingCommit) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction().map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "INSERT INTO bindings(binding_id, source_resource_id, target_resource_id, kind, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(binding_id) DO UPDATE SET source_resource_id = excluded.source_resource_id, target_resource_id = excluded.target_resource_id, kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at",
+                params![
+                    commit.binding.binding_id.as_str(),
+                    commit.binding.source_resource_id.as_str(),
+                    commit.binding.target_resource_id.as_str(),
+                    commit.binding.kind.as_str(),
+                    enum_text(&commit.binding.status)?,
+                    commit.binding.created_at.unix_millis(),
+                    commit.binding.updated_at.unix_millis(),
+                ],
+            )
+            .map_err(StoreError::Sqlite)?;
+        for relation in &commit.relations {
+            upsert_relation(&transaction, relation)?;
+        }
+        for version in &commit.relation_versions {
+            insert_relation_version(&transaction, version)?;
+        }
+        for change in &commit.changes {
+            insert_change(&transaction, change)?;
+        }
+        transaction
+            .execute(
+                "UPDATE projection_metadata SET committed_revision = committed_revision + 1, committed_at = ?1 WHERE singleton_id = 1",
+                params![commit.binding.updated_at.unix_millis()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction.commit().map_err(StoreError::Sqlite)
+    }
+}
+
+impl InferenceStore for Store {
+    fn resource_version_exists(&self, id: &ResourceVersionId) -> Result<bool, Self::Error> {
+        self.connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM resource_versions WHERE version_id = ?1)",
+                params![id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::Sqlite)
+    }
+
+    fn relation_version_exists(&self, id: &RelationVersionId) -> Result<bool, Self::Error> {
+        self.connection
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM relation_versions WHERE relation_version_id = ?1)",
+                params![id.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(StoreError::Sqlite)
+    }
+
+    fn inferred_relations_for_rule(
+        &self,
+        rule_version: &RuleVersion,
+    ) -> Result<Vec<Relation>, Self::Error> {
+        let mut statement = self
+            .connection
+            .prepare(
+                "SELECT relation_id, source_resource_id, target_resource_id, kind, evidence_key, evidence_json, first_seen_at, last_seen_at, lifecycle FROM relations WHERE evidence_type = 'inferred' AND json_extract(evidence_json, '$.rule_version') = ?1 ORDER BY relation_id",
+            )
+            .map_err(StoreError::Sqlite)?;
+        statement
+            .query_map(params![rule_version.as_str()], read_relation)
+            .map_err(StoreError::Sqlite)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::Sqlite)
+    }
+
+    fn commit_inference(&mut self, commit: InferenceCommit) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction().map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "INSERT INTO inference_runs(inference_run_id, rule_version, started_at, finished_at, status, input_resource_version_ids_json, input_relation_version_ids_json, summary_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    commit.run.inference_run_id.as_str(),
+                    commit.run.rule_version.as_str(),
+                    commit.run.started_at.unix_millis(),
+                    timestamp_option(commit.run.finished_at),
+                    enum_text(&commit.run.status)?,
+                    json_text(&commit.run.input_resource_version_ids)?,
+                    json_text(&commit.run.input_relation_version_ids)?,
+                    json_text(&serde_json::json!({ "output_relation_ids": commit.run.output_relation_ids }))?,
+                ],
+            )
+            .map_err(StoreError::Sqlite)?;
+        for relation in &commit.relations {
+            upsert_relation(&transaction, relation)?;
+        }
+        for version in &commit.relation_versions {
+            insert_relation_version(&transaction, version)?;
+        }
+        for change in &commit.changes {
+            insert_change(&transaction, change)?;
+        }
+        for relation_id in &commit.run.output_relation_ids {
+            let evidence_key = commit
+                .relations
+                .iter()
+                .find(|relation| &relation.relation_id == relation_id)
+                .map(|relation| relation.evidence_key.as_str())
+                .ok_or_else(|| {
+                    StoreError::Contract(
+                        "inference output relation is missing from the commit".into(),
+                    )
+                })?;
+            transaction
+                .execute(
+                    "INSERT INTO inference_outputs(inference_run_id, relation_id, evidence_key) VALUES (?1, ?2, ?3)",
+                    params![commit.run.inference_run_id.as_str(), relation_id.as_str(), evidence_key],
+                )
+                .map_err(StoreError::Sqlite)?;
+        }
+        transaction
+            .execute(
+                "UPDATE projection_metadata SET committed_revision = committed_revision + 1, committed_at = ?1 WHERE singleton_id = 1",
+                params![commit.run.finished_at.unwrap_or(commit.run.started_at).unix_millis()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction.commit().map_err(StoreError::Sqlite)
     }
 }
 
@@ -364,6 +683,7 @@ fn insert_change(transaction: &Transaction<'_>, change: &Change) -> Result<usize
     let (subject_type, subject_id) = match &change.subject {
         ChangeSubject::Resource { resource_id } => ("resource", resource_id.as_str()),
         ChangeSubject::Relation { relation_id } => ("relation", relation_id.as_str()),
+        ChangeSubject::Binding { binding_id } => ("binding", binding_id.as_str()),
     };
     transaction.execute(
         "INSERT OR IGNORE INTO changes(change_id, subject_type, subject_id, observed_at, fields_json, origin_json) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -450,6 +770,9 @@ pub(crate) fn read_change(row: &Row<'_>) -> rusqlite::Result<Change> {
         "relation" => ChangeSubject::Relation {
             relation_id: wrapped(subject_id)?,
         },
+        "binding" => ChangeSubject::Binding {
+            binding_id: wrapped(subject_id)?,
+        },
         _ => {
             return Err(rusqlite::Error::FromSqlConversionFailure(
                 1,
@@ -464,6 +787,18 @@ pub(crate) fn read_change(row: &Row<'_>) -> rusqlite::Result<Change> {
         observed_at: timestamp(row.get(3)?)?,
         fields: json(row.get(4)?)?,
         origin: json(row.get(5)?)?,
+    })
+}
+
+fn read_binding(row: &Row<'_>) -> rusqlite::Result<Binding> {
+    Ok(Binding {
+        binding_id: wrapped(row.get(0)?)?,
+        source_resource_id: wrapped(row.get(1)?)?,
+        target_resource_id: wrapped(row.get(2)?)?,
+        kind: wrapped(row.get(3)?)?,
+        status: enum_value(row.get(4)?)?,
+        created_at: timestamp(row.get(5)?)?,
+        updated_at: timestamp(row.get(6)?)?,
     })
 }
 
@@ -870,6 +1205,254 @@ mod tests {
             })
             .unwrap();
         (directory, store)
+    }
+
+    #[test]
+    fn connection_purge_removes_only_the_selected_connection_snapshot() {
+        let (_directory, mut store) = query_projection_store();
+        let connection_id = id("fixture-connection", ConnectionId::new);
+        let mut retained = connection();
+        retained.connection_id = id("retained-connection", ConnectionId::new);
+        retained.display_name = "Retained connection".into();
+        store.upsert_connection(retained.clone()).unwrap();
+
+        let summary = store
+            .preview_connection_purge(&connection_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            summary,
+            ConnectionPurgeSummary {
+                resources: 3,
+                relations: 1,
+                resource_versions: 0,
+                relation_versions: 0,
+                changes: 2,
+                bindings: 0,
+                sync_runs: 1,
+            }
+        );
+        let revision_before = store.projection_metadata().unwrap().committed_revision;
+
+        assert_eq!(store.purge_connection(&connection_id).unwrap(), summary);
+        assert_eq!(store.get_connection(&connection_id).unwrap(), None);
+        assert_eq!(
+            store.get_connection(&retained.connection_id).unwrap(),
+            Some(retained)
+        );
+        assert!(
+            store
+                .query_connections()
+                .unwrap()
+                .body
+                .iter()
+                .all(|connection| { connection.connection_id.as_str() != connection_id.as_str() })
+        );
+        assert_eq!(
+            store.projection_metadata().unwrap().committed_revision,
+            revision_before + 1
+        );
+        assert_eq!(
+            store.preview_connection_purge(&connection_id).unwrap(),
+            None
+        );
+        let foreign_key_violation: Option<String> = store
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
+            .optional()
+            .unwrap();
+        assert_eq!(foreign_key_violation, None);
+    }
+
+    fn topology_store() -> (TempDir, Store, Resource, Resource) {
+        let (directory, mut store) = store();
+        store.upsert_connection(connection()).unwrap();
+        store
+            .start_sync_run(run(SyncRunStatus::Running, None))
+            .unwrap();
+
+        let mut source = resource();
+        source.resource_id = id("fixture-resource-source", ResourceId::new);
+        source.external_id = id("external-source", ExternalId::new);
+        source.name = "source".into();
+        source.display_name = "Fixture Source".into();
+
+        let mut target = resource();
+        target.resource_id = id("fixture-resource-target", ResourceId::new);
+        target.external_id = id("external-target", ExternalId::new);
+        target.name = "target".into();
+        target.display_name = "Fixture Target".into();
+
+        store
+            .commit_sync(SyncCommit {
+                sync_run: run(SyncRunStatus::Succeeded, Some(timestamp_at(3))),
+                resources: vec![source.clone(), target.clone()],
+                resource_versions: Vec::new(),
+                relations: Vec::new(),
+                relation_versions: Vec::new(),
+                changes: Vec::new(),
+                cursor_after: Some(id("cursor-after", SyncCursor::new)),
+                missing_evidence: None,
+            })
+            .unwrap();
+        (directory, store, source, target)
+    }
+
+    fn binding(source: &Resource, target: &Resource) -> Binding {
+        Binding {
+            binding_id: id("fixture-binding", BindingId::new),
+            source_resource_id: source.resource_id.clone(),
+            target_resource_id: target.resource_id.clone(),
+            kind: RelationKind::new("fixture.configured").unwrap(),
+            status: BindingStatus::Active,
+            created_at: timestamp_at(10),
+            updated_at: timestamp_at(11),
+        }
+    }
+
+    fn configured_relation(binding: &Binding, lifecycle: Lifecycle, at: i64) -> Relation {
+        Relation {
+            relation_id: id("fixture-configured-relation", RelationId::new),
+            source_resource_id: binding.source_resource_id.clone(),
+            target_resource_id: binding.target_resource_id.clone(),
+            kind: binding.kind.clone(),
+            evidence_key: id("fixture-configured-evidence", EvidenceKey::new),
+            evidence: RelationEvidence::Configured {
+                binding_id: binding.binding_id.clone(),
+            },
+            first_seen_at: binding.created_at,
+            last_seen_at: timestamp_at(at),
+            lifecycle,
+        }
+    }
+
+    fn configured_relation_version(
+        relation: &Relation,
+        version_id: &str,
+        binding_id: &BindingId,
+        observed_at: i64,
+    ) -> RelationVersion {
+        RelationVersion {
+            relation_version_id: id(version_id, RelationVersionId::new),
+            relation_id: relation.relation_id.clone(),
+            observed_at: timestamp_at(observed_at),
+            normalized_snapshot: json!({"relation": "configured"}),
+            fingerprint: id("fixture-configured-fingerprint", Fingerprint::new),
+            schema_version: SchemaVersion::new(1).unwrap(),
+            origin: OriginRef::Binding {
+                binding_id: binding_id.clone(),
+            },
+        }
+    }
+
+    fn binding_change(binding: &Binding, change_id: &str, observed_at: i64) -> Change {
+        Change {
+            change_id: id(change_id, ChangeId::new),
+            subject: ChangeSubject::Binding {
+                binding_id: binding.binding_id.clone(),
+            },
+            observed_at: timestamp_at(observed_at),
+            fields: vec![FieldChange {
+                path: FieldPath::new("status").unwrap(),
+                before: None,
+                after: Some(json!("active")),
+            }],
+            origin: OriginRef::Binding {
+                binding_id: binding.binding_id.clone(),
+            },
+        }
+    }
+
+    fn inferred_relation(
+        relation_id: &str,
+        rule_version: &RuleVersion,
+        source: &Resource,
+        target: &Resource,
+        lifecycle: Lifecycle,
+        at: i64,
+        provenance: (&[ResourceVersionId], &[RelationVersionId]),
+    ) -> Relation {
+        Relation {
+            relation_id: id(relation_id, RelationId::new),
+            source_resource_id: source.resource_id.clone(),
+            target_resource_id: target.resource_id.clone(),
+            kind: RelationKind::new("fixture.inferred").unwrap(),
+            evidence_key: id(&format!("fixture-evidence-{relation_id}"), EvidenceKey::new),
+            evidence: RelationEvidence::Inferred {
+                rule_version: rule_version.clone(),
+                input_resource_version_ids: provenance.0.to_vec(),
+                input_relation_version_ids: provenance.1.to_vec(),
+                confidence: Confidence::from_basis_points(8_750).unwrap(),
+            },
+            first_seen_at: timestamp_at(at),
+            last_seen_at: timestamp_at(at),
+            lifecycle,
+        }
+    }
+
+    fn inference_provenance(
+        relation: &Relation,
+    ) -> (RuleVersion, Vec<ResourceVersionId>, Vec<RelationVersionId>) {
+        match &relation.evidence {
+            RelationEvidence::Inferred {
+                rule_version,
+                input_resource_version_ids,
+                input_relation_version_ids,
+                ..
+            } => (
+                rule_version.clone(),
+                input_resource_version_ids.clone(),
+                input_relation_version_ids.clone(),
+            ),
+            _ => panic!("fixture relation must be inferred"),
+        }
+    }
+
+    fn inference_relation_version(
+        relation: &Relation,
+        version_id: &str,
+        observed_at: i64,
+    ) -> RelationVersion {
+        let (rule_version, input_resource_version_ids, input_relation_version_ids) =
+            inference_provenance(relation);
+        RelationVersion {
+            relation_version_id: id(version_id, RelationVersionId::new),
+            relation_id: relation.relation_id.clone(),
+            observed_at: timestamp_at(observed_at),
+            normalized_snapshot: json!({"relation": relation.relation_id.as_str()}),
+            fingerprint: id(
+                &format!("fixture-fingerprint-{version_id}"),
+                Fingerprint::new,
+            ),
+            schema_version: SchemaVersion::new(1).unwrap(),
+            origin: OriginRef::Inference {
+                rule_version,
+                input_resource_version_ids,
+                input_relation_version_ids,
+            },
+        }
+    }
+
+    fn inference_change(relation: &Relation, change_id: &str, observed_at: i64) -> Change {
+        let (rule_version, input_resource_version_ids, input_relation_version_ids) =
+            inference_provenance(relation);
+        Change {
+            change_id: id(change_id, ChangeId::new),
+            subject: ChangeSubject::Relation {
+                relation_id: relation.relation_id.clone(),
+            },
+            observed_at: timestamp_at(observed_at),
+            fields: vec![FieldChange {
+                path: FieldPath::new("relation.lifecycle").unwrap(),
+                before: None,
+                after: Some(json!(relation.lifecycle)),
+            }],
+            origin: OriginRef::Inference {
+                rule_version,
+                input_resource_version_ids,
+                input_relation_version_ids,
+            },
+        }
     }
 
     #[test]
@@ -1561,5 +2144,444 @@ mod tests {
             after: Some("not-a-change-cursor".into()),
         };
         assert!(store.query_recent_changes(&invalid_cursor).is_err());
+    }
+
+    #[test]
+    fn binding_commit_persists_provenance_and_advances_revision() {
+        let (_directory, mut store, source, target) = topology_store();
+        let binding = binding(&source, &target);
+        let relation = configured_relation(&binding, Lifecycle::Active, 11);
+        let relation_version = configured_relation_version(
+            &relation,
+            "fixture-configured-version",
+            &binding.binding_id,
+            11,
+        );
+        let change = binding_change(&binding, "fixture-binding-change", 11);
+        let revision_before = store.projection_metadata().unwrap().committed_revision;
+
+        store
+            .commit_binding(BindingCommit {
+                binding: binding.clone(),
+                relations: vec![relation.clone()],
+                relation_versions: vec![relation_version.clone()],
+                changes: vec![change.clone()],
+            })
+            .unwrap();
+
+        assert_eq!(
+            store.projection_metadata().unwrap().committed_revision,
+            revision_before + 1
+        );
+        assert_eq!(
+            store.get_binding(&binding.binding_id).unwrap(),
+            Some(binding)
+        );
+        assert_eq!(
+            store.get_relation(&relation.relation_id).unwrap(),
+            Some(relation)
+        );
+        assert!(
+            store
+                .relation_version_exists(&relation_version.relation_version_id)
+                .unwrap()
+        );
+
+        let persisted_origin: String = store
+            .connection
+            .query_row(
+                "SELECT origin_json FROM relation_versions WHERE relation_version_id = ?1",
+                params![relation_version.relation_version_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<OriginRef>(&persisted_origin).unwrap(),
+            relation_version.origin
+        );
+
+        let persisted_change = store
+            .connection
+            .query_row(
+                "SELECT change_id, subject_type, subject_id, observed_at, fields_json, origin_json FROM changes WHERE change_id = ?1",
+                params![change.change_id.as_str()],
+                read_change,
+            )
+            .unwrap();
+        assert_eq!(persisted_change, change);
+    }
+
+    #[test]
+    fn failed_binding_commit_rolls_back_binding_relations_versions_changes_and_revision() {
+        let (_directory, mut store, source, target) = topology_store();
+        let binding = binding(&source, &target);
+        let relation = configured_relation(&binding, Lifecycle::Active, 11);
+        let valid_version = configured_relation_version(
+            &relation,
+            "fixture-configured-version-valid",
+            &binding.binding_id,
+            11,
+        );
+        let mut invalid_version = configured_relation_version(
+            &relation,
+            "fixture-configured-version-invalid",
+            &binding.binding_id,
+            12,
+        );
+        invalid_version.relation_id = id("missing-configured-relation", RelationId::new);
+        let change = binding_change(&binding, "fixture-binding-change-failed", 11);
+        let revision_before = store.projection_metadata().unwrap().committed_revision;
+
+        assert!(
+            store
+                .commit_binding(BindingCommit {
+                    binding: binding.clone(),
+                    relations: vec![relation.clone()],
+                    relation_versions: vec![valid_version, invalid_version],
+                    changes: vec![change],
+                })
+                .is_err()
+        );
+
+        assert_eq!(
+            store.projection_metadata().unwrap().committed_revision,
+            revision_before
+        );
+        assert!(store.get_binding(&binding.binding_id).unwrap().is_none());
+        assert!(store.get_relation(&relation.relation_id).unwrap().is_none());
+        let counts: (i64, i64, i64, i64) = store
+            .connection
+            .query_row(
+                "SELECT (SELECT count(*) FROM relation_versions), (SELECT count(*) FROM changes), (SELECT count(*) FROM bindings), (SELECT count(*) FROM relations)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(counts, (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn inference_commit_persists_outputs_provenance_and_advances_revision() {
+        let (_directory, mut store, source, target) = topology_store();
+        let rule_version = id("fixture-rule-v1", RuleVersion::new);
+        let input_resource_version_ids =
+            vec![id("fixture-input-resource-version", ResourceVersionId::new)];
+        let input_relation_version_ids =
+            vec![id("fixture-input-relation-version", RelationVersionId::new)];
+        let relation = inferred_relation(
+            "fixture-inferred-relation",
+            &rule_version,
+            &source,
+            &target,
+            Lifecycle::Active,
+            20,
+            (&input_resource_version_ids, &input_relation_version_ids),
+        );
+        let relation_version =
+            inference_relation_version(&relation, "fixture-inferred-relation-version", 20);
+        let change = inference_change(&relation, "fixture-inferred-change", 20);
+        let run = InferenceRun {
+            inference_run_id: id("fixture-inference-run", InferenceRunId::new),
+            rule_version: rule_version.clone(),
+            started_at: timestamp_at(19),
+            finished_at: Some(timestamp_at(20)),
+            status: InferenceRunStatus::Completed,
+            input_resource_version_ids: input_resource_version_ids.clone(),
+            input_relation_version_ids: input_relation_version_ids.clone(),
+            output_relation_ids: vec![relation.relation_id.clone()],
+        };
+        let revision_before = store.projection_metadata().unwrap().committed_revision;
+
+        store
+            .commit_inference(InferenceCommit {
+                run: run.clone(),
+                relations: vec![relation.clone()],
+                relation_versions: vec![relation_version.clone()],
+                changes: vec![change.clone()],
+            })
+            .unwrap();
+
+        assert_eq!(
+            store.projection_metadata().unwrap().committed_revision,
+            revision_before + 1
+        );
+        assert_eq!(
+            store.get_relation(&relation.relation_id).unwrap(),
+            Some(relation.clone())
+        );
+        assert!(
+            store
+                .relation_version_exists(&relation_version.relation_version_id)
+                .unwrap()
+        );
+
+        let persisted_run: (String, i64, Option<i64>, String, String, String, String) = store
+            .connection
+            .query_row(
+                "SELECT rule_version, started_at, finished_at, status, input_resource_version_ids_json, input_relation_version_ids_json, summary_json FROM inference_runs WHERE inference_run_id = ?1",
+                params![run.inference_run_id.as_str()],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(persisted_run.0, rule_version.as_str());
+        assert_eq!(persisted_run.1, run.started_at.unix_millis());
+        assert_eq!(persisted_run.2, run.finished_at.map(Timestamp::unix_millis));
+        assert_eq!(persisted_run.3, "completed");
+        assert_eq!(
+            serde_json::from_str::<Vec<ResourceVersionId>>(&persisted_run.4).unwrap(),
+            input_resource_version_ids
+        );
+        assert_eq!(
+            serde_json::from_str::<Vec<RelationVersionId>>(&persisted_run.5).unwrap(),
+            input_relation_version_ids
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&persisted_run.6).unwrap(),
+            json!({"output_relation_ids": ["fixture-inferred-relation"]})
+        );
+
+        let output: (String, String) = store
+            .connection
+            .query_row(
+                "SELECT relation_id, evidence_key FROM inference_outputs WHERE inference_run_id = ?1",
+                params![run.inference_run_id.as_str()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            output,
+            (
+                relation.relation_id.to_string(),
+                relation.evidence_key.to_string()
+            )
+        );
+
+        let persisted_evidence: String = store
+            .connection
+            .query_row(
+                "SELECT evidence_json FROM relations WHERE relation_id = ?1",
+                params![relation.relation_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<RelationEvidence>(&persisted_evidence).unwrap(),
+            relation.evidence
+        );
+
+        let persisted_version_origin: String = store
+            .connection
+            .query_row(
+                "SELECT origin_json FROM relation_versions WHERE relation_version_id = ?1",
+                params![relation_version.relation_version_id.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<OriginRef>(&persisted_version_origin).unwrap(),
+            relation_version.origin
+        );
+        let persisted_change = store
+            .connection
+            .query_row(
+                "SELECT change_id, subject_type, subject_id, observed_at, fields_json, origin_json FROM changes WHERE change_id = ?1",
+                params![change.change_id.as_str()],
+                read_change,
+            )
+            .unwrap();
+        assert_eq!(persisted_change, change);
+    }
+
+    #[test]
+    fn failed_inference_commit_rolls_back_run_relations_versions_outputs_changes_and_revision() {
+        let (_directory, mut store, source, target) = topology_store();
+        let rule_version = id("fixture-rule-failed", RuleVersion::new);
+        let relation = inferred_relation(
+            "fixture-inferred-failed",
+            &rule_version,
+            &source,
+            &target,
+            Lifecycle::Active,
+            30,
+            (&[], &[]),
+        );
+        let relation_version =
+            inference_relation_version(&relation, "fixture-inferred-failed-version", 30);
+        let change = inference_change(&relation, "fixture-inferred-failed-change", 30);
+        let run = InferenceRun {
+            inference_run_id: id("fixture-inference-run-failed", InferenceRunId::new),
+            rule_version,
+            started_at: timestamp_at(29),
+            finished_at: Some(timestamp_at(30)),
+            status: InferenceRunStatus::Completed,
+            input_resource_version_ids: Vec::new(),
+            input_relation_version_ids: Vec::new(),
+            output_relation_ids: vec![
+                relation.relation_id.clone(),
+                id("missing-inference-output", RelationId::new),
+            ],
+        };
+        let revision_before = store.projection_metadata().unwrap().committed_revision;
+
+        assert!(
+            store
+                .commit_inference(InferenceCommit {
+                    run: run.clone(),
+                    relations: vec![relation.clone()],
+                    relation_versions: vec![relation_version],
+                    changes: vec![change],
+                })
+                .is_err()
+        );
+
+        assert_eq!(
+            store.projection_metadata().unwrap().committed_revision,
+            revision_before
+        );
+        assert!(store.get_relation(&relation.relation_id).unwrap().is_none());
+        let counts: (i64, i64, i64, i64, i64, i64) = store
+            .connection
+            .query_row(
+                "SELECT (SELECT count(*) FROM inference_runs), (SELECT count(*) FROM relations), (SELECT count(*) FROM relation_versions), (SELECT count(*) FROM inference_outputs), (SELECT count(*) FROM changes), (SELECT count(*) FROM projection_metadata WHERE committed_revision = ?1)",
+                params![revision_before as i64],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(counts, (0, 0, 0, 0, 0, 1));
+    }
+
+    #[test]
+    fn inferred_relations_for_rule_filters_rule_and_reads_tombstoned_relations() {
+        let (_directory, mut store, source, target) = topology_store();
+        let input_resource_version_ids = vec![id(
+            "fixture-filter-resource-version",
+            ResourceVersionId::new,
+        )];
+        let input_relation_version_ids = vec![id(
+            "fixture-filter-relation-version",
+            RelationVersionId::new,
+        )];
+        let rule_v1 = id("fixture-filter-rule-v1", RuleVersion::new);
+        let rule_v2 = id("fixture-filter-rule-v2", RuleVersion::new);
+        let active_v1 = inferred_relation(
+            "fixture-inferred-active-v1",
+            &rule_v1,
+            &source,
+            &target,
+            Lifecycle::Active,
+            40,
+            (&input_resource_version_ids, &input_relation_version_ids),
+        );
+        let stale_v1 = inferred_relation(
+            "fixture-inferred-stale-v1",
+            &rule_v1,
+            &source,
+            &target,
+            Lifecycle::Tombstoned,
+            40,
+            (&input_resource_version_ids, &input_relation_version_ids),
+        );
+        let active_v2 = inferred_relation(
+            "fixture-inferred-active-v2",
+            &rule_v2,
+            &source,
+            &target,
+            Lifecycle::Active,
+            41,
+            (&input_resource_version_ids, &input_relation_version_ids),
+        );
+
+        store
+            .commit_inference(InferenceCommit {
+                run: InferenceRun {
+                    inference_run_id: id("fixture-inference-run-filter-v1", InferenceRunId::new),
+                    rule_version: rule_v1.clone(),
+                    started_at: timestamp_at(39),
+                    finished_at: Some(timestamp_at(40)),
+                    status: InferenceRunStatus::Completed,
+                    input_resource_version_ids: input_resource_version_ids.clone(),
+                    input_relation_version_ids: input_relation_version_ids.clone(),
+                    output_relation_ids: vec![active_v1.relation_id.clone()],
+                },
+                relations: vec![active_v1.clone(), stale_v1.clone()],
+                relation_versions: vec![
+                    inference_relation_version(&active_v1, "fixture-filter-version-active-v1", 40),
+                    inference_relation_version(&stale_v1, "fixture-filter-version-stale-v1", 40),
+                ],
+                changes: vec![
+                    inference_change(&active_v1, "fixture-filter-change-active-v1", 40),
+                    inference_change(&stale_v1, "fixture-filter-change-stale-v1", 40),
+                ],
+            })
+            .unwrap();
+        store
+            .commit_inference(InferenceCommit {
+                run: InferenceRun {
+                    inference_run_id: id("fixture-inference-run-filter-v2", InferenceRunId::new),
+                    rule_version: rule_v2.clone(),
+                    started_at: timestamp_at(40),
+                    finished_at: Some(timestamp_at(41)),
+                    status: InferenceRunStatus::Completed,
+                    input_resource_version_ids,
+                    input_relation_version_ids,
+                    output_relation_ids: vec![active_v2.relation_id.clone()],
+                },
+                relations: vec![active_v2.clone()],
+                relation_versions: vec![inference_relation_version(
+                    &active_v2,
+                    "fixture-filter-version-active-v2",
+                    41,
+                )],
+                changes: vec![inference_change(
+                    &active_v2,
+                    "fixture-filter-change-active-v2",
+                    41,
+                )],
+            })
+            .unwrap();
+
+        let v1_relations = store.inferred_relations_for_rule(&rule_v1).unwrap();
+        assert_eq!(v1_relations.len(), 2);
+        assert!(
+            v1_relations
+                .iter()
+                .all(|relation| relation.evidence.evidence_type() == EvidenceType::Inferred)
+        );
+        let stale = v1_relations
+            .iter()
+            .find(|relation| relation.relation_id == stale_v1.relation_id)
+            .unwrap();
+        assert_eq!(stale.lifecycle, Lifecycle::Tombstoned);
+        assert!(
+            v1_relations
+                .iter()
+                .all(|relation| relation.relation_id != active_v2.relation_id)
+        );
+        assert_eq!(
+            store.get_relation(&stale_v1.relation_id).unwrap(),
+            Some(stale_v1)
+        );
+
+        let v2_relations = store.inferred_relations_for_rule(&rule_v2).unwrap();
+        assert_eq!(v2_relations, vec![active_v2]);
     }
 }

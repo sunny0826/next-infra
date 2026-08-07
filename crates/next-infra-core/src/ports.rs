@@ -13,6 +13,22 @@ pub struct SyncCommit {
     pub missing_evidence: Option<MissingEvidenceState>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BindingCommit {
+    pub binding: Binding,
+    pub relations: Vec<Relation>,
+    pub relation_versions: Vec<RelationVersion>,
+    pub changes: Vec<Change>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InferenceCommit {
+    pub run: InferenceRun,
+    pub relations: Vec<Relation>,
+    pub relation_versions: Vec<RelationVersion>,
+    pub changes: Vec<Change>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CommitResult {
     pub resources_written: usize,
@@ -68,6 +84,22 @@ pub trait StoreWriter {
     fn start_sync_run(&mut self, sync_run: SyncRun) -> Result<(), Self::Error>;
     fn commit_sync(&mut self, commit: SyncCommit) -> Result<CommitResult, Self::Error>;
     fn mark_running_syncs_interrupted(&mut self, at: Timestamp) -> Result<usize, Self::Error>;
+}
+
+pub trait BindingStore: StoreReader {
+    fn get_binding(&self, id: &BindingId) -> Result<Option<Binding>, Self::Error>;
+    fn list_bindings(&self) -> Result<Vec<Binding>, Self::Error>;
+    fn commit_binding(&mut self, commit: BindingCommit) -> Result<(), Self::Error>;
+}
+
+pub trait InferenceStore: StoreReader {
+    fn resource_version_exists(&self, id: &ResourceVersionId) -> Result<bool, Self::Error>;
+    fn relation_version_exists(&self, id: &RelationVersionId) -> Result<bool, Self::Error>;
+    fn inferred_relations_for_rule(
+        &self,
+        rule_version: &RuleVersion,
+    ) -> Result<Vec<Relation>, Self::Error>;
+    fn commit_inference(&mut self, commit: InferenceCommit) -> Result<(), Self::Error>;
 }
 
 pub trait ConnectorPort {

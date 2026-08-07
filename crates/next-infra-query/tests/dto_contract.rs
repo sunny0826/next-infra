@@ -1,9 +1,12 @@
 use next_infra_query::dto::{
-    ChangeDto, ChangeOriginDto, ChangeSubjectDto, ConnectionDto, ConnectorCoverageDto,
-    ConnectorCoverageLevelDto, ConnectorHealth, ErrorEnvelope, EvidenceType, FieldChangeDto,
-    Freshness, Lifecycle, PageInfo, QUERY_DTO_SCHEMA_VERSION, QueryViewState, RelationDto,
-    ResourceDto, ResourceHealth, SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto,
-    SyncRunCountsDto, SyncRunDto, SyncRunStatusDto, SyncTriggerDto,
+    BindingCommandResultDto, BindingDto, BindingSnapshotDto, BindingStatusDto, ChangeDto,
+    ChangeOriginDto, ChangeSubjectDto, ConnectionDto, ConnectorCoverageDto,
+    ConnectorCoverageLevelDto, ConnectorHealth, CreateBindingCommandDto, DisableBindingCommandDto,
+    ErrorEnvelope, EvidenceType, FieldChangeDto, Freshness, Lifecycle, PageInfo,
+    QUERY_DTO_SCHEMA_VERSION, QueryViewState, RelationDto, ResourceDto, ResourceHealth,
+    SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto,
+    SyncRunStatusDto, SyncTriggerDto, TimelineGroupDto, TimelineItemDto, TimelineOriginDto,
+    TimelinePageDto, TimelineVersionLinkDto, UpdateBindingCommandDto,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -315,4 +318,186 @@ fn goal_two_history_and_coverage_dtos_are_tagged_and_clean() {
     assert_clean(&sync_run);
     assert_clean(&coverage);
     assert_clean(&change);
+}
+
+#[test]
+fn goal_seven_binding_and_timeline_dtos_are_tagged_and_clean() {
+    let metadata = SnapshotMetadata {
+        schema_version: QUERY_DTO_SCHEMA_VERSION,
+        snapshot_version: "snapshot-goal7".into(),
+        generated_at: "2000-01-01T00:00:00Z".into(),
+    };
+    let binding = BindingDto {
+        binding_id: "binding-1".into(),
+        source_resource_id: "resource-1".into(),
+        target_resource_id: "resource-2".into(),
+        kind: "depends.on".into(),
+        status: BindingStatusDto::Unresolved,
+        created_at: "2000-01-01T00:00:00Z".into(),
+        updated_at: "2000-01-01T00:00:01Z".into(),
+    };
+
+    assert_eq!(
+        [
+            BindingStatusDto::Active,
+            BindingStatusDto::Unresolved,
+            BindingStatusDto::Disabled,
+        ]
+        .map(|status| serde_json::to_value(status).unwrap()),
+        [json!("active"), json!("unresolved"), json!("disabled")]
+    );
+    assert_eq!(
+        field_names(&binding),
+        [
+            "binding_id",
+            "created_at",
+            "kind",
+            "source_resource_id",
+            "status",
+            "target_resource_id",
+            "updated_at",
+        ]
+    );
+
+    let create = CreateBindingCommandDto {
+        source_resource_id: "resource-1".into(),
+        target_resource_id: "resource-2".into(),
+        kind: "depends.on".into(),
+    };
+    let update = UpdateBindingCommandDto {
+        binding_id: "binding-1".into(),
+        source_resource_id: "resource-2".into(),
+        target_resource_id: "resource-3".into(),
+        kind: "runs.on".into(),
+    };
+    let disable = DisableBindingCommandDto {
+        binding_id: "binding-1".into(),
+    };
+    let command_result = BindingCommandResultDto {
+        metadata: metadata.clone(),
+        binding: binding.clone(),
+    };
+    let snapshot = BindingSnapshotDto {
+        metadata: metadata.clone(),
+        items: vec![binding.clone()],
+    };
+    assert_eq!(
+        field_names(&create),
+        ["kind", "source_resource_id", "target_resource_id"]
+    );
+    assert_eq!(
+        field_names(&update),
+        [
+            "binding_id",
+            "kind",
+            "source_resource_id",
+            "target_resource_id",
+        ]
+    );
+    assert_eq!(field_names(&disable), ["binding_id"]);
+    assert_eq!(field_names(&command_result), ["binding", "metadata"]);
+    assert_eq!(field_names(&snapshot), ["items", "metadata"]);
+
+    let change = ChangeDto {
+        change_id: "change-1".into(),
+        subject: ChangeSubjectDto::Binding {
+            binding_id: "binding-1".into(),
+        },
+        observed_at: "2000-01-01T00:00:01Z".into(),
+        fields: vec![FieldChangeDto {
+            path: "status".into(),
+            before: Some(json!("unresolved")),
+            after: Some(json!("active")),
+        }],
+        origin: ChangeOriginDto::Inference {
+            rule_version: "rule.v1".into(),
+            input_resource_version_ids: vec!["resource-version-1".into()],
+            input_relation_version_ids: vec!["relation-version-1".into()],
+        },
+    };
+    let resource_link = TimelineVersionLinkDto::Resource {
+        resource_id: "resource-1".into(),
+        resource_version_id: "resource-version-1".into(),
+    };
+    let relation_link = TimelineVersionLinkDto::Relation {
+        relation_id: "relation-1".into(),
+        relation_version_id: "relation-version-1".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&resource_link).unwrap(),
+        json!({
+            "type": "resource",
+            "resource_id": "resource-1",
+            "resource_version_id": "resource-version-1",
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(&relation_link).unwrap(),
+        json!({
+            "type": "relation",
+            "relation_id": "relation-1",
+            "relation_version_id": "relation-version-1",
+        })
+    );
+
+    let origin = TimelineOriginDto::Inference {
+        rule_version: "rule.v1".into(),
+        input_resource_version_ids: vec!["resource-version-1".into()],
+        input_relation_version_ids: vec!["relation-version-1".into()],
+    };
+    assert_eq!(
+        serde_json::to_value(&origin).unwrap(),
+        json!({
+            "type": "inference",
+            "rule_version": "rule.v1",
+            "input_resource_version_ids": ["resource-version-1"],
+            "input_relation_version_ids": ["relation-version-1"],
+        })
+    );
+    let item = TimelineItemDto {
+        change: change.clone(),
+        version_links: vec![resource_link, relation_link],
+    };
+    let group = TimelineGroupDto {
+        group_id: "group-1".into(),
+        origin,
+        occurred_at: "2000-01-01T00:00:01Z".into(),
+        items: vec![item.clone()],
+    };
+    let page = TimelinePageDto {
+        metadata,
+        groups: vec![group.clone()],
+        page_info: PageInfo::new(None),
+    };
+    assert_eq!(field_names(&item), ["change", "version_links"]);
+    assert_eq!(
+        field_names(&group),
+        ["group_id", "items", "occurred_at", "origin"]
+    );
+    assert_eq!(field_names(&page), ["groups", "metadata", "page_info"]);
+    let page_json = serde_json::to_value(&page).unwrap();
+    assert_eq!(
+        page_json["groups"][0]["occurred_at"],
+        "2000-01-01T00:00:01Z"
+    );
+    assert!(
+        page_json["groups"][0]["items"][0]
+            .get("relation_evidence")
+            .is_none()
+    );
+
+    for value in [
+        serde_json::to_value(&binding).unwrap(),
+        serde_json::to_value(&create).unwrap(),
+        serde_json::to_value(&update).unwrap(),
+        serde_json::to_value(&disable).unwrap(),
+        serde_json::to_value(&command_result).unwrap(),
+        serde_json::to_value(&snapshot).unwrap(),
+        serde_json::to_value(&change).unwrap(),
+        serde_json::to_value(&item).unwrap(),
+        serde_json::to_value(&group).unwrap(),
+        page_json,
+    ] {
+        assert_clean(&value);
+    }
 }

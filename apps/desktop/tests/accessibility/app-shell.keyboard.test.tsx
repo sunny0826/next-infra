@@ -13,18 +13,18 @@ describe("Goal 3 shell keyboard contract", () => {
 
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     const search = screen.getByRole("combobox", {
-      name: "Search local infrastructure",
+      name: "搜索本地基础设施",
     });
     expect(search).toHaveFocus();
 
     await user.type(search, "alpha");
-    expect(await screen.findByRole("listbox", { name: "Search results" })).toBeInTheDocument();
+    expect(await screen.findByRole("listbox", { name: "搜索结果" })).toBeInTheDocument();
 
     fireEvent.keyDown(search, { key: "Escape" });
     await waitFor(() => {
       expect(search).toHaveValue("");
       expect(search).not.toHaveFocus();
-      expect(screen.queryByRole("listbox", { name: "Search results" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("listbox", { name: "搜索结果" })).not.toBeInTheDocument();
     });
   });
 
@@ -32,7 +32,7 @@ describe("Goal 3 shell keyboard contract", () => {
     const user = userEvent.setup();
     renderDesktopFixture();
 
-    await user.click(screen.getByRole("button", { name: "Inventory" }));
+    await user.click(screen.getByRole("button", { name: "资源清单" }));
     const row = (await screen.findByText("Fixture Compute Alpha")).closest("tr");
     expect(row).toHaveAttribute("tabindex", "0");
 
@@ -42,7 +42,7 @@ describe("Goal 3 shell keyboard contract", () => {
     expect(
       await screen.findByRole("heading", { level: 1, name: "Fixture Compute Alpha" }),
     ).toBeInTheDocument();
-    const inspector = screen.getByRole("complementary", { name: "Evidence inspector" });
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
     expect(
       within(inspector).getByRole("heading", { level: 3, name: "Fixture Compute Alpha" }),
     ).toBeInTheDocument();

@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import type { ChangeDto } from "../../generated/query/ChangeDto";
 import type { ConnectionDto } from "../../generated/query/ConnectionDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
+import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
+import { desktopErrorCode } from "../../platform/desktop-adapter/desktop-adapter";
 
 import "./overview.css";
 
@@ -18,11 +20,11 @@ interface OverviewPageProps {
 }
 
 function attentionReason(resource: ResourceDto): string | null {
-  if (resource.health === "unhealthy") return "Resource reports unhealthy";
-  if (resource.health === "degraded") return "Resource reports degraded";
-  if (resource.freshness === "expired") return "Saved fact is expired";
-  if (resource.freshness === "stale") return "Saved fact is stale";
-  if (resource.lifecycle !== "active") return `Lifecycle is ${resource.lifecycle}`;
+  if (resource.health === "unhealthy") return "资源报告为不健康";
+  if (resource.health === "degraded") return "资源报告为降级";
+  if (resource.freshness === "expired") return "已保存事实已过期";
+  if (resource.freshness === "stale") return "已保存事实已过时";
+  if (resource.lifecycle !== "active") return `生命周期为 ${displayEnum(resource.lifecycle)}`;
   return null;
 }
 
@@ -52,8 +54,8 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
           changes: changePage.items,
         });
       })
-      .catch(() => {
-        if (active) setError("The local snapshot could not be queried.");
+      .catch((error) => {
+        if (active) setError(`无法查询本地快照（${desktopErrorCode(error)}）。`);
       });
     return () => {
       active = false;
@@ -74,7 +76,7 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
   if (error !== null) {
     return (
       <section className="overview-state overview-state--error" role="alert">
-        <strong>Overview unavailable</strong>
+        <strong>概览不可用</strong>
         <span>{error}</span>
       </section>
     );
@@ -83,8 +85,8 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
   if (state === null) {
     return (
       <section className="overview-state" aria-busy="true">
-        <strong>Reading local snapshot</strong>
-        <span>Loading bounded resources, connections, and recent changes.</span>
+        <strong>正在读取本地快照</strong>
+        <span>正在加载受限资源、连接和近期变更。</span>
       </section>
     );
   }
@@ -93,25 +95,25 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
     <div className="overview-page">
       <header className="overview-header">
         <div>
-          <p className="overview-eyebrow">Local verification path</p>
-          <h1>Overview</h1>
-          <p>Find facts that need inspection before opening a provider console.</p>
+          <p className="overview-eyebrow">本地核验路径</p>
+          <h1>概览</h1>
+          <p>在打开提供方控制台前，先找到需要检查的事实。</p>
         </div>
         <span className="overview-snapshot-count">
-          {state.resources.length} bounded resources
+          {state.resources.length} 个受限资源
         </span>
       </header>
 
       <section className="overview-section" aria-labelledby="overview-attention">
         <div className="overview-section-heading">
           <div>
-            <p className="overview-eyebrow">Verify first</p>
-            <h2 id="overview-attention">Attention queue</h2>
+            <p className="overview-eyebrow">优先核验</p>
+            <h2 id="overview-attention">关注队列</h2>
           </div>
-          <span>{attention.length} facts</span>
+          <span>{attention.length} 条事实</span>
         </div>
         {attention.length === 0 ? (
-          <p className="overview-empty">No unhealthy, expired, stale, or inactive facts in this page.</p>
+          <p className="overview-empty">此页面没有不健康、过期、过时或非活动的事实。</p>
         ) : (
           <div className="overview-attention-list">
             {attention.map(({ resource, reason }) => (
@@ -128,8 +130,8 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
                 </span>
                 <span className="overview-attention-reason">{reason}</span>
                 <span className="overview-attention-facts">
-                  <small>Health</small> {resource.health}
-                  <small>Freshness</small> {resource.freshness}
+                  <small>健康度</small> {displayEnum(resource.health)}
+                  <small>新鲜度</small> {displayEnum(resource.freshness)}
                 </span>
                 <time dateTime={resource.observed_at}>{resource.observed_at}</time>
               </button>
@@ -141,22 +143,22 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
       <section className="overview-section" aria-labelledby="overview-observations">
         <div className="overview-section-heading">
           <div>
-            <p className="overview-eyebrow">Connector heartbeat</p>
-            <h2 id="overview-observations">Observation strip</h2>
+            <p className="overview-eyebrow">连接器心跳</p>
+            <h2 id="overview-observations">观测概览</h2>
           </div>
-          <span>{state.connections.length} connections</span>
+          <span>{state.connections.length} 个连接</span>
         </div>
         <div className="overview-observation-strip">
           {state.connections.map((connection) => (
             <article key={connection.connection_id}>
               <span className={`overview-connection-state state-${connection.health}`}>
-                {connection.health}
+                {displayEnum(connection.health)}
               </span>
               <strong>{connection.display_name}</strong>
               <code>{connection.connector_type}</code>
               <dl>
-                <div><dt>Last success</dt><dd>{connection.last_success_at ?? "never"}</dd></div>
-                <div><dt>Last attempt</dt><dd>{connection.last_attempt_at ?? "never"}</dd></div>
+                <div><dt>最近成功</dt><dd>{connection.last_success_at ?? "从未"}</dd></div>
+                <div><dt>最近尝试</dt><dd>{connection.last_attempt_at ?? "从未"}</dd></div>
               </dl>
             </article>
           ))}
@@ -166,33 +168,32 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
       <section className="overview-section overview-critical" aria-labelledby="overview-critical">
         <div className="overview-section-heading">
           <div>
-            <p className="overview-eyebrow">Configured paths only</p>
-            <h2 id="overview-critical">Critical paths</h2>
+            <p className="overview-eyebrow">仅限已配置路径</p>
+            <h2 id="overview-critical">关键路径</h2>
           </div>
         </div>
         <p>
-          No critical path is pinned. Next Infra will not infer importance from display names or
-          recent activity.
+          当前没有固定关键路径。Next Infra 不会根据展示名称或近期活动推断重要性。
         </p>
       </section>
 
       <section className="overview-section" aria-labelledby="overview-changes">
         <div className="overview-section-heading">
           <div>
-            <p className="overview-eyebrow">Structured differences</p>
-            <h2 id="overview-changes">Recent changes</h2>
+            <p className="overview-eyebrow">结构化差异</p>
+            <h2 id="overview-changes">近期变更</h2>
           </div>
-          <span>{state.changes.length} changes</span>
+          <span>{state.changes.length} 项变更</span>
         </div>
         {state.changes.length === 0 ? (
-          <p className="overview-empty">No structured changes in the bounded query.</p>
+          <p className="overview-empty">受限查询中没有结构化变更。</p>
         ) : (
           <ol className="overview-change-list">
             {state.changes.map((change) => (
               <li key={change.change_id}>
                 <time dateTime={change.observed_at}>{change.observed_at}</time>
                 <code>{change.change_id}</code>
-                <span>{change.fields.length} changed fields</span>
+                <span>{change.fields.length} 个变更字段</span>
               </li>
             ))}
           </ol>

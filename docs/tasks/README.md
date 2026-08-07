@@ -1,6 +1,6 @@
 # Luna Worker 并行任务总表
 
-本文将 Next Infra 的实施拆解为可交给 `luna_worker` 的有界任务包，并固化调度、依赖、文件所有权和验收方式。用户已于 2026-08-02 授权按本表开始本地只读首版开发；该授权不包含真实凭据、Agent 用户配置、安装、发布、公证或外部基础设施写操作。
+本文将 Next Infra 的实施拆解为可交给 `deepseek_worker` 的有界任务包，并固化调度、依赖、文件所有权和验收方式。用户已于 2026-08-02 授权按本表开始本地只读首版开发；该授权不包含真实凭据、Agent 用户配置、安装、发布、公证或外部基础设施写操作。
 
 实现仍受 [`implementation-goals.md`](../design/implementation-goals.md) 约束：Goal 验收门保持串行；只有当前 Goal 的共享契约冻结后，Goal 内部任务才允许并行。
 
@@ -65,7 +65,7 @@ Goal 1 若冻结出不同目录，必须对下述路径做一对一重映射；�
 
 ## 4. 派发协议
 
-每次派发给 `luna_worker` 的提示必须包含以下内容：
+每次派发给 `deepseek_worker` 的提示必须包含以下内容：
 
 ```text
 Task ID: <唯一 ID>
@@ -142,6 +142,21 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 36. [CON-G5-04 GitHub Collector、ReadConnector 与纵切验收记录](./CON-G5-04-2026-08-05.md)
 37. [UI-G5-01 GitHub 纵切 UI Acceptance](./UI-G5-01-2026-08-05.md)
 38. [GATE-G5 GitHub / Actions 验收门](./GATE-G5-2026-08-05.md)
+39. [DEC-G6-01 SSH 稳定身份与探针预算](../design/decisions/DEC-G6-01-ssh-identity-and-probe-budget.md)
+40. [CON-G6-01 OpenSSH Transport 与 Probe Registry 任务冻结](./CON-G6-01-TASK-FREEZE-2026-08-06.md)
+41. [CON-G6-01 OpenSSH Transport 与 Probe Registry 验收记录](./CON-G6-01-2026-08-06.md)
+42. [CON-G6-02 通用 Host Probe Parser 与 Mapper 任务冻结](./CON-G6-02-TASK-FREEZE-2026-08-06.md)
+43. [CON-G6-03 macOS launchd Probe Parser 与 Mapper 任务冻结](./CON-G6-03-TASK-FREEZE-2026-08-06.md)
+44. [CON-G6-04 Linux systemd Probe Parser 与 Mapper 任务冻结](./CON-G6-04-TASK-FREEZE-2026-08-06.md)
+45. [CON-G6-05 SSH ReadConnector、Partial 与 Replay 纵切任务冻结](./CON-G6-05-TASK-FREEZE-2026-08-06.md)
+46. [CON-G6-02 通用 Host Probe Parser 与 Mapper 验收记录](./CON-G6-02-2026-08-06.md)
+47. [CON-G6-03 macOS launchd Probe Parser 与 Mapper 验收记录](./CON-G6-03-2026-08-06.md)
+48. [CON-G6-04 Linux systemd Probe Parser 与 Mapper 验收记录](./CON-G6-04-2026-08-06.md)
+49. [CON-G6-05 SSH ReadConnector、Partial 与 Replay 纵切验收记录](./CON-G6-05-2026-08-06.md)
+50. [UI-G6-01 SSH / Mac mini UI Acceptance](./UI-G6-01-2026-08-06.md)
+51. [GATE-G6 SSH / Mac mini 验收门](./GATE-G6-2026-08-06.md)
+52. [GATE-G7 Binding / Topology / Timeline 验收门](./GATE-G7-2026-08-06.md)
+53. [GATE-G8 Dokploy / Cloudflare / Cross-Provider Topology 验收门](./GATE-G8-2026-08-06.md)
 
 ## 6. 设计决策包
 
@@ -216,7 +231,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G6-01` — SSH 稳定身份与探针预算冻结
 
-- **状态：** `READY-DESIGN`
+- **状态：** `DONE`（2026-08-06；见 [`DEC-G6-01`](../design/decisions/DEC-G6-01-ssh-identity-and-probe-budget.md)）。
 - **目标：** 固定 SSH Host 的稳定 `external_id`、alias/hostname/IP 各自角色，以及连接、命令、输出和批次上限。
 - **依赖：** Goal 2 identity contract 的设计结论。
 - **独占路径：** `docs/design/decisions/DEC-G6-01-ssh-identity-and-probe-budget.md`；Goal 6 前由当时的 Decision/Gate Captain 串行同步权威文档。
@@ -226,7 +241,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 
 ### `DEC-G8-01` — Dokploy Database 范围对齐
 
-- **状态：** `READY-DESIGN`
+- **状态：** `DONE`（2026-08-06；见 [`DEC-G8-01`](../design/decisions/DEC-G8-01-dokploy-database-scope.md)）。
 - **目标：** 解决 Connector 契约包含 Database、而 Goal 8 范围未包含 Database 的冲突。
 - **依赖：** 当前 Connector 契约和 Goal 8 scope。
 - **独占路径：** `docs/design/decisions/DEC-G8-01-dokploy-database-scope.md`；Goal 8 前由当时的 Decision/Gate Captain 串行同步 Connector 契约与实施目标。
@@ -315,6 +330,8 @@ Gate Captain 必须：
 
 ### `GATE-G7` — Binding、Topology 与 Timeline 验收门
 
+- **状态：** `INTERNAL-PASS`（2026-08-06，见 [`GATE-G7-2026-08-06.md`](./GATE-G7-2026-08-06.md)）。
+
 - **目标：** 证明人工配置与推断证据可解释、可重放，并通过有界 Topology 与 Timeline 核实。
 - **依赖：** `RHM-G7-01..08`、`UI-G7-01/02` 均处于 `REVIEW`。
 - **独占路径：** Goal 7 migration/registry/manifests/lockfile、Shell route integration、`tests/gates/goal-7/**` 和验收报告。
@@ -324,6 +341,8 @@ Gate Captain 必须：
 - **风险/停止：** migration、QDTO、route registry 仅由各单写 owner 或本 Gate 串行集成；未通过不得进入 Goal 8。
 
 ### `GATE-G8` — Dokploy、Cloudflare 与跨平台拓扑验收门
+
+- **状态：** `INTERNAL-PASS / EXTERNAL-DEFERRED`（2026-08-06，见 [`GATE-G8-2026-08-06.md`](./GATE-G8-2026-08-06.md)）。
 
 - **目标：** 证明两条 Provider 主线可以汇合成来源明确的 Repo → Deployment → Host → DNS 代表链。
 - **依赖：** `DEC-G8-01`、`CON-G8-01..05`、`UI-G8-01` 均处于 `REVIEW`。
@@ -335,6 +354,7 @@ Gate Captain 必须：
 
 ### `GATE-G9` — Provider 基础覆盖最终验收门
 
+- **状态：** `INTERNAL-PASS / EXTERNAL-DEFERRED`（2026-08-06，见 [`GATE-G9-2026-08-06.md`](./GATE-G9-2026-08-06.md)）。
 - **目标：** 证明 Supabase 和两家云厂商按 module 提供真实只读覆盖，并完成六页最终回归。
 - **依赖：** `CON-G9-S1..S3`、`CON-G9-A0..A3`、`CON-G9-T0..T3`、`CON-G9-04/05`、`UI-G9-01/02` 均处于 `REVIEW`；未配置的 live Provider 项必须保持有解释的 `BLOCKED`，不能伪装通过或让 Goal 9 通过。
 - **独占路径：** Goal 9 registry/manifests/lockfile、`tests/gates/goal-9/**` 和验收报告。
@@ -345,9 +365,11 @@ Gate Captain 必须：
 
 ## 8. 当前可执行边界
 
+完成性证据与外部缺口汇总见 [`COMPLETION-AUDIT-2026-08-06.md`](./COMPLETION-AUDIT-2026-08-06.md)。
+
 - 已完成：Git 初始化、Goal 0、`DEC-G1-01..06`、Goal 1 工程任务与 `GATE-G1`。
 - 已完成：Goal 2 的 Core、Store、Sync、Normalizer、Fixture、Contract/Catalog、两条真实 SQLite integration suite、UI Fixture Catalog 与 `GATE-G2`。
 - 已完成：Goal 3 内部验收与 Goal 4 内部实现；Goal 4 的 MCP Agent、Apple signing identity 和锁屏交互 smoke 保持 deferred，未标记为通过。
 - 已完成：Goal 5 GitHub/Actions 内部 transport、mapper、ReadConnector、SQLite partial 纵切与 UI/browser acceptance；真实 GitHub identity 未配置，live 项保持 `BLOCKED-EXTERNAL`，MCP 按用户决定 deferred。
-- 当前可派发：Goal 6 内部工程轨道；先复核 `DEC-G6-01`，再执行 `CON-G6-01` OpenSSH transport/probe registry 冻结。Goal 5 live 缺口不得被后续 fixture 冒充补齐。
+- 当前可派发：`CON-G6-02/03/04` 三条独占 Probe mapper 分支；`CON-G6-01` 已进入 REVIEW。Goal 5 live 缺口不得被后续 fixture 冒充补齐。
 - 外部状态边界：Codex/Hermes 配置、安装、签名、公证、真实 Secret 与 Provider 凭据均不在当前自动推进权限内。
