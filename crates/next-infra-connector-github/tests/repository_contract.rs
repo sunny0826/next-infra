@@ -144,7 +144,7 @@ fn repository_resources_drop_unknown_fields_and_pass_normalizer() {
         connection: ConnectionInput {
             connection_id: next_infra_core::ConnectionId::new("github-fixture-connection").unwrap(),
             connector_type: ConnectorType::new("github").unwrap(),
-            config: json!({}),
+            config: json!({"selected_repository_ids": ["10"]}),
             config_schema_version: SchemaVersion::new(1).unwrap(),
         },
         mode: SyncMode::Full,

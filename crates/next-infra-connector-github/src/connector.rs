@@ -622,14 +622,15 @@ fn validate_connection_input(connection: &ConnectionInput) -> Vec<ValidationIssu
             message: "GitHub connection config schema is unsupported".into(),
         });
     }
-    if !connection
+    if connection
         .config
-        .as_object()
-        .is_some_and(serde_json::Map::is_empty)
+        .get("selected_repository_ids")
+        .and_then(serde_json::Value::as_array)
+        .is_none_or(|values| values.is_empty())
     {
         errors.push(ValidationIssue {
             code: ErrorCode::InvalidDomainValue,
-            message: "GitHub connection config must be an empty object".into(),
+            message: "GitHub connection config requires selected repositories".into(),
         });
     }
     errors
@@ -920,7 +921,7 @@ mod tests {
             connection: ConnectionInput {
                 connection_id: ConnectionId::new("github-fixture-connection").unwrap(),
                 connector_type: ConnectorType::new("github").unwrap(),
-                config: serde_json::json!({}),
+                config: serde_json::json!({"selected_repository_ids": ["10"]}),
                 config_schema_version: SchemaVersion::new(1).unwrap(),
             },
             mode: SyncMode::Full,

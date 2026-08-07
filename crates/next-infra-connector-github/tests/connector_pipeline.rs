@@ -163,7 +163,7 @@ fn connection() -> Connection {
         connector_type: ConnectorType::new("github").unwrap(),
         display_name: "GitHub Fixture".into(),
         enabled: true,
-        config: serde_json::json!({}),
+        config: serde_json::json!({"selected_repository_ids": ["10"]}),
         secret_ref: None,
         health: ConnectorHealth::Healthy,
         last_success_at: None,
@@ -179,7 +179,7 @@ fn request(run_id: &str) -> SyncRequest {
         connection: ConnectionInput {
             connection_id: ConnectionId::new("github-fixture-connection").unwrap(),
             connector_type: ConnectorType::new("github").unwrap(),
-            config: serde_json::json!({}),
+            config: serde_json::json!({"selected_repository_ids": ["10"]}),
             config_schema_version: SchemaVersion::new(1).unwrap(),
         },
         mode: SyncMode::Full,
