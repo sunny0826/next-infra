@@ -24,9 +24,7 @@ use next_infra_connector_dokploy::{
 use next_infra_connector_supabase_managed::{
     ManagementRequest, ManagementTransport, SupabaseManagedConnector,
 };
-use next_infra_connector_supabase_self_hosted::{
-    SelfHostedTransport, SourceKind, SupabaseSelfHostedConnector,
-};
+use next_infra_connector_supabase_self_hosted::{SelfHostedTransport, SupabaseSelfHostedConnector};
 use next_infra_connector_tencent::{
     SignedRequest as TencentSignedRequest, TencentConnector, TencentTransport,
 };
@@ -453,7 +451,7 @@ pub struct LiveSelfHostedTransport {
 impl LiveSelfHostedTransport {
     pub fn new(base_url: &str, service_key: &str) -> Result<Self, String> {
         let base = url::Url::parse(base_url).map_err(|_| "invalid Supabase self-hosted URL")?;
-        let mut header = reqwest::header::HeaderValue::from_str(&format!("Bearer {service_key}"))
+        let mut header = reqwest::header::HeaderValue::from_str(service_key)
             .map_err(|_| "invalid service key")?;
         header.set_sensitive(true);
         let client = Client::builder()
@@ -468,14 +466,9 @@ impl LiveSelfHostedTransport {
         })
     }
 
-    fn build_url(&self, source: SourceKind) -> Result<url::Url, String> {
-        let path = match source {
-            SourceKind::ServiceApi => "/rest/v1/projects",
-            SourceKind::PostgresMetadata => "/rest/v1/postgres_metadata",
-            SourceKind::FixedSshProbe => "/rest/v1/runtime_info",
-        };
+    fn openapi_url(&self) -> Result<url::Url, String> {
         self.base_url
-            .join(path)
+            .join("/rest/v1/")
             .map_err(|_| "invalid path".to_string())
     }
 }
@@ -490,8 +483,8 @@ impl std::fmt::Debug for LiveSelfHostedTransport {
 
 #[async_trait]
 impl SelfHostedTransport for LiveSelfHostedTransport {
-    async fn read(&self, source: SourceKind) -> Result<Vec<u8>, ConnectorFailure> {
-        let url = self.build_url(source).map_err(|e| ConnectorFailure {
+    async fn read_openapi(&self) -> Result<Vec<u8>, ConnectorFailure> {
+        let url = self.openapi_url().map_err(|e| ConnectorFailure {
             code: ErrorCode::InvalidDomainValue,
             message: e,
             retryable: false,

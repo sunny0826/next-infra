@@ -25,7 +25,7 @@
 | Dokploy | `dokploy` | `url` + `token`（Bearer）| 高 | SQLite `connection_secrets`（BLOB，0600 DB/0700 目录，FK 级联清理）| `connector.validate`（/v1/user）| 无范围（全量 Project/Application/Server/Domain）| 建连后后台首次同步，扩展 scheduler 同上 |
 | Cloudflare | `cloudflare` | `token`（API Token）| 高 | SQLite `connection_secrets` | `connector.validate`（/user/tokens/verify）| 无范围（全量 Account/Zone）；用户录入时提示 token 权限范围 | 同上 |
 | Supabase managed | `supabase-managed` | `token`（Bearer access token）| 高 | SQLite `connection_secrets` | `connector.validate`（/v1/projects）| 无范围（全量 Organization/Project）；用户只需提供 token | 同上 |
-| Supabase self-hosted | `supabase-self-hosted` | `url` + `token`（service key）| 高 | SQLite `connection_secrets` | `connector.validate`（连接性检查）| 无范围（Service/DB/Runtime 三类 source）| 同上 |
+| Supabase self-hosted | `supabase-self-hosted` | `url` + `token`（service key，`apikey` header only）| 高 | SQLite `connection_secrets` | `connector.validate`（读取 /rest/v1/ OpenAPI）| 无范围（PostgREST 表清单，`supabase.self_hosted.table`）| 同上 |
 | Aliyun | `aliyun` | `access_key_id` + `secret_access_key`（HMAC-SHA1 签名）| 高 | SQLite `connection_secrets` | `connector.validate`（DescribeRegions 或类似）| 需要用户指定 `region`（云厂商必须指定同步区域）；默认空，验证时返回需要 region 的错误 | 同上 |
 | Tencent | `tencent` | `secret_id` + `secret_key`（TC3-HMAC-SHA256 签名）| 高 | SQLite `connection_secrets` | `connector.validate`（ DescribeInstances）| 需要用户指定 `region`；默认空，验证时返回需要 region 的错误 | 同上 |
 
@@ -151,30 +151,32 @@
 
 ### 3.5 Supabase self-hosted（`supabase-self-hosted`）
 
-**凭据性质：** `AuthKind::Token`，URL + service key。
+**凭据性质：** `AuthKind::Token`，URL + service key（`apikey` header，**不带** `Authorization: Bearer` 前缀——Bearer 会触发 Kong JWT 401）。
 
 **UI 状态机：**
 
 ```
-[输入 url + token] → [验证中: 测试 Service API / Postgres Metadata / Fixed SSH Probe 三类 source] → [成功: 显示可用 source 类型] 或 [失败: unreachable / invalid_credentials]
+[输入 url + token] → [验证中: 测试 /rest/v1/ OpenAPI 端点] → [成功: 显示 PostgREST 表清单] 或 [失败: unreachable / invalid_credentials]
 ```
 
 **字段：**
 - `display_name`: 连接名称
-- `url`: 自托管实例 URL
-- `token`: Service API key
+- `url`: 自托管实例 URL（如 `https://supabase.example.com`，connector 追加 `/rest/v1/`）
+- `token`: Service API key（明文 JWT，`apikey` header 发送）
 
 **后端命令（新增）：**
-- `supabase_self_hosted_validate(request: SupabaseSelfHostedValidateRequest) -> SupabaseSelfHostedValidateResult`：尝试读取三类 source（ServiceApi / PostgresMetadata / FixedSshProbe），返回可用 source 列表摘要。
+- `supabase_self_hosted_validate(request: SupabaseSelfHostedValidateRequest) -> SupabaseSelfHostedValidateResult`：尝试读取 OpenAPI 文档，返回表数量摘要。
 - `supabase_self_hosted_connect(request: SupabaseSelfHostedConnectRequest) -> SupabaseSelfHostedConnectResult`：创建 Connection，config 含 `url`（非敏感），secret 存 SQLite `connection_secrets`，触发首次 Full 同步。
 
 **范围选择：** 无范围选择。
 
-**注意：** self-hosted 的 config 在 `validate` 时也要求空对象（`config: {}`），与 managed 一致（见 `crates/next-infra-connector-supabase-self-hosted/src/lib.rs:155`）。
+**数据面：** `supabase.self_hosted.table`（每 Exposed 表一个资源，属性：table name、schema、auth_role、description）；`MAX_TABLES = 500`，超限返回 `Partial` + `PaginationIncomplete`。
+
+**注意：** 2026-08-07 重新设计：原 3 个假设端点（ServiceApi/PostgresMetadata/FixedSshProbe）替换为 PostgREST OpenAPI 表清单。`SourceKind` 简化为单一 `OpenApi` variant；`SelfHostedTransport::read_openapi()` 替代了原来的 variant-based `read(SourceKind)`。
 
 **同步触发：** 新增 `spawn_supabase_self_hosted_sync`，scheduler 扩展点同上。
 
-**参考：** `crates/next-infra-connector-supabase-self-hosted/src/lib.rs`（三类 source，`SourceKind`）。
+**参考：** `crates/next-infra-connector-supabase-self-hosted/src/lib.rs`（单一 `supabase.self_hosted.table` kind，`read_openapi` transport，`MAX_TABLES = 500`），`docs/tasks/CON-G9-S5-2026-08-07.md`（重新设计记录）。
 
 ---
 
@@ -310,7 +312,7 @@ Aliyun 和 Tencent 的 `region` 字段**无默认值**，验证时若 region 为
 - **Dokploy**: 最小只读 token，验证 Project/Application 范围
 - **Cloudflare**: scoped API token，验证 Account/Zone 范围
 - **Supabase managed**: access token，验证 Organization/Project 范围
-- **Supabase self-hosted**: URL + service key，验证三类 source 可达性
+- **Supabase self-hosted**: URL + service key，验证 `/rest/v1/` OpenAPI 端点可达并返回 PostgREST 表清单
 - **Aliyun**: AccessKey，验证指定 region 的模块覆盖
 - **Tencent**: SecretId/Key，验证指定 region 的模块覆盖
 
