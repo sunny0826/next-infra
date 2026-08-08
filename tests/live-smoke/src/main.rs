@@ -136,10 +136,12 @@ impl Provider {
             Self::Aliyun => &[
                 "NEXT_INFRA_ALIYUN_ACCESS_KEY_ID",
                 "NEXT_INFRA_ALIYUN_ACCESS_KEY_SECRET",
+                "NEXT_INFRA_ALIYUN_REGION (optional, default cn-hangzhou)",
             ],
             Self::Tencent => &[
                 "NEXT_INFRA_TENCENT_SECRET_ID",
                 "NEXT_INFRA_TENCENT_SECRET_KEY",
+                "NEXT_INFRA_TENCENT_REGION (optional, default ap-guangzhou)",
             ],
         }
     }
@@ -751,6 +753,28 @@ fn build_validation_request(provider: Provider, config: serde_json::Value) -> Va
     }
 }
 
+fn build_sync_request_with_scope(
+    provider: Provider,
+    config: serde_json::Value,
+    scope: &str,
+) -> SyncRequest {
+    SyncRequest {
+        sync_run_id: SyncRunId::new(format!("live-smoke-run-{}", provider.name()))
+            .expect("valid sync run id"),
+        connection: ConnectionInput {
+            connection_id: ConnectionId::new(format!("live-smoke-{}", provider.name()))
+                .expect("valid connection id"),
+            connector_type: provider.connector_type(),
+            config,
+            config_schema_version: SchemaVersion::new(1).unwrap(),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(scope).expect("valid scope"),
+        cursor: None,
+        targeted_resources: vec![],
+    }
+}
+
 fn build_sync_request(provider: Provider, config: serde_json::Value) -> SyncRequest {
     SyncRequest {
         sync_run_id: SyncRunId::new(format!("live-smoke-run-{}", provider.name()))
@@ -1037,6 +1061,8 @@ async fn run_aliyun() -> RunOutcome {
         .map_err(|_| "NEXT_INFRA_ALIYUN_ACCESS_KEY_ID is not set")?;
     let access_key_secret = std::env::var("NEXT_INFRA_ALIYUN_ACCESS_KEY_SECRET")
         .map_err(|_| "NEXT_INFRA_ALIYUN_ACCESS_KEY_SECRET is not set")?;
+    let region = std::env::var("NEXT_INFRA_ALIYUN_REGION")
+        .unwrap_or_else(|_| "cn-hangzhou".into());
 
     let transport = LiveAliyunTransport::new();
     let connector = AliyunConnector::new(transport);
@@ -1057,7 +1083,10 @@ async fn run_aliyun() -> RunOutcome {
     }
 
     let sync_outcome = connector
-        .sync(build_sync_request(Provider::Aliyun, config), Some(&secret))
+        .sync(
+            build_sync_request_with_scope(Provider::Aliyun, config, &format!("aliyun:{region}")),
+            Some(&secret),
+        )
         .await
         .map_err(|e| format!("Aliyun sync failed: {}", e))?;
 
@@ -1069,6 +1098,8 @@ async fn run_tencent() -> RunOutcome {
         .map_err(|_| "NEXT_INFRA_TENCENT_SECRET_ID is not set")?;
     let secret_key = std::env::var("NEXT_INFRA_TENCENT_SECRET_KEY")
         .map_err(|_| "NEXT_INFRA_TENCENT_SECRET_KEY is not set")?;
+    let region = std::env::var("NEXT_INFRA_TENCENT_REGION")
+        .unwrap_or_else(|_| "ap-guangzhou".into());
 
     let transport = LiveTencentTransport::new();
     let connector = TencentConnector::new(transport);
@@ -1089,7 +1120,10 @@ async fn run_tencent() -> RunOutcome {
     }
 
     let sync_outcome = connector
-        .sync(build_sync_request(Provider::Tencent, config), Some(&secret))
+        .sync(
+            build_sync_request_with_scope(Provider::Tencent, config, &format!("tencent:{region}")),
+            Some(&secret),
+        )
         .await
         .map_err(|e| format!("Tencent sync failed: {}", e))?;
 
