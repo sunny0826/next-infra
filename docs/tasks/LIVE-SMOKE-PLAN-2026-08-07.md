@@ -1,6 +1,6 @@
 # LIVE-SMOKE 真实 Provider / SSH 只读 smoke 任务拆解（2026-08-07）
 
-**状态：** 波次 0 `DONE`；波次 1：CON-G8-02 / CON-G8-04 / CON-G9-S4 `DONE`（真实实例验收通过，见各自记录）、CON-G9-S5 / CON-G9-A4 / CON-G9-T4 `BLOCKED-EXTERNAL`（无凭据）、CON-G6-06 执行 `BLOCKED-EXTERNAL`（需授权 alias）；P2 连接录入 UI 设计 `DONE`（`DEC-CONNECT-UI-01-connection-entry-flows.md`）
+**状态：** 波次 0 `DONE`；波次 1：CON-G8-02 / CON-G8-04 / CON-G9-S4 `DONE`（真实实例验收通过）、CON-G6-06 `DONE`（SSH alias 验收通过）、CON-G9-S5 `BLOCKED-EXTERNAL`（实例网关 TLS 指纹过滤 + 连接器数据面缺口，见记录）、CON-G9-A4 / CON-G9-T4 `BLOCKED-EXTERNAL`（无凭据）；P2 连接录入 UI 设计 `DONE`（`DEC-CONNECT-UI-01`），SSH 录入实现已完成（后端 + 前端纵切）
 **来源：** `HANDOFF-2026-08-07.md` P1「真实 Provider / SSH 只读 smoke」
 **边界：** 真实只读验收；真实响应/凭据**永不**写入 Fixture、文档、日志、Git；凭据只经环境变量（`NEXT_INFRA_<PROVIDER>_*`）进入进程。
 
