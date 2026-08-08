@@ -581,6 +581,9 @@ impl AliyunTransport for LiveAliyunTransport {
         request: SignedRequest,
         _module: &'static str,
     ) -> Result<Vec<u8>, ConnectorFailure> {
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok() {
+            eprintln!("> GET {}", request.url);
+        }
         let response = self
             .client
             .get(request.url)
@@ -594,6 +597,9 @@ impl AliyunTransport for LiveAliyunTransport {
             })?;
 
         let status = response.status();
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok() {
+            eprintln!("< HTTP {status}");
+        }
         if status.as_u16() == 429 {
             let retry_after_ms = response
                 .headers()
@@ -617,6 +623,22 @@ impl AliyunTransport for LiveAliyunTransport {
             });
         }
         if !status.is_success() {
+            if std::env::var("NEXT_INFRA_DEBUG").is_ok()
+                && let Ok(bytes) = response.bytes().await
+                && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            {
+                eprintln!(
+                    "< aliyun error code={} message={}",
+                    value
+                        .get("Code")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?"),
+                    value
+                        .get("Message")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?")
+                );
+            }
             return Err(ConnectorFailure {
                 code: ErrorCode::ProviderUnavailable,
                 message: format!("Aliyun API returned {}", status.as_u16()),
@@ -635,6 +657,11 @@ impl AliyunTransport for LiveAliyunTransport {
                 retry_after_ms: None,
             })?
             .to_vec();
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok()
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&body)
+        {
+            eprintln!("< aliyun body: {}", json_structure(&value));
+        }
         Ok(body)
     }
 }
@@ -1061,8 +1088,7 @@ async fn run_aliyun() -> RunOutcome {
         .map_err(|_| "NEXT_INFRA_ALIYUN_ACCESS_KEY_ID is not set")?;
     let access_key_secret = std::env::var("NEXT_INFRA_ALIYUN_ACCESS_KEY_SECRET")
         .map_err(|_| "NEXT_INFRA_ALIYUN_ACCESS_KEY_SECRET is not set")?;
-    let region = std::env::var("NEXT_INFRA_ALIYUN_REGION")
-        .unwrap_or_else(|_| "cn-hangzhou".into());
+    let region = std::env::var("NEXT_INFRA_ALIYUN_REGION").unwrap_or_else(|_| "cn-hangzhou".into());
 
     let transport = LiveAliyunTransport::new();
     let connector = AliyunConnector::new(transport);
@@ -1098,8 +1124,8 @@ async fn run_tencent() -> RunOutcome {
         .map_err(|_| "NEXT_INFRA_TENCENT_SECRET_ID is not set")?;
     let secret_key = std::env::var("NEXT_INFRA_TENCENT_SECRET_KEY")
         .map_err(|_| "NEXT_INFRA_TENCENT_SECRET_KEY is not set")?;
-    let region = std::env::var("NEXT_INFRA_TENCENT_REGION")
-        .unwrap_or_else(|_| "ap-guangzhou".into());
+    let region =
+        std::env::var("NEXT_INFRA_TENCENT_REGION").unwrap_or_else(|_| "ap-guangzhou".into());
 
     let transport = LiveTencentTransport::new();
     let connector = TencentConnector::new(transport);

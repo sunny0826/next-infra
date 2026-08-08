@@ -105,7 +105,7 @@ impl<T: AliyunTransport> next_infra_connector_api::ReadConnector for AliyunConne
                 "aliyun.network.security_group",
                 "aliyun.vpc.security_group",
                 "DescribeSecurityGroups",
-                "2016-04-28",
+                "2014-05-26",
             ),
             (
                 "aliyun.edge.slb",
@@ -126,20 +126,50 @@ impl<T: AliyunTransport> next_infra_connector_api::ReadConnector for AliyunConne
                 "2014-05-26",
             ),
         ];
+        let access_key = request
+            .connection
+            .config
+            .get("access_key_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| next_infra_connector_api::ConnectorFailure {
+                code: next_infra_core::ErrorCode::InvalidDomainValue,
+                message: "Aliyun connection config requires access_key_id".into(),
+                retryable: false,
+                retry_after_ms: None,
+            })?
+            .to_owned();
+        let region = request
+            .scope
+            .as_str()
+            .strip_prefix("aliyun:")
+            .unwrap_or(request.scope.as_str())
+            .to_owned();
         let mut resources = vec![];
         let mut error = None;
         for (module, kind, action, version) in modules {
-            let fetch = fetch_module(
-                &self.transport,
-                module,
-                kind,
-                action,
-                version,
-                &request.scope,
-                "fixture-access",
-                secret,
-            )
-            .await;
+            let fetch = if module == "aliyun.edge.dns" {
+                fetch_dns(
+                    &self.transport,
+                    &request.scope,
+                    &region,
+                    &access_key,
+                    secret,
+                )
+                .await
+            } else {
+                fetch_module(
+                    &self.transport,
+                    module,
+                    kind,
+                    action,
+                    version,
+                    &request.scope,
+                    &region,
+                    &access_key,
+                    secret,
+                )
+                .await
+            };
             resources.extend(fetch.resources);
             if let Some(failure) = fetch.failure {
                 error = Some(failure);
@@ -222,6 +252,26 @@ fn gap_reason(
 }
 
 pub const ALIYUN_API_ORIGIN: &str = "https://ecs.aliyuncs.com";
+
+/// Per-product RPC endpoint (Aliyun docs: each product has its own origin).
+/// VPC RPC rejects PageSize above its accepted window; keep it modest.
+pub fn module_page_size(module: &str) -> u32 {
+    match module {
+        "aliyun.network.vpc" | "aliyun.network.vswitch" | "aliyun.network.security_group" => 50,
+        _ => PAGE_SIZE,
+    }
+}
+
+pub fn module_origin(module: &str) -> &'static str {
+    match module {
+        "aliyun.compute.ecs" | "aliyun.ecs.public_ip" => "https://ecs.aliyuncs.com",
+        "aliyun.network.vpc" | "aliyun.network.vswitch" => "https://vpc.aliyuncs.com",
+        "aliyun.network.security_group" => ALIYUN_API_ORIGIN,
+        "aliyun.edge.slb" => "https://slb.aliyuncs.com",
+        "aliyun.edge.dns" => "https://dns.aliyuncs.com",
+        _ => ALIYUN_API_ORIGIN,
+    }
+}
 const PAGE_SIZE: u32 = 100;
 const MAX_PAGES_PER_MODULE: u32 = 100;
 const MAX_RESOURCES_PER_MODULE: usize = 10_000;
@@ -236,6 +286,7 @@ pub struct SignedRequest {
 impl SignedRequest {
     #[allow(clippy::too_many_arguments)] // RPC signing binds all independent request fields.
     pub fn new(
+        origin: &str,
         action: &str,
         version: &str,
         region: &str,
@@ -245,6 +296,66 @@ impl SignedRequest {
         now_unix_secs: u64,
         page_number: u32,
         page_size: u32,
+    ) -> Result<Self, String> {
+        Self::build(
+            origin,
+            action,
+            version,
+            region,
+            access_key,
+            secret_key,
+            nonce,
+            now_unix_secs,
+            page_number,
+            page_size,
+            &[],
+        )
+    }
+
+    /// Same as [`Self::new`] but appends action-specific query parameters
+    /// (e.g. `DomainName` for DNS record listing).
+    #[allow(clippy::too_many_arguments)] // RPC signing binds all independent request fields.
+    pub fn with_extra_params(
+        origin: &str,
+        action: &str,
+        version: &str,
+        region: &str,
+        access_key: &str,
+        secret_key: &next_infra_core::SecretValue,
+        nonce: &str,
+        now_unix_secs: u64,
+        page_number: u32,
+        page_size: u32,
+        extra: &[(&str, &str)],
+    ) -> Result<Self, String> {
+        Self::build(
+            origin,
+            action,
+            version,
+            region,
+            access_key,
+            secret_key,
+            nonce,
+            now_unix_secs,
+            page_number,
+            page_size,
+            extra,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // RPC signing binds all independent request fields.
+    fn build(
+        origin: &str,
+        action: &str,
+        version: &str,
+        region: &str,
+        access_key: &str,
+        secret_key: &next_infra_core::SecretValue,
+        nonce: &str,
+        now_unix_secs: u64,
+        page_number: u32,
+        page_size: u32,
+        extra: &[(&str, &str)],
     ) -> Result<Self, String> {
         if action.is_empty()
             || version.is_empty()
@@ -269,13 +380,13 @@ impl SignedRequest {
         params.insert("SignatureVersion".into(), "1.0".into());
         params.insert("Timestamp".into(), format_utc_iso8601(now_unix_secs));
         params.insert("Version".into(), version.to_string());
+        for (key, value) in extra {
+            params.insert((*key).to_string(), (*value).to_string());
+        }
         let signature = sign_rpc_query(secret_key.expose(), &params)?;
         params.insert("Signature".into(), signature);
-        let url = url::Url::parse(&format!(
-            "{ALIYUN_API_ORIGIN}/?{}",
-            canonical_query(&params)
-        ))
-        .map_err(|_| "invalid Aliyun request URL".to_string())?;
+        let url = url::Url::parse(&format!("{origin}/?{}", canonical_query(&params)))
+            .map_err(|_| "invalid Aliyun request URL".to_string())?;
         Ok(Self {
             url,
             access_key: access_key.into(),
@@ -377,14 +488,52 @@ fn civil_from_unix_secs(unix_secs: u64) -> (u32, u32, u32) {
 
 #[derive(Deserialize)]
 struct PageEnvelope {
-    #[serde(rename = "TotalCount")]
     total_count: u64,
-    #[serde(rename = "PageNumber")]
     page_number: u32,
-    #[serde(rename = "PageSize")]
     page_size: u32,
-    #[serde(rename = "Items")]
     items: Vec<ResourceDto>,
+}
+
+/// Aliyun RPC list responses wrap items per action
+/// (Instances.Instance, Vpcs.Vpc, DomainRecords.Record, ...). Extract the
+/// nested array generically instead of assuming a flat `Items` field.
+fn parse_page_envelope(body: &[u8]) -> Result<PageEnvelope, String> {
+    let value: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|_| "Aliyun response is not valid JSON".to_string())?;
+    let total_count = value
+        .get("TotalCount")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let page_number = value
+        .get("PageNumber")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1) as u32;
+    let page_size = value
+        .get("PageSize")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as u32;
+    let items = value
+        .get("Items")
+        .filter(|value| value.is_array())
+        .or_else(|| {
+            value.as_object().and_then(|map| {
+                map.values()
+                    .find(|value| value.is_object())
+                    .and_then(|wrapped| {
+                        wrapped
+                            .as_object()
+                            .and_then(|inner| inner.values().find(|value| value.is_array()))
+                    })
+            })
+        })
+        .and_then(|array| serde_json::from_value(array.clone()).ok())
+        .unwrap_or_default();
+    Ok(PageEnvelope {
+        total_count,
+        page_number,
+        page_size,
+        items,
+    })
 }
 
 struct ModuleFetch {
@@ -400,6 +549,7 @@ async fn fetch_module<T: AliyunTransport>(
     action: &str,
     version: &str,
     scope: &Scope,
+    region: &str,
     access_key: &str,
     secret_key: &next_infra_core::SecretValue,
 ) -> ModuleFetch {
@@ -416,15 +566,16 @@ async fn fetch_module<T: AliyunTransport>(
         }
         let result = retry_list(transport, module, || {
             SignedRequest::new(
+                module_origin(module),
                 action,
                 version,
-                scope.as_str(),
+                region,
                 access_key,
                 secret_key,
                 &nonce(),
                 now_unix_secs(),
                 page,
-                PAGE_SIZE,
+                module_page_size(module),
             )
         })
         .await;
@@ -435,7 +586,7 @@ async fn fetch_module<T: AliyunTransport>(
                 break;
             }
         };
-        let envelope = match serde_json::from_slice::<PageEnvelope>(&body) {
+        let envelope = match parse_page_envelope(&body) {
             Ok(envelope) => envelope,
             Err(_) => {
                 fetch_failure = Some(failure(
@@ -478,6 +629,184 @@ async fn fetch_module<T: AliyunTransport>(
             break;
         }
         page += 1;
+    }
+    ModuleFetch {
+        resources,
+        failure: fetch_failure,
+    }
+}
+
+const MAX_DNS_DOMAINS: usize = 20;
+
+/// DNS records require a two-step walk: list domains, then per-domain records.
+async fn fetch_dns<T: AliyunTransport>(
+    transport: &T,
+    scope: &Scope,
+    region: &str,
+    access_key: &str,
+    secret_key: &next_infra_core::SecretValue,
+) -> ModuleFetch {
+    let origin = module_origin("aliyun.edge.dns");
+    let version = "2015-01-09";
+    let mut domains: Vec<String> = Vec::new();
+    let mut page = 1u32;
+    loop {
+        if page > MAX_PAGES_PER_MODULE || domains.len() >= MAX_DNS_DOMAINS {
+            break;
+        }
+        let body = match retry_list(transport, "aliyun.edge.dns", || {
+            SignedRequest::with_extra_params(
+                origin,
+                "DescribeDomains",
+                version,
+                region,
+                access_key,
+                secret_key,
+                &nonce(),
+                now_unix_secs(),
+                page,
+                module_page_size("aliyun.edge.dns"),
+                &[],
+            )
+        })
+        .await
+        {
+            Ok(body) => body,
+            Err(failure) => {
+                return ModuleFetch {
+                    resources: Vec::new(),
+                    failure: Some(failure),
+                };
+            }
+        };
+        let value: serde_json::Value = match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(_) => {
+                return ModuleFetch {
+                    resources: Vec::new(),
+                    failure: Some(failure(
+                        next_infra_core::ErrorCode::InvalidResponse,
+                        "Aliyun DNS domains response is invalid",
+                    )),
+                };
+            }
+        };
+        let total_count = value
+            .get("TotalCount")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let found = value
+            .as_object()
+            .and_then(|map| map.values().find(|v| v.is_object()))
+            .and_then(|wrapped| wrapped.as_object())
+            .and_then(|inner| inner.values().find(|v| v.is_array()))
+            .map(|array| {
+                array
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| {
+                                item.get("DomainName").and_then(serde_json::Value::as_str)
+                            })
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let found_empty = found.is_empty();
+        domains.extend(found);
+        if domains.len() as u64 >= total_count || found_empty {
+            break;
+        }
+        page += 1;
+    }
+    domains.truncate(MAX_DNS_DOMAINS);
+
+    let at = Timestamp::from_unix_millis(0)
+        .map_err(|_| "invalid timestamp")
+        .ok();
+    let at = at.unwrap();
+    let mut resources = Vec::new();
+    let mut fetch_failure = None;
+    for domain in domains {
+        if resources.len() >= MAX_RESOURCES_PER_MODULE {
+            fetch_failure = Some(failure(
+                next_infra_core::ErrorCode::PartialPagination,
+                "Aliyun DNS records exceeded its bounded budget",
+            ));
+            break;
+        }
+        let mut page = 1u32;
+        loop {
+            if page > MAX_PAGES_PER_MODULE || resources.len() >= MAX_RESOURCES_PER_MODULE {
+                fetch_failure = Some(failure(
+                    next_infra_core::ErrorCode::PartialPagination,
+                    "Aliyun DNS records exceeded its bounded budget",
+                ));
+                break;
+            }
+            let body = match retry_list(transport, "aliyun.edge.dns", || {
+                SignedRequest::with_extra_params(
+                    origin,
+                    "DescribeDomainRecords",
+                    version,
+                    region,
+                    access_key,
+                    secret_key,
+                    &nonce(),
+                    now_unix_secs(),
+                    page,
+                    module_page_size("aliyun.edge.dns"),
+                    &[("DomainName", &domain)],
+                )
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(f) => {
+                    fetch_failure = Some(f);
+                    break;
+                }
+            };
+            let envelope = match parse_page_envelope(&body) {
+                Ok(envelope) => envelope,
+                Err(_) => {
+                    fetch_failure = Some(failure(
+                        next_infra_core::ErrorCode::InvalidResponse,
+                        "Aliyun DNS records response is invalid",
+                    ));
+                    break;
+                }
+            };
+            if envelope.page_size == 0 || envelope.page_number != page {
+                fetch_failure = Some(failure(
+                    next_infra_core::ErrorCode::InvalidResponse,
+                    "Aliyun DNS pagination is invalid",
+                ));
+                break;
+            }
+            let empty_page = envelope.items.is_empty();
+            for value in envelope.items {
+                match map("aliyun.dns.record", scope, at, value) {
+                    Ok(observation) => resources.push(observation),
+                    Err(_) => {
+                        fetch_failure = Some(failure(
+                            next_infra_core::ErrorCode::InvalidResponse,
+                            "Aliyun DNS record mapping failed",
+                        ));
+                        break;
+                    }
+                }
+            }
+            if u64::try_from(resources.len()).unwrap_or(u64::MAX) >= envelope.total_count
+                || empty_page
+            {
+                break;
+            }
+            page += 1;
+        }
     }
     ModuleFetch {
         resources,
@@ -653,13 +982,56 @@ fn relation(
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct ResourceDto {
     pub id: String,
     pub name: Option<String>,
     pub region: Option<String>,
     pub status: Option<String>,
     pub parent_id: Option<String>,
+}
+
+/// Aliyun products use per-resource id fields (InstanceId, VpcId, ...) and
+/// some responses also carry a generic `id`; pick the first present one so a
+/// duplicate never aborts deserialization.
+impl<'de> serde::Deserialize<'de> for ResourceDto {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("Aliyun resource is not an object"))?;
+        let id = [
+            "id",
+            "InstanceId",
+            "VpcId",
+            "VSwitchId",
+            "SecurityGroupId",
+            "LoadBalancerId",
+            "RecordId",
+            "AllocationId",
+        ]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(serde_json::Value::as_str))
+        .unwrap_or("")
+        .to_owned();
+        let field = |key: &str| {
+            object
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        let parent_id = field("parent_id").or_else(|| field("VpcId"));
+        Ok(ResourceDto {
+            id,
+            name: field("name"),
+            region: field("region"),
+            status: field("status"),
+            parent_id,
+        })
+    }
 }
 pub fn map(
     kind: &str,
@@ -772,7 +1144,7 @@ mod tests {
             connection: ConnectionInput {
                 connection_id: ConnectionId::new("aliyun-fixture-connection").unwrap(),
                 connector_type: ConnectorType::new("aliyun").unwrap(),
-                config: json!({}),
+                config: json!({"access_key_id": "fixture-access"}),
                 config_schema_version: SchemaVersion::new(1).unwrap(),
             },
             mode: SyncMode::Full,
@@ -784,6 +1156,7 @@ mod tests {
 
     fn signed_request(action: &str) -> SignedRequest {
         SignedRequest::new(
+            ALIYUN_API_ORIGIN,
             action,
             "2014-05-26",
             "cn-example-1",
@@ -872,6 +1245,7 @@ mod tests {
     #[test]
     fn rpc_request_is_injection_safe_and_never_echoes_secret() {
         let request = SignedRequest::new(
+            ALIYUN_API_ORIGIN,
             "Describe&Injected=true",
             "2014-05-26",
             "cn-example-1&Injected=true",
@@ -907,6 +1281,7 @@ mod tests {
         let secret = &SecretValue::new("fixture-secret");
         assert!(
             SignedRequest::new(
+                ALIYUN_API_ORIGIN,
                 "",
                 "2014-05-26",
                 "cn-example-1",
@@ -921,6 +1296,7 @@ mod tests {
         );
         assert!(
             SignedRequest::new(
+                ALIYUN_API_ORIGIN,
                 "A",
                 "2014-05-26",
                 "cn-example-1",
@@ -935,6 +1311,7 @@ mod tests {
         );
         assert!(
             SignedRequest::new(
+                ALIYUN_API_ORIGIN,
                 "A",
                 "2014-05-26",
                 "cn-example-1",
@@ -949,6 +1326,7 @@ mod tests {
         );
         assert!(
             SignedRequest::new(
+                ALIYUN_API_ORIGIN,
                 "A",
                 "2014-05-26",
                 "cn-example-1",
@@ -990,7 +1368,7 @@ mod tests {
         ) -> Result<Vec<u8>, next_infra_connector_api::ConnectorFailure> {
             assert_eq!(
                 request.url.origin().ascii_serialization(),
-                ALIYUN_API_ORIGIN
+                module_origin(module)
             );
             if module == "aliyun.edge.dns" {
                 return Err(failure(
@@ -1025,11 +1403,19 @@ mod tests {
         async fn list(
             &self,
             request: SignedRequest,
-            _module: &'static str,
+            module: &'static str,
         ) -> Result<Vec<u8>, ConnectorFailure> {
+            if request
+                .url
+                .query_pairs()
+                .any(|(key, value)| key == "Action" && value == "DescribeDomains")
+            {
+                return Ok(br#"{"TotalCount":1,"PageNumber":1,"PageSize":10,"Domains":{"Domain":[{"DomainName":"fixture-domain"}]}}"#.to_vec());
+            }
+
             assert_eq!(
                 request.url.origin().ascii_serialization(),
-                ALIYUN_API_ORIGIN
+                module_origin(module)
             );
             let page: u32 = request
                 .url
@@ -1069,6 +1455,14 @@ mod tests {
             request: SignedRequest,
             _module: &'static str,
         ) -> Result<Vec<u8>, ConnectorFailure> {
+            if request
+                .url
+                .query_pairs()
+                .any(|(key, value)| key == "Action" && value == "DescribeDomains")
+            {
+                return Ok(br#"{"TotalCount":1,"PageNumber":1,"PageSize":10,"Domains":{"Domain":[{"DomainName":"fixture-domain"}]}}"#.to_vec());
+            }
+
             let page: u32 = request
                 .url
                 .query_pairs()
@@ -1079,10 +1473,11 @@ mod tests {
                 .map(|i| json!({"id": format!("budget-{page}-{i}"), "region": "cn-example-1"}))
                 .collect();
             Ok(json!({
-                "TotalCount": 10_000_000,
-                "PageNumber": page,
-                "PageSize": 100,
-                "Items": items,
+                    "TotalCount": 10_000_000,
+                    "PageNumber": page,
+                    "PageSize": 100,
+                    "Items": items,
+
             })
             .to_string()
             .into_bytes())
@@ -1114,9 +1509,17 @@ mod tests {
     impl AliyunTransport for FlakyTransport {
         async fn list(
             &self,
-            _request: SignedRequest,
+            request: SignedRequest,
             _module: &'static str,
         ) -> Result<Vec<u8>, ConnectorFailure> {
+            if request
+                .url
+                .query_pairs()
+                .any(|(key, value)| key == "Action" && value == "DescribeDomains")
+            {
+                return Ok(br#"{"TotalCount":1,"PageNumber":1,"PageSize":10,"Domains":{"Domain":[{"DomainName":"fixture-domain"}]}}"#.to_vec());
+            }
+
             *self.attempts.lock().unwrap() += 1;
             let mut failures = self.failures.lock().unwrap();
             if *failures > 0 {
