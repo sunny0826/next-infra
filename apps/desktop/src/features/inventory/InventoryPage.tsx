@@ -8,6 +8,7 @@ import "./inventory.css";
 
 interface InventoryPageProps {
   readonly onSelectResource?: (resource: ResourceDto) => void;
+  readonly queryVersion?: number;
 }
 
 type InventoryState =
@@ -27,7 +28,7 @@ function needsAttention(resource: ResourceDto): boolean {
   );
 }
 
-export function InventoryPage({ onSelectResource }: InventoryPageProps) {
+export function InventoryPage({ onSelectResource, queryVersion = 0 }: InventoryPageProps) {
   const adapter = useDesktopAdapter();
   const [state, setState] = useState<InventoryState>({ type: "loading" });
   const [query, setQuery] = useState("");
@@ -58,7 +59,7 @@ export function InventoryPage({ onSelectResource }: InventoryPageProps) {
     return () => {
       active = false;
     };
-  }, [adapter, cursor, query]);
+  }, [adapter, cursor, query, queryVersion]);
 
   const visibleItems = useMemo(() => {
     if (state.type !== "ready") return [];

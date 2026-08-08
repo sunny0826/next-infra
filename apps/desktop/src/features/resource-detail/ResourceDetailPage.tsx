@@ -8,7 +8,7 @@ import { EvidenceSpine } from "../evidence/EvidenceSpine";
 
 import "./resource-detail.css";
 
-interface ResourceDetailPageProps { readonly resourceId: string; }
+interface ResourceDetailPageProps { readonly resourceId: string; readonly queryVersion?: number; }
 
 interface DetailState {
   readonly detail: ResourceDetailDto;
@@ -24,7 +24,7 @@ function normalizedAttributes(value: unknown): readonly [string, string][] {
     .map(([key, item]) => [key, item === null ? "null" : String(item)]);
 }
 
-export function ResourceDetailPage({ resourceId }: ResourceDetailPageProps) {
+export function ResourceDetailPage({ resourceId, queryVersion = 0 }: ResourceDetailPageProps) {
   const adapter = useDesktopAdapter();
   const [state, setState] = useState<DetailState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +57,7 @@ export function ResourceDetailPage({ resourceId }: ResourceDetailPageProps) {
         if (active) setError("无法从本地快照加载资源详情。");
       });
     return () => { active = false; };
-  }, [adapter, resourceId]);
+  }, [adapter, queryVersion, resourceId]);
 
   const evidenceGroups = useMemo(() => {
     if (state === null) return [];

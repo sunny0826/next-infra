@@ -11,6 +11,9 @@ import {
 } from "../../platform/desktop-adapter/desktop-adapter";
 
 import "./connectors.css";
+import { usePersistedState } from "./use-persisted-state";
+
+const CONNECTOR_DRAFT_PREFIX = "next-infra.connector-draft";
 
 interface ConnectionRow {
   readonly connection: ConnectionDto;
@@ -67,19 +70,21 @@ const PROVIDER_TITLES: Record<string, string> = {
 
 function ProviderConnectionForm({
   descriptor,
+  draftKey,
   onNotice,
   onError,
   onCreated,
 }: {
   readonly descriptor: ProviderFormDescriptor;
+  readonly draftKey: string;
   readonly onNotice: (text: string | null) => void;
   readonly onError: (text: string | null) => void;
   readonly onCreated: () => Promise<void>;
 }) {
   const adapter = useDesktopAdapter();
-  const [name, setName] = useState("");
+  const [name, setName] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.${draftKey}.name`, "");
   const [secrets, setSecrets] = useState<Record<string, string>>({});
-  const [region, setRegion] = useState(descriptor.defaultRegion ?? "");
+  const [region, setRegion] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.${draftKey}.region`, descriptor.defaultRegion ?? "");
   const [validated, setValidated] = useState(false);
   const [validating, setValidating] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -151,36 +156,34 @@ function ProviderConnectionForm({
           <label key={field.key}>{field.label}<input autoComplete="off" disabled={validating || connecting} maxLength={4096} onChange={(event) => setSecrets((current) => ({ ...current, [field.key]: event.target.value }))} required type="password" value={secrets[field.key] ?? ""} /></label>
         ))}
         {descriptor.regionLabel !== undefined ? <label>{descriptor.regionLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={64} onChange={(event) => setRegion(event.target.value)} placeholder={descriptor.defaultRegion} required value={region} /></label> : null}
-        <button disabled={validating || connecting} onClick={validateProvider} type="button">{validating ? "正在验证…" : descriptor.validateButtonLabel}</button>
+        <button disabled={validating || connecting} onClick={validateProvider} type="button">{validating ? "正在验证…" : descriptor.validateButtonLabel}{validating ? <span aria-hidden="true" className="connectors-button-progress" /> : null}</button>
         <button disabled={connecting || !validated} type="submit">{connecting ? "连接中…" : descriptor.createButtonLabel}</button>
       </form>
     </section>
   );
 }
 
-export function ConnectorsPage() {
+export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: number }) {
   const adapter = useDesktopAdapter();
   const [rows, setRows] = useState<readonly ConnectionRow[] | null>(null);
   const [coverage, setCoverage] = useState<readonly ConnectorCoverageDto[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [displayName, setDisplayName] = useState("");
+  const [displayName, setDisplayName] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.github.displayName`, "");
   const [token, setToken] = useState("");
-  const [repositories, setRepositories] = useState<readonly GitHubRepositoryOption[] | null>(null);
-  const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<readonly string[]>([]);
+  const [repositories, setRepositories] = usePersistedState<readonly GitHubRepositoryOption[] | null>(`${CONNECTOR_DRAFT_PREFIX}.github.repositories`, null);
+  const [selectedRepositoryIds, setSelectedRepositoryIds] = usePersistedState<readonly string[]>(`${CONNECTOR_DRAFT_PREFIX}.github.selectedRepositoryIds`, []);
   const [discovering, setDiscovering] = useState(false);
   const [connecting, setConnecting] = useState(false);
-  const [sshDisplayName, setSshDisplayName] = useState("");
-  const [sshHostAlias, setSshHostAlias] = useState("");
-  const [sshConnectTimeout, setSshConnectTimeout] = useState("10");
-  const [sshDiscoveredServices, setSshDiscoveredServices] = useState<
-    readonly { id: string; name: string }[] | null
-  >(null);
-  const [sshSelectedServiceIds, setSshSelectedServiceIds] = useState<readonly string[]>([]);
+  const [sshDisplayName, setSshDisplayName] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.ssh.displayName`, "");
+  const [sshHostAlias, setSshHostAlias] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.ssh.hostAlias`, "");
+  const [sshConnectTimeout, setSshConnectTimeout] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.ssh.connectTimeout`, "10");
+  const [sshDiscoveredServices, setSshDiscoveredServices] = usePersistedState<readonly { id: string; name: string }[] | null>(`${CONNECTOR_DRAFT_PREFIX}.ssh.discoveredServices`, null);
+  const [sshSelectedServiceIds, setSshSelectedServiceIds] = usePersistedState<readonly string[]>(`${CONNECTOR_DRAFT_PREFIX}.ssh.selectedServiceIds`, []);
   const [sshValidating, setSshValidating] = useState(false);
   const [sshConnecting, setSshConnecting] = useState(false);
-  const [dokployDisplayName, setDokployDisplayName] = useState("");
-  const [dokployUrl, setDokployUrl] = useState("");
+  const [dokployDisplayName, setDokployDisplayName] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.dokploy.displayName`, "");
+  const [dokployUrl, setDokployUrl] = usePersistedState(`${CONNECTOR_DRAFT_PREFIX}.dokploy.url`, "");
   const [dokployToken, setDokployToken] = useState("");
   const [dokployValidated, setDokployValidated] = useState(false);
   const [dokployValidating, setDokployValidating] = useState(false);
@@ -221,7 +224,7 @@ export function ConnectorsPage() {
       .then(() => { if (active) setError(null); })
       .catch((error) => { if (active) setError(`无法查询连接器状态（${desktopErrorCode(error)}）。`); });
     return () => { active = false; };
-  }, [refresh]);
+  }, [queryVersion, refresh]);
 
   async function createGitHubConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -513,7 +516,7 @@ export function ConnectorsPage() {
         <form className="connectors-form" onSubmit={createGitHubConnection}>
           <label>连接名称<input autoComplete="off" disabled={connecting || discovering} maxLength={120} onChange={(event) => setDisplayName(event.target.value)} required value={displayName} /></label>
           <label>细粒度 Token<input autoComplete="off" disabled={connecting || discovering} maxLength={16384} onChange={(event) => setToken(event.target.value)} required type="password" value={token} /></label>
-          <button disabled={connecting || discovering} onClick={discoverGitHubRepositories} type="button">{discovering ? "正在加载…" : "验证并加载仓库"}</button>
+          <button disabled={connecting || discovering} onClick={discoverGitHubRepositories} type="button">{discovering ? "正在加载…" : "验证并加载仓库"}{discovering ? <span aria-hidden="true" className="connectors-button-progress" /> : null}</button>
           {repositories !== null ? <fieldset className="connectors-repository-picker">
             <legend>同步范围：已选择 {selectedRepositoryIds.length} / {repositories.length} 个仓库</legend>
             {repositories.length === 0 ? <p>该 Token 没有可同步的仓库。</p> : <div className="connectors-repository-list">
@@ -531,7 +534,7 @@ export function ConnectorsPage() {
           <label>SSH 连接名称<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={120} onChange={(event) => setSshDisplayName(event.target.value)} required value={sshDisplayName} /></label>
           <label>主机别名<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={128} onChange={(event) => setSshHostAlias(event.target.value)} placeholder="例如 mac-mini" required value={sshHostAlias} /><span className="connectors-field-hint">SSH config 中的别名：字母/数字开头，仅含字母、数字、_ . -</span></label>
           <label>连接超时（秒）<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={4} onChange={(event) => setSshConnectTimeout(event.target.value)} type="number" value={sshConnectTimeout} /></label>
-          <button disabled={sshValidating || sshConnecting} onClick={discoverSshServices} type="button">{sshValidating ? "正在验证…" : "验证并发现服务"}</button>
+          <button disabled={sshValidating || sshConnecting} onClick={discoverSshServices} type="button">{sshValidating ? "正在验证…" : "验证并发现服务"}{sshValidating ? <span aria-hidden="true" className="connectors-button-progress" /> : null}</button>
           {sshDiscoveredServices !== null ? <fieldset className="connectors-repository-picker">
             <legend>同步范围：已选择 {sshSelectedServiceIds.length} / {sshDiscoveredServices.length} 个服务</legend>
             {sshDiscoveredServices.length === 0 ? <p>没有可用的服务，仍可创建空范围连接。</p> : <div className="connectors-repository-list">
@@ -549,7 +552,7 @@ export function ConnectorsPage() {
           <label>Dokploy 连接名称<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={120} onChange={(event) => setDokployDisplayName(event.target.value)} required value={dokployDisplayName} /></label>
           <label>实例 URL<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={512} onChange={(event) => setDokployUrl(event.target.value)} placeholder="https://dokploy.example.com" required value={dokployUrl} /><span className="connectors-field-hint">实例基础地址（不带 /api 后缀）</span></label>
           <label>API Token<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={4096} onChange={(event) => setDokployToken(event.target.value)} required type="password" value={dokployToken} /></label>
-          <button disabled={dokployValidating || dokployConnecting} onClick={validateDokployConnection} type="button">{dokployValidating ? "正在验证…" : "验证并统计项目"}</button>
+          <button disabled={dokployValidating || dokployConnecting} onClick={validateDokployConnection} type="button">{dokployValidating ? "正在验证…" : "验证并统计项目"}{dokployValidating ? <span aria-hidden="true" className="connectors-button-progress" /> : null}</button>
           <button disabled={dokployConnecting || !dokployValidated} type="submit">{dokployConnecting ? "连接中…" : "创建连接并同步"}</button>
         </form>
       </section>
@@ -569,6 +572,7 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
+        draftKey="cloudflare"
         onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
       ) : null}
@@ -588,6 +592,7 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
+        draftKey="supabase"
         onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
       ) : null}
@@ -612,6 +617,7 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
+        draftKey="aliyun"
         onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
       ) : null}
@@ -636,6 +642,7 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
+        draftKey="tencent"
         onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
       ) : null}

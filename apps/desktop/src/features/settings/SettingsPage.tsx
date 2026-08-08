@@ -6,9 +6,11 @@ import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapter
 
 import "./settings.css";
 
+interface SettingsPageProps { readonly queryVersion?: number; }
+
 interface SettingsState { readonly settings: LocalSettings; readonly capabilities: RuntimeCapabilities; }
 
-export function SettingsPage() {
+export function SettingsPage({ queryVersion = 0 }: SettingsPageProps) {
   const adapter = useDesktopAdapter();
   const [state, setState] = useState<SettingsState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +21,7 @@ export function SettingsPage() {
       .then(([settings, capabilities]) => { if (active) setState({ settings, capabilities }); })
       .catch(() => { if (active) setError("无法查询本地设置。"); });
     return () => { active = false; };
-  }, [adapter]);
+  }, [adapter, queryVersion]);
 
   async function save(settings: LocalSettings) {
     if (state === null) return;

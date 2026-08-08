@@ -279,6 +279,22 @@ describe("React app shell", () => {
     expect(within(inspector).getByText("fixture-sync-run-complete")).toBeInTheDocument();
   });
 
+  it("keeps the connection dialog and its draft open across window focus", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "连接器" }));
+    await user.click(await screen.findByRole("button", { name: "添加连接" }));
+    await user.click(await screen.findByRole("button", { name: /^GitHub/ }));
+    const name = await screen.findByLabelText("连接名称");
+    await user.type(name, "Focus Draft");
+
+    window.dispatchEvent(new Event("focus"));
+
+    expect(screen.getByRole("dialog", { name: "添加连接" })).toBeInTheDocument();
+    expect(screen.getByLabelText("连接名称")).toHaveValue("Focus Draft");
+  });
+
   it("re-queries on window focus and invalidation, then unsubscribes on unmount", async () => {
     const adapter = new TrackingAdapter(createQueryEvidenceLifecycleSnapshotFixture());
     const { unmount } = renderShell(adapter);

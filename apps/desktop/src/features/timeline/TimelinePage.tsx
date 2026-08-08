@@ -21,7 +21,11 @@ function compactValue(value: unknown): string {
   return text.length > 160 ? `${text.slice(0, 160)}...` : text;
 }
 
-export function TimelinePage() {
+interface TimelinePageProps {
+  readonly queryVersion?: number;
+}
+
+export function TimelinePage({ queryVersion = 0 }: TimelinePageProps) {
   const adapter = useDesktopAdapter();
   const [groups, setGroups] = useState<readonly TimelineGroupDto[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -41,7 +45,7 @@ export function TimelinePage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { load(); }, [adapter]);
+  useEffect(() => { load(); }, [adapter, queryVersion]);
 
   return (
     <section className="timeline-page" aria-labelledby="timeline-title">

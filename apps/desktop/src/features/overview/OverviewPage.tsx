@@ -19,6 +19,7 @@ interface OverviewState {
 
 interface OverviewPageProps {
   readonly onInspectResource?: (resource: ResourceDto) => void;
+  readonly queryVersion?: number;
 }
 
 function attentionReason(resource: ResourceDto): string | null {
@@ -36,7 +37,7 @@ function attentionTone(resource: ResourceDto): string {
   return "unknown";
 }
 
-export function OverviewPage({ onInspectResource }: OverviewPageProps) {
+export function OverviewPage({ onInspectResource, queryVersion = 0 }: OverviewPageProps) {
   const adapter = useDesktopAdapter();
   const [state, setState] = useState<OverviewState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export function OverviewPage({ onInspectResource }: OverviewPageProps) {
     return () => {
       active = false;
     };
-  }, [adapter]);
+  }, [adapter, queryVersion]);
 
   const attention = useMemo(
     () =>

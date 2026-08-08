@@ -159,7 +159,7 @@ export function AppShell() {
         searchValue={searchValue}
       />
       <PrimaryCanvas
-        key={`${route.id}-${queryVersion}`}
+        key={route.id}
         detailResourceId={currentRouteState.detailResourceId}
         inspectorOpen={inspectorOpen}
         onInspectRelation={inspectRelation}
@@ -167,6 +167,7 @@ export function AppShell() {
         onOpenInspector={() => setInspectorOpen(true)}
         onSelectResource={selectInventoryResource}
         onTopologyFocus={focusTopology}
+        queryVersion={queryVersion}
         route={route}
         topologyFocusId={currentRouteState.topologyFocusId}
       />

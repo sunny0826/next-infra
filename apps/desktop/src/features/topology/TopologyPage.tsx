@@ -13,6 +13,7 @@ interface TopologyPageProps {
   readonly onInspectResource?: (resource: ResourceDto) => void;
   readonly onInspectRelation?: (relation: RelationDto) => void;
   readonly onFocusResource?: (resourceId: string) => void;
+  readonly queryVersion?: number;
 }
 
 interface Point { readonly x: number; readonly y: number; }
@@ -46,6 +47,7 @@ export function TopologyPage({
   onInspectResource,
   onInspectRelation,
   onFocusResource,
+  queryVersion = 0,
 }: TopologyPageProps) {
   const adapter = useDesktopAdapter();
   const [topology, setTopology] = useState<TopologyDto | null>(null);
@@ -68,7 +70,7 @@ export function TopologyPage({
       .then((result) => { if (active) setTopology(result); })
       .catch(() => { if (active) setError("无法完成受限拓扑查询。"); });
     return () => { active = false; };
-  }, [adapter, focusResourceId]);
+  }, [adapter, focusResourceId, queryVersion]);
 
   const positions = useMemo(() => {
     const points = new Map<string, Point>();
