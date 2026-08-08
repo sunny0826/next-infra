@@ -117,6 +117,26 @@ export interface SshConnectResult {
   readonly sync_run_id: string;
 }
 
+export interface DokployValidateInput {
+  readonly url: string;
+  readonly token: string;
+}
+
+export interface DokployValidateResult {
+  readonly project_count: number;
+}
+
+export interface DokployConnectInput {
+  readonly display_name: string;
+  readonly url: string;
+  readonly token: string;
+}
+
+export interface DokployConnectResult {
+  readonly connection_id: string;
+  readonly sync_run_id: string;
+}
+
 export interface ConnectionPurgeSummary {
   readonly resources: number;
   readonly relations: number;
@@ -191,6 +211,8 @@ export interface DesktopAdapter {
   createGitHubConnection(input: CreateGitHubConnectionInput): Promise<CreateGitHubConnectionResult>;
   validateSshConnection(input: SshValidateInput): Promise<SshValidateResult>;
   createSshConnection(input: SshConnectInput): Promise<SshConnectResult>;
+  validateDokployConnection(input: DokployValidateInput): Promise<DokployValidateResult>;
+  createDokployConnection(input: DokployConnectInput): Promise<DokployConnectResult>;
   previewGitHubConnectionPurge(connectionId: string): Promise<ConnectionPurgeSummary>;
   purgeGitHubConnection(connectionId: string): Promise<ConnectionPurgeSummary>;
   manualSync(connectionId: string): Promise<ManualSyncResult>;

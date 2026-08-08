@@ -24,6 +24,10 @@ import type {
   SshConnectResult,
   SshValidateInput,
   SshValidateResult,
+  DokployConnectInput,
+  DokployConnectResult,
+  DokployValidateInput,
+  DokployValidateResult,
   DisableBindingInput,
   UpdateBindingInput,
   Unsubscribe,
@@ -223,6 +227,17 @@ export class MockDesktopAdapter implements DesktopAdapter {
     return {
       connection_id: `fixture-ssh-${input.display_name || "connection"}`,
       sync_run_id: "fixture-ssh-sync",
+    };
+  }
+
+  async validateDokployConnection(_input: DokployValidateInput): Promise<DokployValidateResult> {
+    return { project_count: 0 };
+  }
+
+  async createDokployConnection(input: DokployConnectInput): Promise<DokployConnectResult> {
+    return {
+      connection_id: `fixture-dokploy-${input.display_name || "connection"}`,
+      sync_run_id: "fixture-dokploy-sync",
     };
   }
 

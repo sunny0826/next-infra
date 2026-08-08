@@ -46,6 +46,12 @@ export function ConnectorsPage() {
   const [sshSelectedServiceIds, setSshSelectedServiceIds] = useState<readonly string[]>([]);
   const [sshValidating, setSshValidating] = useState(false);
   const [sshConnecting, setSshConnecting] = useState(false);
+  const [dokployDisplayName, setDokployDisplayName] = useState("");
+  const [dokployUrl, setDokployUrl] = useState("");
+  const [dokployToken, setDokployToken] = useState("");
+  const [dokployValidated, setDokployValidated] = useState(false);
+  const [dokployValidating, setDokployValidating] = useState(false);
+  const [dokployConnecting, setDokployConnecting] = useState(false);
   const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
   const [purging, setPurging] = useState(false);
 
@@ -207,6 +213,69 @@ export function ConnectorsPage() {
     );
   }
 
+  function isValidDokployUrl(value: string): boolean {
+    try {
+      const url = new URL(value.trim());
+      return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  async function validateDokployConnection() {
+    if (dokployValidating || dokployConnecting) return;
+    if (!isValidDokployUrl(dokployUrl)) {
+      setError("Dokploy 实例 URL 无效：需以 http:// 或 https:// 开头且包含主机名。");
+      return;
+    }
+    if (dokployToken.trim().length === 0) {
+      setError("请先输入 Dokploy API Token。");
+      return;
+    }
+    setNotice(null);
+    setError(null);
+    setDokployValidating(true);
+    try {
+      const result = await adapter.validateDokployConnection({
+        url: dokployUrl.trim(),
+        token: dokployToken,
+      });
+      setDokployValidated(true);
+      setNotice(`已验证 Dokploy 实例，发现 ${result.project_count} 个项目。`);
+    } catch (error) {
+      setDokployValidated(false);
+      setError(`无法验证 Dokploy 实例（${desktopErrorCode(error)}）。请检查 URL 与 Token 后重试。`);
+    } finally {
+      setDokployToken("");
+      setDokployValidating(false);
+    }
+  }
+
+  async function createDokployConnection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (dokployValidating || dokployConnecting) return;
+    setNotice(null);
+    setError(null);
+    setDokployConnecting(true);
+    try {
+      const result = await adapter.createDokployConnection({
+        display_name: dokployDisplayName,
+        url: dokployUrl.trim(),
+        token: dokployToken,
+      });
+      setNotice(`Dokploy 连接已创建，将在后台同步：${result.sync_run_id}。`);
+      setDokployDisplayName("");
+      setDokployUrl("");
+      setDokployToken("");
+      setDokployValidated(false);
+      await refresh();
+    } catch (error) {
+      setError(`无法创建 Dokploy 连接（${desktopErrorCode(error)}）。请检查 URL 与 Token 后重试。`);
+    } finally {
+      setDokployConnecting(false);
+    }
+  }
+
   async function startManualSync(connection: ConnectionDto) {
     setNotice(null);
     try {
@@ -307,6 +376,16 @@ export function ConnectorsPage() {
             </div>}
             <button disabled={sshConnecting} type="submit">{sshConnecting ? "连接中…" : `创建连接并同步 ${sshSelectedServiceIds.length} 个服务`}</button>
           </fieldset> : null}
+        </form>
+      </section>
+      <section className="connectors-section" aria-labelledby="dokploy-connection">
+        <div><h2 id="dokploy-connection">添加 Dokploy 连接</h2><span>只读项目、应用、部署、服务器与域名</span></div>
+        <form className="connectors-form" onSubmit={createDokployConnection}>
+          <label>Dokploy 连接名称<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={120} onChange={(event) => setDokployDisplayName(event.target.value)} required value={dokployDisplayName} /></label>
+          <label>实例 URL<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={512} onChange={(event) => setDokployUrl(event.target.value)} placeholder="https://dokploy.example.com" required value={dokployUrl} /><span className="connectors-field-hint">实例基础地址（不带 /api 后缀）</span></label>
+          <label>API Token<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={4096} onChange={(event) => setDokployToken(event.target.value)} required type="password" value={dokployToken} /></label>
+          <button disabled={dokployValidating || dokployConnecting} onClick={validateDokployConnection} type="button">{dokployValidating ? "正在验证…" : "验证并统计项目"}</button>
+          <button disabled={dokployConnecting || !dokployValidated} type="submit">{dokployConnecting ? "连接中…" : "创建连接并同步"}</button>
         </form>
       </section>
       <section className="connectors-section" aria-labelledby="connection-state"><div><h2 id="connection-state">连接状态</h2><span>手动同步与页面刷新相互独立</span></div>

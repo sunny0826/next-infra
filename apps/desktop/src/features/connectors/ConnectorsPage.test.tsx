@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { DesktopAdapterProvider } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { MockDesktopAdapter } from "../../platform/desktop-adapter/mock-desktop-adapter";
-import type { SshValidateResult } from "../../platform/desktop-adapter/desktop-adapter";
+import type { SshValidateResult, DokployValidateResult } from "../../platform/desktop-adapter/desktop-adapter";
 import { createConnectorCoverageFixtures, createGitHubGoal5SnapshotFixture, createGoal9ConnectorCoverageFixtures, createQueryEvidenceLifecycleSnapshotFixture } from "../../test/fixtures/query-fixtures";
 import { ConnectorsPage } from "./ConnectorsPage";
 
@@ -113,5 +113,50 @@ describe("ConnectorsPage", () => {
     expect(await screen.findByText(/没有可用的服务，仍可创建空范围连接/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "创建连接并同步 0 个服务" }));
     expect(await screen.findByText(/SSH 连接已创建，将在后台同步 0 个服务/)).toBeInTheDocument();
+  });
+
+  it("renders the Dokploy connection form section", async () => {
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    expect(await screen.findByRole("heading", { name: "添加 Dokploy 连接" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Dokploy 连接名称")).toBeInTheDocument();
+    expect(screen.getByLabelText(/实例 URL/)).toBeInTheDocument();
+    expect(screen.getByLabelText("API Token")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "验证并统计项目" })).toBeInTheDocument();
+  });
+
+  it("rejects an invalid Dokploy URL before calling the backend", async () => {
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    const url = await screen.findByLabelText(/实例 URL/);
+    fireEvent.change(url, { target: { value: "not-a-url" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计项目" }));
+    expect(await screen.findByText(/Dokploy 实例 URL 无效/)).toBeInTheDocument();
+  });
+
+  it("surfaces Dokploy validation errors with the desktop error code", async () => {
+    class DokployRejectAdapter extends ConnectorAdapter {
+      override async validateDokployConnection(): Promise<DokployValidateResult> { throw { code: "dokploy_auth_failed" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new DokployRejectAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    fireEvent.change(await screen.findByLabelText("Dokploy 连接名称"), { target: { value: "Prod" } });
+    fireEvent.change(screen.getByLabelText(/实例 URL/), { target: { value: "https://fixture.example.test" } });
+    fireEvent.change(screen.getByLabelText("API Token"), { target: { value: "fixture-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计项目" }));
+    expect(await screen.findByText(/dokploy_auth_failed/)).toBeInTheDocument();
+  });
+
+  it("validates a Dokploy instance and creates a scoped connection", async () => {
+    class DokployOkAdapter extends ConnectorAdapter {
+      override async validateDokployConnection() { return { project_count: 3 }; }
+      override async createDokployConnection() { return { connection_id: "fixture-dokploy-conn", sync_run_id: "fixture-dokploy-sync" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new DokployOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    fireEvent.change(await screen.findByLabelText("Dokploy 连接名称"), { target: { value: "Prod" } });
+    fireEvent.change(screen.getByLabelText(/实例 URL/), { target: { value: "https://fixture.example.test" } });
+    fireEvent.change(screen.getByLabelText("API Token"), { target: { value: "fixture-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计项目" }));
+    expect(await screen.findByText(/已验证 Dokploy 实例，发现 3 个项目/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建连接并同步" })).toBeEnabled();
+    fireEvent.submit(screen.getByRole("button", { name: "创建连接并同步" }).closest("form")!);
+    expect(await screen.findByText(/Dokploy 连接已创建，将在后台同步：fixture-dokploy-sync/)).toBeInTheDocument();
   });
 });

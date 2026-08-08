@@ -15,6 +15,8 @@ import type {
   CreateGitHubConnectionInput,
   SshConnectInput,
   SshValidateInput,
+  DokployConnectInput,
+  DokployValidateInput,
   DisableBindingInput,
   UpdateBindingInput,
   Unsubscribe,
@@ -87,6 +89,14 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
 
   async createSshConnection(_input: SshConnectInput): Promise<never> {
     throw new Error("SSH connection creation is unavailable.");
+  }
+
+  async validateDokployConnection(_input: DokployValidateInput): Promise<never> {
+    throw new Error("Dokploy connection validation is unavailable.");
+  }
+
+  async createDokployConnection(_input: DokployConnectInput): Promise<never> {
+    throw new Error("Dokploy connection creation is unavailable.");
   }
 
   async previewGitHubConnectionPurge(_connectionId: string): Promise<never> {
