@@ -31,6 +31,14 @@ import type {
   SshValidateInput,
   DokployConnectInput,
   DokployValidateInput,
+  CloudflareConnectInput,
+  CloudflareValidateInput,
+  SupabaseManagedConnectInput,
+  SupabaseManagedValidateInput,
+  AliyunConnectInput,
+  AliyunValidateInput,
+  TencentConnectInput,
+  TencentValidateInput,
   UpdateBindingInput,
   DisableBindingInput,
   Unsubscribe,
@@ -194,6 +202,62 @@ export class RealDesktopAdapter implements DesktopAdapter {
   async createDokployConnection(input: DokployConnectInput) {
     return this.#invoke<Awaited<ReturnType<DesktopAdapter["createDokployConnection"]>>>(
       "dokploy_connect",
+      { request: input },
+    );
+  }
+
+  async validateCloudflareConnection(input: CloudflareValidateInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["validateCloudflareConnection"]>>>(
+      "cloudflare_validate",
+      { request: input },
+    );
+  }
+
+  async createCloudflareConnection(input: CloudflareConnectInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["createCloudflareConnection"]>>>(
+      "cloudflare_connect",
+      { request: input },
+    );
+  }
+
+  async validateSupabaseManagedConnection(input: SupabaseManagedValidateInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["validateSupabaseManagedConnection"]>>>(
+      "supabase_managed_validate",
+      { request: input },
+    );
+  }
+
+  async createSupabaseManagedConnection(input: SupabaseManagedConnectInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["createSupabaseManagedConnection"]>>>(
+      "supabase_managed_connect",
+      { request: input },
+    );
+  }
+
+  async validateAliyunConnection(input: AliyunValidateInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["validateAliyunConnection"]>>>(
+      "aliyun_validate",
+      { request: input },
+    );
+  }
+
+  async createAliyunConnection(input: AliyunConnectInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["createAliyunConnection"]>>>(
+      "aliyun_connect",
+      { request: input },
+    );
+  }
+
+  async validateTencentConnection(input: TencentValidateInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["validateTencentConnection"]>>>(
+      "tencent_validate",
+      { request: input },
+    );
+  }
+
+  async createTencentConnection(input: TencentConnectInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["createTencentConnection"]>>>(
+      "tencent_connect",
       { request: input },
     );
   }

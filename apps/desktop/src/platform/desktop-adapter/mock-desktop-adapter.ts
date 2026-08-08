@@ -28,6 +28,22 @@ import type {
   DokployConnectResult,
   DokployValidateInput,
   DokployValidateResult,
+  CloudflareConnectInput,
+  CloudflareConnectResult,
+  CloudflareValidateInput,
+  CloudflareValidateResult,
+  SupabaseManagedConnectInput,
+  SupabaseManagedConnectResult,
+  SupabaseManagedValidateInput,
+  SupabaseManagedValidateResult,
+  AliyunConnectInput,
+  AliyunConnectResult,
+  AliyunValidateInput,
+  AliyunValidateResult,
+  TencentConnectInput,
+  TencentConnectResult,
+  TencentValidateInput,
+  TencentValidateResult,
   DisableBindingInput,
   UpdateBindingInput,
   Unsubscribe,
@@ -239,6 +255,31 @@ export class MockDesktopAdapter implements DesktopAdapter {
       connection_id: `fixture-dokploy-${input.display_name || "connection"}`,
       sync_run_id: "fixture-dokploy-sync",
     };
+  }
+
+  async validateCloudflareConnection(_input: CloudflareValidateInput): Promise<CloudflareValidateResult> {
+    return { account_count: 0 };
+  }
+  async createCloudflareConnection(input: CloudflareConnectInput): Promise<CloudflareConnectResult> {
+    return { connection_id: `fixture-cloudflare-${input.display_name || "connection"}`, sync_run_id: "fixture-cloudflare-sync" };
+  }
+  async validateSupabaseManagedConnection(_input: SupabaseManagedValidateInput): Promise<SupabaseManagedValidateResult> {
+    return { project_count: 0 };
+  }
+  async createSupabaseManagedConnection(input: SupabaseManagedConnectInput): Promise<SupabaseManagedConnectResult> {
+    return { connection_id: `fixture-supabase-${input.display_name || "connection"}`, sync_run_id: "fixture-supabase-sync" };
+  }
+  async validateAliyunConnection(_input: AliyunValidateInput): Promise<AliyunValidateResult> {
+    return { resource_count: 0 };
+  }
+  async createAliyunConnection(input: AliyunConnectInput): Promise<AliyunConnectResult> {
+    return { connection_id: `fixture-aliyun-${input.display_name || "connection"}`, sync_run_id: "fixture-aliyun-sync" };
+  }
+  async validateTencentConnection(_input: TencentValidateInput): Promise<TencentValidateResult> {
+    return { resource_count: 0 };
+  }
+  async createTencentConnection(input: TencentConnectInput): Promise<TencentConnectResult> {
+    return { connection_id: `fixture-tencent-${input.display_name || "connection"}`, sync_run_id: "fixture-tencent-sync" };
   }
 
   async previewGitHubConnectionPurge(connectionId: string) {

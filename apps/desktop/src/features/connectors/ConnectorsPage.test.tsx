@@ -159,4 +159,62 @@ describe("ConnectorsPage", () => {
     fireEvent.submit(screen.getByRole("button", { name: "创建连接并同步" }).closest("form")!);
     expect(await screen.findByText(/Dokploy 连接已创建，将在后台同步：fixture-dokploy-sync/)).toBeInTheDocument();
   });
+
+  it("validates and creates a Cloudflare connection", async () => {
+    class CloudflareOkAdapter extends ConnectorAdapter {
+      override async validateCloudflareConnection() { return { account_count: 2 }; }
+      override async createCloudflareConnection() { return { connection_id: "fixture-cf-conn", sync_run_id: "fixture-cf-sync" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new CloudflareOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    fireEvent.change(await screen.findByLabelText("Cloudflare 连接名称"), { target: { value: "CF" } });
+    fireEvent.change(screen.getByLabelText("Cloudflare Token"), { target: { value: "fixture-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计账户" }));
+    expect(await screen.findByText(/已验证 Cloudflare 账户，发现 2 个账户/)).toBeInTheDocument();
+    fireEvent.submit(screen.getByRole("button", { name: "创建 Cloudflare 连接并同步" }).closest("form")!);
+    expect(await screen.findByText(/Cloudflare 连接已创建，将在后台同步：fixture-cf-sync/)).toBeInTheDocument();
+  });
+
+  it("validates and creates a Supabase managed connection", async () => {
+    class SupabaseOkAdapter extends ConnectorAdapter {
+      override async validateSupabaseManagedConnection() { return { project_count: 4 }; }
+      override async createSupabaseManagedConnection() { return { connection_id: "fixture-sb-conn", sync_run_id: "fixture-sb-sync" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new SupabaseOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    fireEvent.change(await screen.findByLabelText("Supabase 连接名称"), { target: { value: "SB" } });
+    fireEvent.change(screen.getByLabelText("Supabase Token"), { target: { value: "fixture-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计 Supabase 项目" }));
+    expect(await screen.findByText(/已验证 Supabase 账户，发现 4 个项目/)).toBeInTheDocument();
+    fireEvent.submit(screen.getByRole("button", { name: "创建 Supabase 连接并同步" }).closest("form")!);
+    expect(await screen.findByText(/Supabase 连接已创建，将在后台同步：fixture-sb-sync/)).toBeInTheDocument();
+  });
+
+  it("validates and creates an Aliyun connection with a region", async () => {
+    class AliyunOkAdapter extends ConnectorAdapter {
+      override async validateAliyunConnection() { return { resource_count: 12 }; }
+      override async createAliyunConnection() { return { connection_id: "fixture-ali-conn", sync_run_id: "fixture-ali-sync" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new AliyunOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    fireEvent.change(await screen.findByLabelText("阿里云连接名称"), { target: { value: "Ali" } });
+    fireEvent.change(screen.getByLabelText("阿里云 AccessKey ID"), { target: { value: "fixture-id" } });
+    fireEvent.change(screen.getByLabelText("阿里云 AccessKey Secret"), { target: { value: "fixture-secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计阿里云资源" }));
+    expect(await screen.findByText(/已验证阿里云凭据，发现 12 个资源/)).toBeInTheDocument();
+    fireEvent.submit(screen.getByRole("button", { name: "创建阿里云连接并同步" }).closest("form")!);
+    expect(await screen.findByText(/阿里云连接已创建，将在后台同步：fixture-ali-sync/)).toBeInTheDocument();
+  });
+
+  it("validates and creates a Tencent connection with a region", async () => {
+    class TencentOkAdapter extends ConnectorAdapter {
+      override async validateTencentConnection() { return { resource_count: 7 }; }
+      override async createTencentConnection() { return { connection_id: "fixture-tc-conn", sync_run_id: "fixture-tc-sync" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new TencentOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    fireEvent.change(await screen.findByLabelText("腾讯云连接名称"), { target: { value: "TC" } });
+    fireEvent.change(screen.getByLabelText("腾讯云 SecretId"), { target: { value: "fixture-id" } });
+    fireEvent.change(screen.getByLabelText("腾讯云 SecretKey"), { target: { value: "fixture-key" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计腾讯云资源" }));
+    expect(await screen.findByText(/已验证腾讯云凭据，发现 7 个资源/)).toBeInTheDocument();
+    fireEvent.submit(screen.getByRole("button", { name: "创建腾讯云连接并同步" }).closest("form")!);
+    expect(await screen.findByText(/腾讯云连接已创建，将在后台同步：fixture-tc-sync/)).toBeInTheDocument();
+  });
 });

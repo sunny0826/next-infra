@@ -17,6 +17,14 @@ import type {
   SshValidateInput,
   DokployConnectInput,
   DokployValidateInput,
+  CloudflareConnectInput,
+  CloudflareValidateInput,
+  SupabaseManagedConnectInput,
+  SupabaseManagedValidateInput,
+  AliyunConnectInput,
+  AliyunValidateInput,
+  TencentConnectInput,
+  TencentValidateInput,
   DisableBindingInput,
   UpdateBindingInput,
   Unsubscribe,
@@ -97,6 +105,31 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
 
   async createDokployConnection(_input: DokployConnectInput): Promise<never> {
     throw new Error("Dokploy connection creation is unavailable.");
+  }
+
+  async validateCloudflareConnection(_input: CloudflareValidateInput): Promise<never> {
+    throw new Error("Cloudflare connection validation is unavailable.");
+  }
+  async createCloudflareConnection(_input: CloudflareConnectInput): Promise<never> {
+    throw new Error("Cloudflare connection creation is unavailable.");
+  }
+  async validateSupabaseManagedConnection(_input: SupabaseManagedValidateInput): Promise<never> {
+    throw new Error("Supabase connection validation is unavailable.");
+  }
+  async createSupabaseManagedConnection(_input: SupabaseManagedConnectInput): Promise<never> {
+    throw new Error("Supabase connection creation is unavailable.");
+  }
+  async validateAliyunConnection(_input: AliyunValidateInput): Promise<never> {
+    throw new Error("Aliyun connection validation is unavailable.");
+  }
+  async createAliyunConnection(_input: AliyunConnectInput): Promise<never> {
+    throw new Error("Aliyun connection creation is unavailable.");
+  }
+  async validateTencentConnection(_input: TencentValidateInput): Promise<never> {
+    throw new Error("Tencent connection validation is unavailable.");
+  }
+  async createTencentConnection(_input: TencentConnectInput): Promise<never> {
+    throw new Error("Tencent connection creation is unavailable.");
   }
 
   async previewGitHubConnectionPurge(_connectionId: string): Promise<never> {

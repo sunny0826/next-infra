@@ -25,6 +25,120 @@ interface PurgeConfirmation {
   readonly summary: ConnectionPurgeSummary;
 }
 
+interface ProviderSecretField {
+  readonly key: string;
+  readonly label: string;
+}
+
+interface ProviderFormDescriptor {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly nameLabel: string;
+  readonly secretFields: readonly ProviderSecretField[];
+  readonly regionLabel?: string;
+  readonly defaultRegion?: string;
+  readonly validateButtonLabel: string;
+  readonly createButtonLabel: string;
+  readonly validatedNotice: (count: number) => string;
+  readonly createdNotice: (syncRunId: string) => string;
+  readonly onValidate: (values: Record<string, string>) => Promise<number>;
+  readonly onCreate: (values: Record<string, string>) => Promise<string>;
+}
+
+function ProviderConnectionForm({
+  descriptor,
+  onNotice,
+  onError,
+  onCreated,
+}: {
+  readonly descriptor: ProviderFormDescriptor;
+  readonly onNotice: (text: string | null) => void;
+  readonly onError: (text: string | null) => void;
+  readonly onCreated: () => Promise<void>;
+}) {
+  const adapter = useDesktopAdapter();
+  const [name, setName] = useState("");
+  const [secrets, setSecrets] = useState<Record<string, string>>({});
+  const [region, setRegion] = useState(descriptor.defaultRegion ?? "");
+  const [validated, setValidated] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+
+  const values = (): Record<string, string> => ({
+    display_name: name,
+    ...secrets,
+    ...(descriptor.regionLabel !== undefined ? { region } : {}),
+  });
+
+  async function validateProvider() {
+    if (validating || connecting) return;
+    if (name.trim().length === 0) {
+      onError("请先填写连接名称。");
+      return;
+    }
+    for (const field of descriptor.secretFields) {
+      if ((secrets[field.key] ?? "").trim().length === 0) {
+        onError(`请先填写${field.label}。`);
+        return;
+      }
+    }
+    if (descriptor.regionLabel !== undefined && region.trim().length === 0) {
+      onError(`请先填写${descriptor.regionLabel}。`);
+      return;
+    }
+    onNotice(null);
+    onError(null);
+    setValidating(true);
+    try {
+      const count = await descriptor.onValidate(values());
+      setValidated(true);
+      onNotice(descriptor.validatedNotice(count));
+    } catch (error) {
+      setValidated(false);
+      onError(`无法验证${descriptor.title}（${desktopErrorCode(error)}）。请检查配置后重试。`);
+    } finally {
+      setSecrets({});
+      setValidating(false);
+    }
+  }
+
+  async function createProvider(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (validating || connecting) return;
+    onNotice(null);
+    onError(null);
+    setConnecting(true);
+    try {
+      const syncRunId = await descriptor.onCreate(values());
+      onNotice(descriptor.createdNotice(syncRunId));
+      setName("");
+      setSecrets({});
+      setRegion(descriptor.defaultRegion ?? "");
+      setValidated(false);
+      await onCreated();
+    } catch (error) {
+      onError(`无法创建${descriptor.title}连接（${desktopErrorCode(error)}）。请检查配置后重试。`);
+    } finally {
+      setConnecting(false);
+    }
+  }
+
+  return (
+    <section className="connectors-section" aria-labelledby={`provider-${descriptor.title}`}>
+      <div><h2 id={`provider-${descriptor.title}`}>{descriptor.title}</h2><span>{descriptor.subtitle}</span></div>
+      <form className="connectors-form" onSubmit={createProvider}>
+        <label>{descriptor.nameLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} /></label>
+        {descriptor.secretFields.map((field) => (
+          <label key={field.key}>{field.label}<input autoComplete="off" disabled={validating || connecting} maxLength={4096} onChange={(event) => setSecrets((current) => ({ ...current, [field.key]: event.target.value }))} required type="password" value={secrets[field.key] ?? ""} /></label>
+        ))}
+        {descriptor.regionLabel !== undefined ? <label>{descriptor.regionLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={64} onChange={(event) => setRegion(event.target.value)} placeholder={descriptor.defaultRegion} required value={region} /></label> : null}
+        <button disabled={validating || connecting} onClick={validateProvider} type="button">{validating ? "正在验证…" : descriptor.validateButtonLabel}</button>
+        <button disabled={connecting || !validated} type="submit">{connecting ? "连接中…" : descriptor.createButtonLabel}</button>
+      </form>
+    </section>
+  );
+}
+
 export function ConnectorsPage() {
   const adapter = useDesktopAdapter();
   const [rows, setRows] = useState<readonly ConnectionRow[] | null>(null);
@@ -388,6 +502,84 @@ export function ConnectorsPage() {
           <button disabled={dokployConnecting || !dokployValidated} type="submit">{dokployConnecting ? "连接中…" : "创建连接并同步"}</button>
         </form>
       </section>
+      <ProviderConnectionForm
+        descriptor={{
+          title: "添加 Cloudflare 连接",
+          subtitle: "只读账户、区域、DNS 记录、隧道与 Worker 摘要",
+          nameLabel: "Cloudflare 连接名称",
+          secretFields: [{ key: "token", label: "Cloudflare Token" }],
+          validateButtonLabel: "验证并统计账户",
+          createButtonLabel: "创建 Cloudflare 连接并同步",
+          validatedNotice: (count) => `已验证 Cloudflare 账户，发现 ${count} 个账户。`,
+          createdNotice: (syncRunId) => `Cloudflare 连接已创建，将在后台同步：${syncRunId}。`,
+          onValidate: async (v) => (await adapter.validateCloudflareConnection({ token: v.token })).account_count,
+          onCreate: async (v) => (await adapter.createCloudflareConnection({ display_name: v.display_name, token: v.token })).sync_run_id,
+        }}
+        onNotice={setNotice}
+        onError={setError}
+        onCreated={refresh}
+      />
+      <ProviderConnectionForm
+        descriptor={{
+          title: "添加 Supabase 连接",
+          subtitle: "只读组织与项目摘要（Management API）",
+          nameLabel: "Supabase 连接名称",
+          secretFields: [{ key: "token", label: "Supabase Token" }],
+          validateButtonLabel: "验证并统计 Supabase 项目",
+          createButtonLabel: "创建 Supabase 连接并同步",
+          validatedNotice: (count) => `已验证 Supabase 账户，发现 ${count} 个项目。`,
+          createdNotice: (syncRunId) => `Supabase 连接已创建，将在后台同步：${syncRunId}。`,
+          onValidate: async (v) => (await adapter.validateSupabaseManagedConnection({ token: v.token })).project_count,
+          onCreate: async (v) => (await adapter.createSupabaseManagedConnection({ display_name: v.display_name, token: v.token })).sync_run_id,
+        }}
+        onNotice={setNotice}
+        onError={setError}
+        onCreated={refresh}
+      />
+      <ProviderConnectionForm
+        descriptor={{
+          title: "添加阿里云连接",
+          subtitle: "只读 ECS、VPC、SLB、DNS 与公网 IP 摘要",
+          nameLabel: "阿里云连接名称",
+          secretFields: [
+            { key: "access_key_id", label: "阿里云 AccessKey ID" },
+            { key: "access_key_secret", label: "阿里云 AccessKey Secret" },
+          ],
+          regionLabel: "区域",
+          defaultRegion: "cn-hangzhou",
+          validateButtonLabel: "验证并统计阿里云资源",
+          createButtonLabel: "创建阿里云连接并同步",
+          validatedNotice: (count) => `已验证阿里云凭据，发现 ${count} 个资源。`,
+          createdNotice: (syncRunId) => `阿里云连接已创建，将在后台同步：${syncRunId}。`,
+          onValidate: async (v) => (await adapter.validateAliyunConnection({ access_key_id: v.access_key_id, access_key_secret: v.access_key_secret, region: v.region })).resource_count,
+          onCreate: async (v) => (await adapter.createAliyunConnection({ display_name: v.display_name, access_key_id: v.access_key_id, access_key_secret: v.access_key_secret, region: v.region })).sync_run_id,
+        }}
+        onNotice={setNotice}
+        onError={setError}
+        onCreated={refresh}
+      />
+      <ProviderConnectionForm
+        descriptor={{
+          title: "添加腾讯云连接",
+          subtitle: "只读 CVM、VPC、CLB、DNS 与公网 IP 摘要",
+          nameLabel: "腾讯云连接名称",
+          secretFields: [
+            { key: "secret_id", label: "腾讯云 SecretId" },
+            { key: "secret_key", label: "腾讯云 SecretKey" },
+          ],
+          regionLabel: "区域",
+          defaultRegion: "ap-guangzhou",
+          validateButtonLabel: "验证并统计腾讯云资源",
+          createButtonLabel: "创建腾讯云连接并同步",
+          validatedNotice: (count) => `已验证腾讯云凭据，发现 ${count} 个资源。`,
+          createdNotice: (syncRunId) => `腾讯云连接已创建，将在后台同步：${syncRunId}。`,
+          onValidate: async (v) => (await adapter.validateTencentConnection({ secret_id: v.secret_id, secret_key: v.secret_key, region: v.region })).resource_count,
+          onCreate: async (v) => (await adapter.createTencentConnection({ display_name: v.display_name, secret_id: v.secret_id, secret_key: v.secret_key, region: v.region })).sync_run_id,
+        }}
+        onNotice={setNotice}
+        onError={setError}
+        onCreated={refresh}
+      />
       <section className="connectors-section" aria-labelledby="connection-state"><div><h2 id="connection-state">连接状态</h2><span>手动同步与页面刷新相互独立</span></div>
         <div className="connectors-frame"><table><thead><tr><th>连接</th><th>健康度</th><th>最近成功</th><th>最近尝试</th><th>最近运行</th><th>最近错误</th><th>最近警告</th><th>下次计划</th><th>操作</th></tr></thead><tbody>
           {rows.map(({ connection, nextScheduledAt, recentStatus, recentError, recentWarning }) => <tr key={connection.connection_id}>

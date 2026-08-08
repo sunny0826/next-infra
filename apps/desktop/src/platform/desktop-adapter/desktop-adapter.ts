@@ -137,6 +137,71 @@ export interface DokployConnectResult {
   readonly sync_run_id: string;
 }
 
+export interface CloudflareValidateInput {
+  readonly token: string;
+}
+export interface CloudflareValidateResult {
+  readonly account_count: number;
+}
+export interface CloudflareConnectInput {
+  readonly display_name: string;
+  readonly token: string;
+}
+export interface CloudflareConnectResult {
+  readonly connection_id: string;
+  readonly sync_run_id: string;
+}
+export interface SupabaseManagedValidateInput {
+  readonly token: string;
+}
+export interface SupabaseManagedValidateResult {
+  readonly project_count: number;
+}
+export interface SupabaseManagedConnectInput {
+  readonly display_name: string;
+  readonly token: string;
+}
+export interface SupabaseManagedConnectResult {
+  readonly connection_id: string;
+  readonly sync_run_id: string;
+}
+export interface AliyunValidateInput {
+  readonly access_key_id: string;
+  readonly access_key_secret: string;
+  readonly region: string;
+}
+export interface AliyunValidateResult {
+  readonly resource_count: number;
+}
+export interface AliyunConnectInput {
+  readonly display_name: string;
+  readonly access_key_id: string;
+  readonly access_key_secret: string;
+  readonly region: string;
+}
+export interface AliyunConnectResult {
+  readonly connection_id: string;
+  readonly sync_run_id: string;
+}
+export interface TencentValidateInput {
+  readonly secret_id: string;
+  readonly secret_key: string;
+  readonly region: string;
+}
+export interface TencentValidateResult {
+  readonly resource_count: number;
+}
+export interface TencentConnectInput {
+  readonly display_name: string;
+  readonly secret_id: string;
+  readonly secret_key: string;
+  readonly region: string;
+}
+export interface TencentConnectResult {
+  readonly connection_id: string;
+  readonly sync_run_id: string;
+}
+
 export interface ConnectionPurgeSummary {
   readonly resources: number;
   readonly relations: number;
@@ -213,6 +278,14 @@ export interface DesktopAdapter {
   createSshConnection(input: SshConnectInput): Promise<SshConnectResult>;
   validateDokployConnection(input: DokployValidateInput): Promise<DokployValidateResult>;
   createDokployConnection(input: DokployConnectInput): Promise<DokployConnectResult>;
+  validateCloudflareConnection(input: CloudflareValidateInput): Promise<CloudflareValidateResult>;
+  createCloudflareConnection(input: CloudflareConnectInput): Promise<CloudflareConnectResult>;
+  validateSupabaseManagedConnection(input: SupabaseManagedValidateInput): Promise<SupabaseManagedValidateResult>;
+  createSupabaseManagedConnection(input: SupabaseManagedConnectInput): Promise<SupabaseManagedConnectResult>;
+  validateAliyunConnection(input: AliyunValidateInput): Promise<AliyunValidateResult>;
+  createAliyunConnection(input: AliyunConnectInput): Promise<AliyunConnectResult>;
+  validateTencentConnection(input: TencentValidateInput): Promise<TencentValidateResult>;
+  createTencentConnection(input: TencentConnectInput): Promise<TencentConnectResult>;
   previewGitHubConnectionPurge(connectionId: string): Promise<ConnectionPurgeSummary>;
   purgeGitHubConnection(connectionId: string): Promise<ConnectionPurgeSummary>;
   manualSync(connectionId: string): Promise<ManualSyncResult>;
