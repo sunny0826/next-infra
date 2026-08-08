@@ -14,6 +14,7 @@ path = "src/main.rs"
 tauri-build = { workspace = true }
 
 [dependencies]
+async-trait = { workspace = true }
 libc = { workspace = true }
 next-infra-core = { workspace = true }
 next-infra-connector-catalog = { workspace = true }
@@ -34,12 +35,14 @@ next-infra-query = { workspace = true }
 next-infra-runtime = { workspace = true }
 next-infra-store = { workspace = true }
 next-infra-sync = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }
 tauri-plugin-autostart = { workspace = true }
 tauri-plugin-opener = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
+url = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { workspace = true }

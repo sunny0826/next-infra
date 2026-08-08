@@ -10,12 +10,18 @@ use crate::host::lifecycle::LaunchSource;
 use crate::host::local_rpc::LocalRpcHost;
 use crate::scheduled_sync::{self, DriverHandle};
 use next_infra_binding::{BindingInput, BindingService};
-use next_infra_connector_aliyun::descriptor as aliyun_descriptor;
+use next_infra_connector_aliyun::{
+    AliyunConnector, AliyunTransport, SignedRequest as AliyunSignedRequest,
+    descriptor as aliyun_descriptor,
+};
 use next_infra_connector_api::{
-    ConnectionInput, ReadConnector, SyncOutcome, SyncRequest, ValidationRequest, ValidationStatus,
+    ConnectionInput, ConnectorFailure, ReadConnector, SyncOutcome, SyncRequest, ValidationRequest,
+    ValidationStatus,
 };
 use next_infra_connector_catalog::ConnectorCoverageSnapshot;
-use next_infra_connector_cloudflare::cloudflare_descriptor;
+use next_infra_connector_cloudflare::{
+    CloudflareConnector, ReqwestCloudflareTransport, cloudflare_descriptor,
+};
 use next_infra_connector_dokploy::{
     DokployConnector, DokployEndpoint, ReqwestDokployTransport, dokploy_descriptor,
 };
@@ -27,9 +33,15 @@ use next_infra_connector_ssh::{
     HostAlias, OpenSshClient, ProbeProfile, ServiceId, SshConnectionConfigV1, SshConnector,
     ssh_descriptor,
 };
-use next_infra_connector_supabase_managed::descriptor as supabase_managed_descriptor;
+use next_infra_connector_supabase_managed::{
+    ManagementRequest, ManagementTransport, SupabaseManagedConnector,
+    descriptor as supabase_managed_descriptor,
+};
 use next_infra_connector_supabase_self_hosted::descriptor as supabase_self_hosted_descriptor;
-use next_infra_connector_tencent::descriptor as tencent_descriptor;
+use next_infra_connector_tencent::{
+    SignedRequest as TencentSignedRequest, TencentConnector, TencentTransport,
+    descriptor as tencent_descriptor,
+};
 use next_infra_core::{
     Connection, ConnectionId, ConnectorHealth, ConnectorType, DomainError, ErrorCode, ResourceKind,
     SchemaVersion, Scope, SecretValue, StoreReader, StoreWriter, SyncMode, SyncRunId, SyncTrigger,
@@ -70,6 +82,201 @@ type DesktopRuntime = Runtime<SqliteRuntimeBackend, CommittedQuerySource>;
 
 const DEFAULT_QUERY_SYNC_INTERVAL_MILLIS: u64 = 15 * 60 * 1_000;
 
+// ── Local transport implementations ─────────────────────────────────────────
+// The supabase-managed, aliyun, and tencent connector crates define generic
+// transport traits but do not ship concrete reqwest implementations.
+// These live transports follow the same shape as ReqwestCloudflareTransport
+// and ReqwestDokployTransport from their respective connector crates.
+
+/// Reqwest-based ManagementTransport for Supabase Managed API.
+struct LiveManagementTransport {
+    client: reqwest::Client,
+}
+impl LiveManagementTransport {
+    fn new() -> Result<Self, String> {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map(|client| Self { client })
+            .map_err(|_| "supabase-managed transport is unavailable".into())
+    }
+}
+#[async_trait::async_trait]
+impl ManagementTransport for LiveManagementTransport {
+    async fn get(&self, request: ManagementRequest) -> Result<Vec<u8>, ConnectorFailure> {
+        let response = self
+            .client
+            .get(request.url)
+            .header(reqwest::header::AUTHORIZATION, request.authorization)
+            .send()
+            .await
+            .map_err(|_| ConnectorFailure {
+                code: ErrorCode::NetworkUnreachable,
+                message: "Supabase Management API is unreachable".into(),
+                retryable: true,
+                retry_after_ms: None,
+            })?;
+        let status = response.status();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|_| ConnectorFailure {
+                code: ErrorCode::NetworkUnreachable,
+                message: "Supabase Management API response is invalid".into(),
+                retryable: true,
+                retry_after_ms: None,
+            })?
+            .to_vec();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(ConnectorFailure {
+                code: ErrorCode::AuthenticationFailed,
+                message: "Supabase Management API authentication failed".into(),
+                retryable: false,
+                retry_after_ms: None,
+            });
+        }
+        if !status.is_success() {
+            return Err(ConnectorFailure {
+                code: ErrorCode::ProviderUnavailable,
+                message: "Supabase Management API returned an error".into(),
+                retryable: true,
+                retry_after_ms: None,
+            });
+        }
+        Ok(body)
+    }
+}
+
+/// Reqwest-based AliyunTransport for Aliyun API.
+struct LiveAliyunTransport {
+    client: reqwest::Client,
+}
+impl LiveAliyunTransport {
+    fn new() -> Result<Self, String> {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map(|client| Self { client })
+            .map_err(|_| "aliyun transport is unavailable".into())
+    }
+}
+#[async_trait::async_trait]
+impl AliyunTransport for LiveAliyunTransport {
+    async fn list(
+        &self,
+        request: AliyunSignedRequest,
+        _module: &'static str,
+    ) -> Result<Vec<u8>, ConnectorFailure> {
+        let response = self
+            .client
+            .get(request.url)
+            .send()
+            .await
+            .map_err(|_| ConnectorFailure {
+                code: ErrorCode::NetworkUnreachable,
+                message: "Aliyun API is unreachable".into(),
+                retryable: true,
+                retry_after_ms: None,
+            })?;
+        let status = response.status();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|_| ConnectorFailure {
+                code: ErrorCode::NetworkUnreachable,
+                message: "Aliyun API response is invalid".into(),
+                retryable: true,
+                retry_after_ms: None,
+            })?
+            .to_vec();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(ConnectorFailure {
+                code: ErrorCode::AuthenticationFailed,
+                message: "Aliyun API authentication failed".into(),
+                retryable: false,
+                retry_after_ms: None,
+            });
+        }
+        if !status.is_success() {
+            return Err(ConnectorFailure {
+                code: ErrorCode::ProviderUnavailable,
+                message: "Aliyun API returned an error".into(),
+                retryable: true,
+                retry_after_ms: None,
+            });
+        }
+        Ok(body)
+    }
+}
+
+/// Reqwest-based TencentTransport for Tencent API.
+struct LiveTencentTransport {
+    client: reqwest::Client,
+}
+impl LiveTencentTransport {
+    fn new() -> Result<Self, String> {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map(|client| Self { client })
+            .map_err(|_| "tencent transport is unavailable".into())
+    }
+}
+#[async_trait::async_trait]
+impl TencentTransport for LiveTencentTransport {
+    async fn list(
+        &self,
+        request: TencentSignedRequest,
+        _module: &'static str,
+    ) -> Result<Vec<u8>, ConnectorFailure> {
+        let response = self
+            .client
+            .post(request.url)
+            .header(reqwest::header::AUTHORIZATION, &request.authorization)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/json; charset=utf-8",
+            )
+            .body(request.payload)
+            .send()
+            .await
+            .map_err(|_| ConnectorFailure {
+                code: ErrorCode::NetworkUnreachable,
+                message: "Tencent API is unreachable".into(),
+                retryable: true,
+                retry_after_ms: None,
+            })?;
+        let status = response.status();
+        let body = response
+            .bytes()
+            .await
+            .map_err(|_| ConnectorFailure {
+                code: ErrorCode::NetworkUnreachable,
+                message: "Tencent API response is invalid".into(),
+                retryable: true,
+                retry_after_ms: None,
+            })?
+            .to_vec();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(ConnectorFailure {
+                code: ErrorCode::AuthenticationFailed,
+                message: "Tencent API authentication failed".into(),
+                retryable: false,
+                retry_after_ms: None,
+            });
+        }
+        if !status.is_success() {
+            return Err(ConnectorFailure {
+                code: ErrorCode::ProviderUnavailable,
+                message: "Tencent API returned an error".into(),
+                retryable: true,
+                retry_after_ms: None,
+            });
+        }
+        Ok(body)
+    }
+}
+
 pub struct AppState {
     runtime: Arc<Mutex<DesktopRuntime>>,
     store: SharedStore,
@@ -86,6 +293,11 @@ pub struct AppState {
     ssh_connector: Arc<SshConnector<OpenSshClient>>,
     ssh_sync_running: Arc<AtomicBool>,
     dokploy_sync_running: Arc<AtomicBool>,
+    cloudflare_connector: Arc<CloudflareConnector<ReqwestCloudflareTransport>>,
+    cloudflare_sync_running: Arc<AtomicBool>,
+    supabase_managed_sync_running: Arc<AtomicBool>,
+    aliyun_sync_running: Arc<AtomicBool>,
+    tencent_sync_running: Arc<AtomicBool>,
     integration_paths: IntegrationPaths,
     current_app_bundle: PathBuf,
     scheduler_driver: Mutex<Option<DriverHandle>>,
@@ -149,6 +361,9 @@ impl AppState {
         let settings_path = data_directory.join("settings-v1.json");
         let settings = load_settings(&settings_path)?;
         let github_connector = Arc::new(github_connector()?);
+        let cloudflare_connector = Arc::new(CloudflareConnector::new(
+            ReqwestCloudflareTransport::new().map_err(|_| "cloudflare transport unavailable")?,
+        ));
 
         if let Ok(connections) = shared.read(|s| s.query_connections()) {
             for connection in connections.body {
@@ -182,8 +397,17 @@ impl AppState {
         let store_for_driver_clone = store_for_driver.clone();
         let query_context_for_driver = query_context.clone();
         let github_connector_for_driver = github_connector.clone();
+        let cloudflare_connector_for_driver = cloudflare_connector.clone();
         let dokploy_running_for_driver = Arc::new(AtomicBool::new(false));
         let dokploy_running_for_driver_clone = dokploy_running_for_driver.clone();
+        let cloudflare_running_for_driver = Arc::new(AtomicBool::new(false));
+        let cloudflare_running_for_driver_clone = cloudflare_running_for_driver.clone();
+        let supabase_managed_running_for_driver = Arc::new(AtomicBool::new(false));
+        let supabase_managed_running_for_driver_clone = supabase_managed_running_for_driver.clone();
+        let aliyun_running_for_driver = Arc::new(AtomicBool::new(false));
+        let aliyun_running_for_driver_clone = aliyun_running_for_driver.clone();
+        let tencent_running_for_driver = Arc::new(AtomicBool::new(false));
+        let tencent_running_for_driver_clone = tencent_running_for_driver.clone();
 
         let (tx, rx) = std::sync::mpsc::channel();
         let join = std::thread::spawn(move || {
@@ -193,105 +417,232 @@ impl AppState {
             let running = running_for_driver_clone;
             let query_context = query_context_for_driver;
             let dokploy_running = dokploy_running_for_driver_clone;
+            let cloudflare_running = cloudflare_running_for_driver_clone;
+            let supabase_managed_running = supabase_managed_running_for_driver_clone;
+            let aliyun_running = aliyun_running_for_driver_clone;
+            let tencent_running = tencent_running_for_driver_clone;
             loop {
                 match rx.recv_timeout(Duration::from_millis(scheduled_sync::TICK_MILLIS)) {
                     Ok(()) => break,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                         let github_connector = github_connector_for_driver.clone();
+                        let cloudflare_connector = cloudflare_connector_for_driver.clone();
                         let Ok(at) = now() else {
                             continue;
                         };
-                        let next_due: std::collections::BTreeMap<ConnectionId, Timestamp> = {
-                            let Ok(mut guard) = rt.lock() else {
-                                continue;
-                            };
-                            let pending_inner = &mut pending.lock().unwrap();
-                            scheduled_sync::ScheduledSyncDriver::new(
-                                {
-                                    let store = store.clone();
-                                    move |id: &ConnectionId| {
-                                        store.read(|s| s.get_connection(id)).ok().flatten()
-                                    }
-                                },
-                                {
-                                    let store = store.clone();
-                                    let running = running.clone();
-                                    let dokploy_running = dokploy_running.clone();
-                                    move |conn: Connection, trigger: SyncTrigger| match conn
-                                        .connector_type
-                                        .as_str()
+                        let next_due: std::collections::BTreeMap<ConnectionId, Timestamp> =
+                            {
+                                let Ok(mut guard) = rt.lock() else {
+                                    continue;
+                                };
+                                let pending_inner = &mut pending.lock().unwrap();
+                                scheduled_sync::ScheduledSyncDriver::new(
                                     {
-                                        "github" => {
-                                            if running.swap(true, Ordering::AcqRel) {
-                                                return Err(
+                                        let store = store.clone();
+                                        move |id: &ConnectionId| {
+                                            store.read(|s| s.get_connection(id)).ok().flatten()
+                                        }
+                                    },
+                                    {
+                                        let store = store.clone();
+                                        let running = running.clone();
+                                        let dokploy_running = dokploy_running.clone();
+                                        let cloudflare_running = cloudflare_running.clone();
+                                        let cloudflare_connector = cloudflare_connector.clone();
+                                        let supabase_managed_running =
+                                            supabase_managed_running.clone();
+                                        let aliyun_running = aliyun_running.clone();
+                                        let tencent_running = tencent_running.clone();
+                                        move |conn: Connection, trigger: SyncTrigger| match conn
+                                            .connector_type
+                                            .as_str()
+                                        {
+                                            "github" => {
+                                                if running.swap(true, Ordering::AcqRel) {
+                                                    return Err(
                                                     scheduled_sync::EnqueueError::SyncInProgress,
                                                 );
-                                            }
-                                            let sync_run_id = SyncRunId::new(format!(
-                                                "github-scheduled-{}",
-                                                uuid::Uuid::new_v4()
-                                            ))
-                                            .map_err(|_| {
-                                                running.store(false, Ordering::Release);
-                                                scheduled_sync::EnqueueError::Unavailable
-                                            })?;
-                                            scheduled_sync::spawn_github_sync(
-                                                store.clone(),
-                                                running.clone(),
-                                                github_connector.clone(),
-                                                conn,
-                                                trigger,
-                                                sync_run_id,
-                                            )
-                                            .map_err(
-                                                |_| {
+                                                }
+                                                let sync_run_id = SyncRunId::new(format!(
+                                                    "github-scheduled-{}",
+                                                    uuid::Uuid::new_v4()
+                                                ))
+                                                .map_err(|_| {
                                                     running.store(false, Ordering::Release);
                                                     scheduled_sync::EnqueueError::Unavailable
-                                                },
-                                            )?;
-                                            Ok(())
-                                        }
-                                        "dokploy" => {
-                                            if dokploy_running.swap(true, Ordering::AcqRel) {
-                                                return Err(
+                                                })?;
+                                                scheduled_sync::spawn_github_sync(
+                                                    store.clone(),
+                                                    running.clone(),
+                                                    github_connector.clone(),
+                                                    conn,
+                                                    trigger,
+                                                    sync_run_id,
+                                                )
+                                                .map_err(|_| {
+                                                    running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                Ok(())
+                                            }
+                                            "dokploy" => {
+                                                if dokploy_running.swap(true, Ordering::AcqRel) {
+                                                    return Err(
                                                     scheduled_sync::EnqueueError::SyncInProgress,
                                                 );
-                                            }
-                                            let sync_run_id = SyncRunId::new(format!(
-                                                "dokploy-scheduled-{}",
-                                                uuid::Uuid::new_v4()
-                                            ))
-                                            .map_err(|_| {
-                                                dokploy_running.store(false, Ordering::Release);
-                                                scheduled_sync::EnqueueError::Unavailable
-                                            })?;
-                                            scheduled_sync::spawn_dokploy_sync(
-                                                store.clone(),
-                                                dokploy_running.clone(),
-                                                conn,
-                                                trigger,
-                                                sync_run_id,
-                                            )
-                                            .map_err(
-                                                |_| {
+                                                }
+                                                let sync_run_id = SyncRunId::new(format!(
+                                                    "dokploy-scheduled-{}",
+                                                    uuid::Uuid::new_v4()
+                                                ))
+                                                .map_err(|_| {
                                                     dokploy_running.store(false, Ordering::Release);
                                                     scheduled_sync::EnqueueError::Unavailable
-                                                },
-                                            )?;
-                                            Ok(())
+                                                })?;
+                                                scheduled_sync::spawn_dokploy_sync(
+                                                    store.clone(),
+                                                    dokploy_running.clone(),
+                                                    conn,
+                                                    trigger,
+                                                    sync_run_id,
+                                                )
+                                                .map_err(|_| {
+                                                    dokploy_running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                Ok(())
+                                            }
+                                            "cloudflare" => {
+                                                if cloudflare_running.swap(true, Ordering::AcqRel) {
+                                                    return Err(
+                                                    scheduled_sync::EnqueueError::SyncInProgress,
+                                                );
+                                                }
+                                                let sync_run_id = SyncRunId::new(format!(
+                                                    "cloudflare-scheduled-{}",
+                                                    uuid::Uuid::new_v4()
+                                                ))
+                                                .map_err(|_| {
+                                                    cloudflare_running
+                                                        .store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                scheduled_sync::spawn_cloudflare_sync(
+                                                    store.clone(),
+                                                    cloudflare_running.clone(),
+                                                    cloudflare_connector.clone(),
+                                                    conn,
+                                                    trigger,
+                                                    sync_run_id,
+                                                )
+                                                .map_err(|_| {
+                                                    cloudflare_running
+                                                        .store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                Ok(())
+                                            }
+                                            "supabase-managed" => {
+                                                if supabase_managed_running
+                                                    .swap(true, Ordering::AcqRel)
+                                                {
+                                                    return Err(
+                                                    scheduled_sync::EnqueueError::SyncInProgress,
+                                                );
+                                                }
+                                                let sync_run_id = SyncRunId::new(format!(
+                                                    "supabase-managed-scheduled-{}",
+                                                    uuid::Uuid::new_v4()
+                                                ))
+                                                .map_err(|_| {
+                                                    supabase_managed_running
+                                                        .store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                scheduled_sync::spawn_supabase_managed_sync(
+                                                    store.clone(),
+                                                    supabase_managed_running.clone(),
+                                                    conn,
+                                                    trigger,
+                                                    sync_run_id,
+                                                )
+                                                .map_err(|_| {
+                                                    supabase_managed_running
+                                                        .store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                Ok(())
+                                            }
+                                            "aliyun" => {
+                                                if aliyun_running.swap(true, Ordering::AcqRel) {
+                                                    return Err(
+                                                    scheduled_sync::EnqueueError::SyncInProgress,
+                                                );
+                                                }
+                                                let sync_run_id = SyncRunId::new(format!(
+                                                    "aliyun-scheduled-{}",
+                                                    uuid::Uuid::new_v4()
+                                                ))
+                                                .map_err(|_| {
+                                                    aliyun_running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                scheduled_sync::spawn_aliyun_sync(
+                                                    store.clone(),
+                                                    aliyun_running.clone(),
+                                                    conn,
+                                                    trigger,
+                                                    sync_run_id,
+                                                )
+                                                .map_err(|_| {
+                                                    aliyun_running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                Ok(())
+                                            }
+                                            "tencent" => {
+                                                if tencent_running.swap(true, Ordering::AcqRel) {
+                                                    return Err(
+                                                    scheduled_sync::EnqueueError::SyncInProgress,
+                                                );
+                                                }
+                                                let sync_run_id = SyncRunId::new(format!(
+                                                    "tencent-scheduled-{}",
+                                                    uuid::Uuid::new_v4()
+                                                ))
+                                                .map_err(|_| {
+                                                    tencent_running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                scheduled_sync::spawn_tencent_sync(
+                                                    store.clone(),
+                                                    tencent_running.clone(),
+                                                    conn,
+                                                    trigger,
+                                                    sync_run_id,
+                                                )
+                                                .map_err(|_| {
+                                                    tencent_running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                })?;
+                                                Ok(())
+                                            }
+                                            _ => Err(scheduled_sync::EnqueueError::Unavailable),
                                         }
-                                        _ => Err(scheduled_sync::EnqueueError::Unavailable),
-                                    }
-                                },
-                            )
-                            .tick(&mut guard, pending_inner, at);
+                                    },
+                                )
+                                .tick(
+                                    &mut guard,
+                                    pending_inner,
+                                    at,
+                                );
 
-                            guard
-                                .scheduler()
-                                .entries()
-                                .map(|e| (e.connection_id.clone(), e.next_due_at))
-                                .collect()
-                        };
+                                guard
+                                    .scheduler()
+                                    .entries()
+                                    .map(|e| (e.connection_id.clone(), e.next_due_at))
+                                    .collect()
+                            };
 
                         if !next_due.is_empty() {
                             let revision = query_context.revision().unwrap_or(0).saturating_add(1);
@@ -313,6 +664,10 @@ impl AppState {
         let ssh_connector = Arc::new(SshConnector::new(OpenSshClient::new()));
         let ssh_sync_running = Arc::new(AtomicBool::new(false));
         let dokploy_sync_running = dokploy_running_for_driver.clone();
+        let cloudflare_sync_running = cloudflare_running_for_driver.clone();
+        let supabase_managed_sync_running = supabase_managed_running_for_driver.clone();
+        let aliyun_sync_running = aliyun_running_for_driver.clone();
+        let tencent_sync_running = tencent_running_for_driver.clone();
 
         let mut state = Self {
             runtime: runtime_for_driver,
@@ -326,6 +681,11 @@ impl AppState {
             ssh_connector,
             ssh_sync_running,
             dokploy_sync_running,
+            cloudflare_connector,
+            cloudflare_sync_running,
+            supabase_managed_sync_running,
+            aliyun_sync_running,
+            tencent_sync_running,
             integration_paths: paths.clone(),
             current_app_bundle: current_app_bundle.to_path_buf(),
             scheduler_driver: Mutex::new(None),
@@ -777,6 +1137,358 @@ impl AppState {
         result
     }
 
+    async fn create_cloudflare_connection(
+        &self,
+        request: CloudflareConnectCommand,
+    ) -> Result<CloudflareConnectResult, ErrorEnvelope> {
+        let display_name = request.display_name.trim();
+        if display_name.is_empty() || display_name.len() > 120 {
+            return Err(safe_error(
+                "invalid_connection",
+                "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        self.begin_cloudflare_sync()?;
+        let result = async {
+            let connection_id = ConnectionId::new(format!("cloudflare-{}", uuid::Uuid::new_v4()))
+                .map_err(|_| {
+                safe_error(
+                    "connection_unavailable",
+                    "Cloudflare connection could not be created.",
+                )
+            })?;
+            let connection = Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("cloudflare").expect("static connector type"),
+                display_name: display_name.into(),
+                enabled: true,
+                config: serde_json::json!({}),
+                secret_ref: None,
+                health: ConnectorHealth::Degraded,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+                deleted_at: None,
+            };
+            if self
+                .store
+                .write(|store| store.upsert_connection(connection.clone()))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Cloudflare connection could not be saved.",
+                ));
+            }
+            let token = SecretValue::new(request.token.into_bytes());
+            if self
+                .store
+                .write(|s| s.upsert_connection_secret(&connection_id, &token))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Cloudflare credential could not be saved.",
+                ));
+            }
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            if let Err(error) = self.register_cloudflare_connection(&connection) {
+                eprintln!(
+                    "scheduler: Cloudflare connection saved but registration failed: {}",
+                    error.message
+                );
+            }
+            let sync_run_id = self.enqueue_cloudflare_sync(connection, SyncTrigger::User)?;
+            Ok(CloudflareConnectResult {
+                connection_id: connection_id.as_str().to_owned(),
+                sync_run_id,
+            })
+        }
+        .await;
+        if result.is_err() {
+            self.cloudflare_sync_running.store(false, Ordering::Release);
+        }
+        result
+    }
+
+    async fn create_supabase_managed_connection(
+        &self,
+        request: SupabaseManagedConnectCommand,
+    ) -> Result<SupabaseManagedConnectResult, ErrorEnvelope> {
+        let display_name = request.display_name.trim();
+        if display_name.is_empty() || display_name.len() > 120 {
+            return Err(safe_error(
+                "invalid_connection",
+                "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        self.begin_supabase_managed_sync()?;
+        let result = async {
+            let connection_id =
+                ConnectionId::new(format!("supabase-managed-{}", uuid::Uuid::new_v4())).map_err(
+                    |_| {
+                        safe_error(
+                            "connection_unavailable",
+                            "Supabase managed connection could not be created.",
+                        )
+                    },
+                )?;
+            let connection = Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("supabase-managed")
+                    .expect("static connector type"),
+                display_name: display_name.into(),
+                enabled: true,
+                config: serde_json::json!({}),
+                secret_ref: None,
+                health: ConnectorHealth::Degraded,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+                deleted_at: None,
+            };
+            if self
+                .store
+                .write(|store| store.upsert_connection(connection.clone()))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Supabase managed connection could not be saved.",
+                ));
+            }
+            let token = SecretValue::new(request.token.into_bytes());
+            if self
+                .store
+                .write(|s| s.upsert_connection_secret(&connection_id, &token))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Supabase managed credential could not be saved.",
+                ));
+            }
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            if let Err(error) = self.register_supabase_managed_connection(&connection) {
+                eprintln!(
+                    "scheduler: Supabase managed connection saved but registration failed: {}",
+                    error.message
+                );
+            }
+            let sync_run_id = self.enqueue_supabase_managed_sync(connection, SyncTrigger::User)?;
+            Ok(SupabaseManagedConnectResult {
+                connection_id: connection_id.as_str().to_owned(),
+                sync_run_id,
+            })
+        }
+        .await;
+        if result.is_err() {
+            self.supabase_managed_sync_running
+                .store(false, Ordering::Release);
+        }
+        result
+    }
+
+    async fn create_aliyun_connection(
+        &self,
+        request: AliyunConnectCommand,
+    ) -> Result<AliyunConnectResult, ErrorEnvelope> {
+        let display_name = request.display_name.trim();
+        if display_name.is_empty() || display_name.len() > 120 {
+            return Err(safe_error(
+                "invalid_connection",
+                "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        let region = request.region.trim();
+        if region.is_empty() {
+            return Err(safe_error(
+                "invalid_connection",
+                "Aliyun region must not be empty.",
+            ));
+        }
+        self.begin_aliyun_sync()?;
+        let result = async {
+            let connection_id = ConnectionId::new(format!("aliyun-{}", uuid::Uuid::new_v4()))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Aliyun connection could not be created.",
+                    )
+                })?;
+            let mut config = serde_json::Map::new();
+            config.insert(
+                "access_key_id".to_owned(),
+                serde_json::Value::String(request.access_key_id.clone()),
+            );
+            config.insert(
+                "region".to_owned(),
+                serde_json::Value::String(region.to_owned()),
+            );
+            let connection = Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("aliyun").expect("static connector type"),
+                display_name: display_name.into(),
+                enabled: true,
+                config: serde_json::Value::Object(config),
+                secret_ref: None,
+                health: ConnectorHealth::Degraded,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+                deleted_at: None,
+            };
+            if self
+                .store
+                .write(|store| store.upsert_connection(connection.clone()))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Aliyun connection could not be saved.",
+                ));
+            }
+            let secret = SecretValue::new(request.access_key_secret.into_bytes());
+            if self
+                .store
+                .write(|s| s.upsert_connection_secret(&connection_id, &secret))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Aliyun credential could not be saved.",
+                ));
+            }
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            if let Err(error) = self.register_aliyun_connection(&connection) {
+                eprintln!(
+                    "scheduler: Aliyun connection saved but registration failed: {}",
+                    error.message
+                );
+            }
+            let sync_run_id = self.enqueue_aliyun_sync(connection, SyncTrigger::User)?;
+            Ok(AliyunConnectResult {
+                connection_id: connection_id.as_str().to_owned(),
+                sync_run_id,
+            })
+        }
+        .await;
+        if result.is_err() {
+            self.aliyun_sync_running.store(false, Ordering::Release);
+        }
+        result
+    }
+
+    async fn create_tencent_connection(
+        &self,
+        request: TencentConnectCommand,
+    ) -> Result<TencentConnectResult, ErrorEnvelope> {
+        let display_name = request.display_name.trim();
+        if display_name.is_empty() || display_name.len() > 120 {
+            return Err(safe_error(
+                "invalid_connection",
+                "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        let region = request.region.trim();
+        if region.is_empty() {
+            return Err(safe_error(
+                "invalid_connection",
+                "Tencent region must not be empty.",
+            ));
+        }
+        self.begin_tencent_sync()?;
+        let result = async {
+            let connection_id = ConnectionId::new(format!("tencent-{}", uuid::Uuid::new_v4()))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Tencent connection could not be created.",
+                    )
+                })?;
+            let mut config = serde_json::Map::new();
+            config.insert(
+                "secret_id".to_owned(),
+                serde_json::Value::String(request.secret_id.clone()),
+            );
+            config.insert(
+                "region".to_owned(),
+                serde_json::Value::String(region.to_owned()),
+            );
+            let connection = Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("tencent").expect("static connector type"),
+                display_name: display_name.into(),
+                enabled: true,
+                config: serde_json::Value::Object(config),
+                secret_ref: None,
+                health: ConnectorHealth::Degraded,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+                deleted_at: None,
+            };
+            if self
+                .store
+                .write(|store| store.upsert_connection(connection.clone()))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Tencent connection could not be saved.",
+                ));
+            }
+            let secret = SecretValue::new(request.secret_key.into_bytes());
+            if self
+                .store
+                .write(|s| s.upsert_connection_secret(&connection_id, &secret))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Tencent credential could not be saved.",
+                ));
+            }
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            if let Err(error) = self.register_tencent_connection(&connection) {
+                eprintln!(
+                    "scheduler: Tencent connection saved but registration failed: {}",
+                    error.message
+                );
+            }
+            let sync_run_id = self.enqueue_tencent_sync(connection, SyncTrigger::User)?;
+            Ok(TencentConnectResult {
+                connection_id: connection_id.as_str().to_owned(),
+                sync_run_id,
+            })
+        }
+        .await;
+        if result.is_err() {
+            self.tencent_sync_running.store(false, Ordering::Release);
+        }
+        result
+    }
+
     async fn manual_github_sync(&self, connection_id: String) -> Result<String, ErrorEnvelope> {
         let connection_id = ConnectionId::new(connection_id)
             .map_err(|_| safe_error("invalid_connection", "Connection identifier is invalid."))?;
@@ -1106,6 +1818,209 @@ impl AppState {
         scheduled_sync::spawn_dokploy_sync(
             self.store.clone(),
             self.dokploy_sync_running.clone(),
+            connection,
+            trigger,
+            sync_run_id,
+        )
+    }
+
+    fn begin_cloudflare_sync(&self) -> Result<(), ErrorEnvelope> {
+        if self.cloudflare_sync_running.swap(true, Ordering::AcqRel) {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "A Cloudflare synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn register_cloudflare_connection(&self, connection: &Connection) -> Result<(), DomainError> {
+        let evaluated_at = now().map_err(DomainError::invalid_value)?;
+        let interval = query_sync_interval_millis(&connection.connector_type);
+        let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
+        let next_due = Timestamp::from_unix_millis(next_due).unwrap_or(evaluated_at);
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| DomainError::invalid_value("runtime lock poisoned"))?;
+        runtime
+            .scheduler_mut()
+            .register(connection.connection_id.clone(), interval, next_due)
+            .map_err(|e| DomainError::invalid_value(format!("{:?}", e)))?;
+        Ok(())
+    }
+
+    fn enqueue_cloudflare_sync(
+        &self,
+        connection: Connection,
+        trigger: SyncTrigger,
+    ) -> Result<String, ErrorEnvelope> {
+        let sync_run_id = SyncRunId::new(format!("cloudflare-sync-{}", uuid::Uuid::new_v4()))
+            .map_err(|_| {
+                safe_error(
+                    "sync_unavailable",
+                    "Cloudflare synchronization could not start.",
+                )
+            })?;
+        scheduled_sync::spawn_cloudflare_sync(
+            self.store.clone(),
+            self.cloudflare_sync_running.clone(),
+            self.cloudflare_connector.clone(),
+            connection,
+            trigger,
+            sync_run_id,
+        )
+    }
+
+    fn begin_supabase_managed_sync(&self) -> Result<(), ErrorEnvelope> {
+        if self
+            .supabase_managed_sync_running
+            .swap(true, Ordering::AcqRel)
+        {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "A Supabase managed synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn register_supabase_managed_connection(
+        &self,
+        connection: &Connection,
+    ) -> Result<(), DomainError> {
+        let evaluated_at = now().map_err(DomainError::invalid_value)?;
+        let interval = query_sync_interval_millis(&connection.connector_type);
+        let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
+        let next_due = Timestamp::from_unix_millis(next_due).unwrap_or(evaluated_at);
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| DomainError::invalid_value("runtime lock poisoned"))?;
+        runtime
+            .scheduler_mut()
+            .register(connection.connection_id.clone(), interval, next_due)
+            .map_err(|e| DomainError::invalid_value(format!("{:?}", e)))?;
+        Ok(())
+    }
+
+    fn enqueue_supabase_managed_sync(
+        &self,
+        connection: Connection,
+        trigger: SyncTrigger,
+    ) -> Result<String, ErrorEnvelope> {
+        let sync_run_id = SyncRunId::new(format!("supabase-managed-sync-{}", uuid::Uuid::new_v4()))
+            .map_err(|_| {
+                safe_error(
+                    "sync_unavailable",
+                    "Supabase managed synchronization could not start.",
+                )
+            })?;
+        scheduled_sync::spawn_supabase_managed_sync(
+            self.store.clone(),
+            self.supabase_managed_sync_running.clone(),
+            connection,
+            trigger,
+            sync_run_id,
+        )
+    }
+
+    fn begin_aliyun_sync(&self) -> Result<(), ErrorEnvelope> {
+        if self.aliyun_sync_running.swap(true, Ordering::AcqRel) {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "An Aliyun synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn register_aliyun_connection(&self, connection: &Connection) -> Result<(), DomainError> {
+        let evaluated_at = now().map_err(DomainError::invalid_value)?;
+        let interval = query_sync_interval_millis(&connection.connector_type);
+        let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
+        let next_due = Timestamp::from_unix_millis(next_due).unwrap_or(evaluated_at);
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| DomainError::invalid_value("runtime lock poisoned"))?;
+        runtime
+            .scheduler_mut()
+            .register(connection.connection_id.clone(), interval, next_due)
+            .map_err(|e| DomainError::invalid_value(format!("{:?}", e)))?;
+        Ok(())
+    }
+
+    fn enqueue_aliyun_sync(
+        &self,
+        connection: Connection,
+        trigger: SyncTrigger,
+    ) -> Result<String, ErrorEnvelope> {
+        let sync_run_id =
+            SyncRunId::new(format!("aliyun-sync-{}", uuid::Uuid::new_v4())).map_err(|_| {
+                safe_error(
+                    "sync_unavailable",
+                    "Aliyun synchronization could not start.",
+                )
+            })?;
+        scheduled_sync::spawn_aliyun_sync(
+            self.store.clone(),
+            self.aliyun_sync_running.clone(),
+            connection,
+            trigger,
+            sync_run_id,
+        )
+    }
+
+    fn begin_tencent_sync(&self) -> Result<(), ErrorEnvelope> {
+        if self.tencent_sync_running.swap(true, Ordering::AcqRel) {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "A Tencent synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn register_tencent_connection(&self, connection: &Connection) -> Result<(), DomainError> {
+        let evaluated_at = now().map_err(DomainError::invalid_value)?;
+        let interval = query_sync_interval_millis(&connection.connector_type);
+        let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
+        let next_due = Timestamp::from_unix_millis(next_due).unwrap_or(evaluated_at);
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| DomainError::invalid_value("runtime lock poisoned"))?;
+        runtime
+            .scheduler_mut()
+            .register(connection.connection_id.clone(), interval, next_due)
+            .map_err(|e| DomainError::invalid_value(format!("{:?}", e)))?;
+        Ok(())
+    }
+
+    fn enqueue_tencent_sync(
+        &self,
+        connection: Connection,
+        trigger: SyncTrigger,
+    ) -> Result<String, ErrorEnvelope> {
+        let sync_run_id = SyncRunId::new(format!("tencent-sync-{}", uuid::Uuid::new_v4()))
+            .map_err(|_| {
+                safe_error(
+                    "sync_unavailable",
+                    "Tencent synchronization could not start.",
+                )
+            })?;
+        scheduled_sync::spawn_tencent_sync(
+            self.store.clone(),
+            self.tencent_sync_running.clone(),
             connection,
             trigger,
             sync_run_id,
@@ -1594,6 +2509,684 @@ pub(crate) async fn sync_dokploy(
     Ok(())
 }
 
+pub(crate) async fn sync_cloudflare(
+    store: SharedStore,
+    connector: Arc<CloudflareConnector<ReqwestCloudflareTransport>>,
+    mut connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: SyncRunId,
+) -> Result<(), ErrorEnvelope> {
+    let started_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Cloudflare synchronization could not start.",
+        )
+    })?;
+    connection.last_attempt_at = Some(started_at);
+    store
+        .write(|store| store.upsert_connection(connection.clone()))
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Cloudflare synchronization could not start.",
+            )
+        })?;
+    let request = SyncRequest {
+        sync_run_id: sync_run_id.clone(),
+        connection: ConnectionInput {
+            connection_id: connection.connection_id.clone(),
+            connector_type: ConnectorType::new("cloudflare").expect("static connector type"),
+            config: connection.config.clone(),
+            config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(format!("cloudflare:{}", connection.connection_id.as_str())).map_err(
+            |_| {
+                safe_error(
+                    "sync_unavailable",
+                    "Cloudflare synchronization could not start.",
+                )
+            },
+        )?,
+        cursor: None,
+        targeted_resources: Vec::new(),
+    };
+    let secret = store
+        .read(|s| s.connection_secret(&connection.connection_id))
+        .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "Cloudflare credential is unavailable from local storage.",
+            )
+        })?
+        .ok_or_else(|| {
+            safe_error(
+                "credential_unavailable",
+                "Cloudflare credential is unavailable from local storage.",
+            )
+        })?;
+    let mut engine = SyncEngine::new(store.clone());
+    let handle = engine
+        .start(
+            &connection,
+            SyncRunStart {
+                sync_run_id: sync_run_id.clone(),
+                mode: SyncMode::Full,
+                trigger,
+                scope: request.scope.clone(),
+                started_at,
+                targeted_resources: Vec::new(),
+            },
+        )
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Cloudflare synchronization could not start.",
+            )
+        })?;
+    let outcome = connector.sync(request.clone(), Some(&secret)).await;
+    let finished_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Cloudflare synchronization could not finish.",
+        )
+    })?;
+    let health = match outcome {
+        Ok(outcome) => {
+            let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
+                ConnectorHealth::Degraded
+            } else {
+                ConnectorHealth::Healthy
+            };
+            let normalized =
+                match cloudflare_normalizer().normalize(&request, outcome.batch().clone()) {
+                    Ok(normalized) => normalized,
+                    Err(_) => {
+                        let _ = engine.fail(
+                            handle,
+                            DomainError {
+                                code: ErrorCode::Internal,
+                                message: "Cloudflare data normalization failed.".into(),
+                                retryable: false,
+                            },
+                            finished_at,
+                        );
+                        return Err(safe_error(
+                            "sync_unavailable",
+                            "Cloudflare data could not be saved.",
+                        ));
+                    }
+                };
+            engine
+                .commit(handle, normalized, finished_at)
+                .map_err(|_| {
+                    safe_error("sync_unavailable", "Cloudflare data could not be saved.")
+                })?;
+            connection.last_success_at = Some(finished_at);
+            health
+        }
+        Err(failure) => {
+            let health = match failure.code {
+                ErrorCode::NetworkUnreachable
+                | ErrorCode::AuthenticationFailed
+                | ErrorCode::ProviderUnavailable => ConnectorHealth::Unreachable,
+                _ => ConnectorHealth::Unreachable,
+            };
+            engine
+                .fail(
+                    handle,
+                    DomainError {
+                        code: failure.code,
+                        message: "Cloudflare synchronization failed.".into(),
+                        retryable: failure.retryable,
+                    },
+                    finished_at,
+                )
+                .map_err(|_| {
+                    safe_error(
+                        "sync_unavailable",
+                        "Cloudflare synchronization could not finish.",
+                    )
+                })?;
+            connection.health = health;
+            store
+                .write(|s| s.upsert_connection(connection))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Cloudflare connection status could not be saved.",
+                    )
+                })?;
+            return Err(safe_error(
+                "cloudflare_sync_failed",
+                "Cloudflare synchronization failed.",
+            ));
+        }
+    };
+    connection.health = health;
+    store
+        .write(|s| s.upsert_connection(connection))
+        .map_err(|_| {
+            safe_error(
+                "connection_unavailable",
+                "Cloudflare connection status could not be saved.",
+            )
+        })?;
+    Ok(())
+}
+
+pub(crate) async fn sync_supabase_managed(
+    store: SharedStore,
+    mut connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: SyncRunId,
+) -> Result<(), ErrorEnvelope> {
+    let started_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Supabase managed synchronization could not start.",
+        )
+    })?;
+    connection.last_attempt_at = Some(started_at);
+    store
+        .write(|s| s.upsert_connection(connection.clone()))
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Supabase managed synchronization could not start.",
+            )
+        })?;
+    let request = SyncRequest {
+        sync_run_id: sync_run_id.clone(),
+        connection: ConnectionInput {
+            connection_id: connection.connection_id.clone(),
+            connector_type: ConnectorType::new("supabase-managed").expect("static connector type"),
+            config: connection.config.clone(),
+            config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(format!(
+            "supabase-managed:{}",
+            connection.connection_id.as_str()
+        ))
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Supabase managed synchronization could not start.",
+            )
+        })?,
+        cursor: None,
+        targeted_resources: Vec::new(),
+    };
+    let secret = store
+        .read(|s| s.connection_secret(&connection.connection_id))
+        .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "Supabase managed credential is unavailable.",
+            )
+        })?
+        .ok_or_else(|| {
+            safe_error(
+                "credential_unavailable",
+                "Supabase managed credential is unavailable.",
+            )
+        })?;
+    let transport = LiveManagementTransport::new().map_err(|_| {
+        supabase_managed_unreachable_error("Supabase managed transport is unavailable.")
+    })?;
+    let connector = Arc::new(SupabaseManagedConnector::new(transport));
+    let mut engine = SyncEngine::new(store.clone());
+    let handle = engine
+        .start(
+            &connection,
+            SyncRunStart {
+                sync_run_id: sync_run_id.clone(),
+                mode: SyncMode::Full,
+                trigger,
+                scope: request.scope.clone(),
+                started_at,
+                targeted_resources: Vec::new(),
+            },
+        )
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Supabase managed synchronization could not start.",
+            )
+        })?;
+    let outcome = connector.sync(request.clone(), Some(&secret)).await;
+    let finished_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Supabase managed synchronization could not finish.",
+        )
+    })?;
+    let health = match outcome {
+        Ok(outcome) => {
+            let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
+                ConnectorHealth::Degraded
+            } else {
+                ConnectorHealth::Healthy
+            };
+            let normalized =
+                match supabase_managed_normalizer().normalize(&request, outcome.batch().clone()) {
+                    Ok(n) => n,
+                    Err(_) => {
+                        let _ = engine.fail(
+                            handle,
+                            DomainError {
+                                code: ErrorCode::Internal,
+                                message: "Supabase managed data normalization failed.".into(),
+                                retryable: false,
+                            },
+                            finished_at,
+                        );
+                        return Err(safe_error(
+                            "sync_unavailable",
+                            "Supabase managed data could not be saved.",
+                        ));
+                    }
+                };
+            engine
+                .commit(handle, normalized, finished_at)
+                .map_err(|_| {
+                    safe_error(
+                        "sync_unavailable",
+                        "Supabase managed data could not be saved.",
+                    )
+                })?;
+            connection.last_success_at = Some(finished_at);
+            health
+        }
+        Err(failure) => {
+            let health = match failure.code {
+                ErrorCode::NetworkUnreachable
+                | ErrorCode::AuthenticationFailed
+                | ErrorCode::ProviderUnavailable => ConnectorHealth::Unreachable,
+                _ => ConnectorHealth::Unreachable,
+            };
+            engine
+                .fail(
+                    handle,
+                    DomainError {
+                        code: failure.code,
+                        message: "Supabase managed synchronization failed.".into(),
+                        retryable: failure.retryable,
+                    },
+                    finished_at,
+                )
+                .map_err(|_| {
+                    safe_error(
+                        "sync_unavailable",
+                        "Supabase managed synchronization could not finish.",
+                    )
+                })?;
+            connection.health = health;
+            store
+                .write(|s| s.upsert_connection(connection))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Supabase managed connection status could not be saved.",
+                    )
+                })?;
+            return Err(safe_error(
+                "supabase_managed_sync_failed",
+                "Supabase managed synchronization failed.",
+            ));
+        }
+    };
+    connection.health = health;
+    store
+        .write(|s| s.upsert_connection(connection))
+        .map_err(|_| {
+            safe_error(
+                "connection_unavailable",
+                "Supabase managed connection status could not be saved.",
+            )
+        })?;
+    Ok(())
+}
+
+pub(crate) async fn sync_aliyun(
+    store: SharedStore,
+    mut connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: SyncRunId,
+) -> Result<(), ErrorEnvelope> {
+    let started_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Aliyun synchronization could not start.",
+        )
+    })?;
+    connection.last_attempt_at = Some(started_at);
+    store
+        .write(|s| s.upsert_connection(connection.clone()))
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Aliyun synchronization could not start.",
+            )
+        })?;
+    let region = connection
+        .config
+        .get("region")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let request = SyncRequest {
+        sync_run_id: sync_run_id.clone(),
+        connection: ConnectionInput {
+            connection_id: connection.connection_id.clone(),
+            connector_type: ConnectorType::new("aliyun").expect("static connector type"),
+            config: connection.config.clone(),
+            config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(format!("aliyun:{region}")).map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Aliyun synchronization could not start.",
+            )
+        })?,
+        cursor: None,
+        targeted_resources: Vec::new(),
+    };
+    let secret = store
+        .read(|s| s.connection_secret(&connection.connection_id))
+        .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "Aliyun credential is unavailable.",
+            )
+        })?
+        .ok_or_else(|| {
+            safe_error(
+                "credential_unavailable",
+                "Aliyun credential is unavailable.",
+            )
+        })?;
+    let transport = LiveAliyunTransport::new()
+        .map_err(|_| aliyun_unreachable_error("Aliyun transport is unavailable."))?;
+    let connector = Arc::new(AliyunConnector::new(transport));
+    let mut engine = SyncEngine::new(store.clone());
+    let handle = engine
+        .start(
+            &connection,
+            SyncRunStart {
+                sync_run_id: sync_run_id.clone(),
+                mode: SyncMode::Full,
+                trigger,
+                scope: request.scope.clone(),
+                started_at,
+                targeted_resources: Vec::new(),
+            },
+        )
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Aliyun synchronization could not start.",
+            )
+        })?;
+    let outcome = connector.sync(request.clone(), Some(&secret)).await;
+    let finished_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Aliyun synchronization could not finish.",
+        )
+    })?;
+    let health = match outcome {
+        Ok(outcome) => {
+            let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
+                ConnectorHealth::Degraded
+            } else {
+                ConnectorHealth::Healthy
+            };
+            let normalized = match aliyun_normalizer().normalize(&request, outcome.batch().clone())
+            {
+                Ok(n) => n,
+                Err(_) => {
+                    let _ = engine.fail(
+                        handle,
+                        DomainError {
+                            code: ErrorCode::Internal,
+                            message: "Aliyun data normalization failed.".into(),
+                            retryable: false,
+                        },
+                        finished_at,
+                    );
+                    return Err(safe_error(
+                        "sync_unavailable",
+                        "Aliyun data could not be saved.",
+                    ));
+                }
+            };
+            engine
+                .commit(handle, normalized, finished_at)
+                .map_err(|_| safe_error("sync_unavailable", "Aliyun data could not be saved."))?;
+            connection.last_success_at = Some(finished_at);
+            health
+        }
+        Err(failure) => {
+            let health = match failure.code {
+                ErrorCode::NetworkUnreachable
+                | ErrorCode::AuthenticationFailed
+                | ErrorCode::ProviderUnavailable => ConnectorHealth::Unreachable,
+                _ => ConnectorHealth::Unreachable,
+            };
+            engine
+                .fail(
+                    handle,
+                    DomainError {
+                        code: failure.code,
+                        message: "Aliyun synchronization failed.".into(),
+                        retryable: failure.retryable,
+                    },
+                    finished_at,
+                )
+                .map_err(|_| {
+                    safe_error(
+                        "sync_unavailable",
+                        "Aliyun synchronization could not finish.",
+                    )
+                })?;
+            connection.health = health;
+            store
+                .write(|s| s.upsert_connection(connection))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Aliyun connection status could not be saved.",
+                    )
+                })?;
+            return Err(safe_error(
+                "aliyun_sync_failed",
+                "Aliyun synchronization failed.",
+            ));
+        }
+    };
+    connection.health = health;
+    store
+        .write(|s| s.upsert_connection(connection))
+        .map_err(|_| {
+            safe_error(
+                "connection_unavailable",
+                "Aliyun connection status could not be saved.",
+            )
+        })?;
+    Ok(())
+}
+
+pub(crate) async fn sync_tencent(
+    store: SharedStore,
+    mut connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: SyncRunId,
+) -> Result<(), ErrorEnvelope> {
+    let started_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Tencent synchronization could not start.",
+        )
+    })?;
+    connection.last_attempt_at = Some(started_at);
+    store
+        .write(|s| s.upsert_connection(connection.clone()))
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Tencent synchronization could not start.",
+            )
+        })?;
+    let region = connection
+        .config
+        .get("region")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let request = SyncRequest {
+        sync_run_id: sync_run_id.clone(),
+        connection: ConnectionInput {
+            connection_id: connection.connection_id.clone(),
+            connector_type: ConnectorType::new("tencent").expect("static connector type"),
+            config: connection.config.clone(),
+            config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(format!("tencent:{region}")).map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Tencent synchronization could not start.",
+            )
+        })?,
+        cursor: None,
+        targeted_resources: Vec::new(),
+    };
+    let secret = store
+        .read(|s| s.connection_secret(&connection.connection_id))
+        .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "Tencent credential is unavailable.",
+            )
+        })?
+        .ok_or_else(|| {
+            safe_error(
+                "credential_unavailable",
+                "Tencent credential is unavailable.",
+            )
+        })?;
+    let transport = LiveTencentTransport::new()
+        .map_err(|_| tencent_unreachable_error("Tencent transport is unavailable."))?;
+    let connector = Arc::new(TencentConnector::new(transport));
+    let mut engine = SyncEngine::new(store.clone());
+    let handle = engine
+        .start(
+            &connection,
+            SyncRunStart {
+                sync_run_id: sync_run_id.clone(),
+                mode: SyncMode::Full,
+                trigger,
+                scope: request.scope.clone(),
+                started_at,
+                targeted_resources: Vec::new(),
+            },
+        )
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Tencent synchronization could not start.",
+            )
+        })?;
+    let outcome = connector.sync(request.clone(), Some(&secret)).await;
+    let finished_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Tencent synchronization could not finish.",
+        )
+    })?;
+    let health = match outcome {
+        Ok(outcome) => {
+            let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
+                ConnectorHealth::Degraded
+            } else {
+                ConnectorHealth::Healthy
+            };
+            let normalized = match tencent_normalizer().normalize(&request, outcome.batch().clone())
+            {
+                Ok(n) => n,
+                Err(_) => {
+                    let _ = engine.fail(
+                        handle,
+                        DomainError {
+                            code: ErrorCode::Internal,
+                            message: "Tencent data normalization failed.".into(),
+                            retryable: false,
+                        },
+                        finished_at,
+                    );
+                    return Err(safe_error(
+                        "sync_unavailable",
+                        "Tencent data could not be saved.",
+                    ));
+                }
+            };
+            engine
+                .commit(handle, normalized, finished_at)
+                .map_err(|_| safe_error("sync_unavailable", "Tencent data could not be saved."))?;
+            connection.last_success_at = Some(finished_at);
+            health
+        }
+        Err(failure) => {
+            let health = match failure.code {
+                ErrorCode::NetworkUnreachable
+                | ErrorCode::AuthenticationFailed
+                | ErrorCode::ProviderUnavailable => ConnectorHealth::Unreachable,
+                _ => ConnectorHealth::Unreachable,
+            };
+            engine
+                .fail(
+                    handle,
+                    DomainError {
+                        code: failure.code,
+                        message: "Tencent synchronization failed.".into(),
+                        retryable: failure.retryable,
+                    },
+                    finished_at,
+                )
+                .map_err(|_| {
+                    safe_error(
+                        "sync_unavailable",
+                        "Tencent synchronization could not finish.",
+                    )
+                })?;
+            connection.health = health;
+            store
+                .write(|s| s.upsert_connection(connection))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Tencent connection status could not be saved.",
+                    )
+                })?;
+            return Err(safe_error(
+                "tencent_sync_failed",
+                "Tencent synchronization failed.",
+            ));
+        }
+    };
+    connection.health = health;
+    store
+        .write(|s| s.upsert_connection(connection))
+        .map_err(|_| {
+            safe_error(
+                "connection_unavailable",
+                "Tencent connection status could not be saved.",
+            )
+        })?;
+    Ok(())
+}
+
 fn ssh_sync_error(code: ErrorCode) -> ErrorEnvelope {
     let code_str = match code {
         ErrorCode::HostKeyMismatch => "host_key_mismatch",
@@ -1634,6 +3227,48 @@ fn dokploy_unreachable_error(msg: impl Into<String>) -> ErrorEnvelope {
 #[allow(dead_code)]
 fn dokploy_auth_error(msg: impl Into<String>) -> ErrorEnvelope {
     safe_error("dokploy_auth_failed", &msg.into())
+}
+
+fn cloudflare_validation_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("cloudflare_validation_failed", &msg.into())
+}
+fn cloudflare_unreachable_error(msg: impl Into<String>) -> ErrorEnvelope {
+    let mut e = safe_error("cloudflare_unreachable", &msg.into());
+    e.retryable = true;
+    e
+}
+fn cloudflare_auth_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("cloudflare_auth_failed", &msg.into())
+}
+
+fn supabase_managed_validation_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("supabase_managed_validation_failed", &msg.into())
+}
+fn supabase_managed_unreachable_error(msg: impl Into<String>) -> ErrorEnvelope {
+    let mut e = safe_error("supabase_managed_unreachable", &msg.into());
+    e.retryable = true;
+    e
+}
+fn supabase_managed_auth_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("supabase_managed_auth_failed", &msg.into())
+}
+
+fn aliyun_validation_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("aliyun_validation_failed", &msg.into())
+}
+fn aliyun_unreachable_error(msg: impl Into<String>) -> ErrorEnvelope {
+    let mut e = safe_error("aliyun_unreachable", &msg.into());
+    e.retryable = true;
+    e
+}
+
+fn tencent_validation_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("tencent_validation_failed", &msg.into())
+}
+fn tencent_unreachable_error(msg: impl Into<String>) -> ErrorEnvelope {
+    let mut e = safe_error("tencent_unreachable", &msg.into());
+    e.retryable = true;
+    e
 }
 
 fn goal9_catalog() -> ConnectorCatalogSnapshot {
@@ -1748,6 +3383,14 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         github_connection_purge,
         ssh_validate,
         ssh_connect,
+        cloudflare_validate,
+        cloudflare_connect,
+        supabase_managed_validate,
+        supabase_managed_connect,
+        aliyun_validate,
+        aliyun_connect,
+        tencent_validate,
+        tencent_connect,
         runtime_manual_sync,
         local_settings_get,
         local_settings_update,
@@ -1892,6 +3535,114 @@ struct DokployConnectCommand {
 
 #[derive(Serialize)]
 struct DokployConnectResult {
+    connection_id: String,
+    sync_run_id: String,
+}
+
+// ── Cloudflare DTOs ──────────────────────────────────────────────────────────
+#[derive(Deserialize)]
+struct CloudflareValidateCommand {
+    #[allow(unused)]
+    token: String,
+}
+
+#[derive(Serialize)]
+struct CloudflareValidateResult {
+    account_count: u64,
+}
+
+#[derive(Deserialize)]
+struct CloudflareConnectCommand {
+    display_name: String,
+    #[allow(unused)]
+    token: String,
+}
+
+#[derive(Serialize)]
+struct CloudflareConnectResult {
+    connection_id: String,
+    sync_run_id: String,
+}
+
+// ── Supabase Managed DTOs ────────────────────────────────────────────────────
+#[derive(Deserialize)]
+struct SupabaseManagedValidateCommand {
+    #[allow(unused)]
+    token: String,
+}
+
+#[derive(Serialize)]
+struct SupabaseManagedValidateResult {
+    project_count: u64,
+}
+
+#[derive(Deserialize)]
+struct SupabaseManagedConnectCommand {
+    display_name: String,
+    #[allow(unused)]
+    token: String,
+}
+
+#[derive(Serialize)]
+struct SupabaseManagedConnectResult {
+    connection_id: String,
+    sync_run_id: String,
+}
+
+// ── Aliyun DTOs ──────────────────────────────────────────────────────────────
+#[derive(Deserialize)]
+struct AliyunValidateCommand {
+    access_key_id: String,
+    #[allow(unused)]
+    access_key_secret: String,
+    region: String,
+}
+
+#[derive(Serialize)]
+struct AliyunValidateResult {
+    resource_count: u64,
+}
+
+#[derive(Deserialize)]
+struct AliyunConnectCommand {
+    display_name: String,
+    access_key_id: String,
+    #[allow(unused)]
+    access_key_secret: String,
+    region: String,
+}
+
+#[derive(Serialize)]
+struct AliyunConnectResult {
+    connection_id: String,
+    sync_run_id: String,
+}
+
+// ── Tencent DTOs ─────────────────────────────────────────────────────────────
+#[derive(Deserialize)]
+struct TencentValidateCommand {
+    secret_id: String,
+    #[allow(unused)]
+    secret_key: String,
+    region: String,
+}
+
+#[derive(Serialize)]
+struct TencentValidateResult {
+    resource_count: u64,
+}
+
+#[derive(Deserialize)]
+struct TencentConnectCommand {
+    display_name: String,
+    secret_id: String,
+    #[allow(unused)]
+    secret_key: String,
+    region: String,
+}
+
+#[derive(Serialize)]
+struct TencentConnectResult {
     connection_id: String,
     sync_run_id: String,
 }
@@ -2119,6 +3870,350 @@ async fn dokploy_connect(
     request: DokployConnectCommand,
 ) -> Result<DokployConnectResult, ErrorEnvelope> {
     state.create_dokploy_connection(request).await
+}
+
+// ── Cloudflare commands ───────────────────────────────────────────────────────
+#[tauri::command]
+async fn cloudflare_validate(
+    _state: State<'_, AppState>,
+    request: CloudflareValidateCommand,
+) -> Result<CloudflareValidateResult, ErrorEnvelope> {
+    let token = request.token.trim();
+    if token.is_empty() {
+        return Err(cloudflare_validation_error(
+            "Cloudflare token must not be empty.",
+        ));
+    }
+    let secret = SecretValue::new(token.as_bytes().to_vec());
+    let transport = ReqwestCloudflareTransport::new()
+        .map_err(|_| cloudflare_unreachable_error("Cloudflare transport is unavailable."))?;
+    let connector = CloudflareConnector::new(transport);
+    let connection_id = ConnectionId::new(format!("cloudflare-validate-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| cloudflare_validation_error("Cloudflare validation identifier is invalid."))?;
+    let connection = ConnectionInput {
+        connection_id,
+        connector_type: ConnectorType::new("cloudflare").expect("static connector type"),
+        config: serde_json::json!({}),
+        config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+    };
+    let report = connector
+        .validate(
+            ValidationRequest {
+                connection: connection.clone(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| {
+            cloudflare_validation_error(format!("Cloudflare validation failed ({e:?})"))
+        })?;
+    if report.status != ValidationStatus::Valid {
+        let code = report
+            .errors
+            .first()
+            .map(|issue| issue.code)
+            .unwrap_or(ErrorCode::InvalidDomainValue);
+        return Err(match code {
+            ErrorCode::AuthenticationFailed => {
+                cloudflare_auth_error("Cloudflare API token is invalid.")
+            }
+            ErrorCode::CredentialUnavailable => {
+                cloudflare_validation_error("Cloudflare credential is unavailable.")
+            }
+            _ => cloudflare_validation_error(format!("Cloudflare validation failed ({code:?})")),
+        });
+    }
+    let sync_run_id = SyncRunId::new(format!("cloudflare-validate-sync-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| cloudflare_validation_error("Cloudflare validation could not start."))?;
+    let scope = Scope::new("cloudflare-validate")
+        .map_err(|_| cloudflare_validation_error("Cloudflare validation scope is invalid."))?;
+    let outcome = connector
+        .sync(
+            SyncRequest {
+                sync_run_id,
+                connection,
+                mode: SyncMode::Full,
+                scope,
+                cursor: None,
+                targeted_resources: Vec::new(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| {
+            cloudflare_validation_error(format!("Cloudflare validation failed ({e:?})"))
+        })?;
+    let account_count = outcome
+        .batch()
+        .resources
+        .iter()
+        .filter(|resource| resource.kind.as_str() == "cloudflare.account")
+        .count() as u64;
+    Ok(CloudflareValidateResult { account_count })
+}
+
+#[tauri::command]
+async fn cloudflare_connect(
+    state: State<'_, AppState>,
+    request: CloudflareConnectCommand,
+) -> Result<CloudflareConnectResult, ErrorEnvelope> {
+    state.create_cloudflare_connection(request).await
+}
+
+// ── Supabase Managed commands ─────────────────────────────────────────────────
+#[tauri::command]
+async fn supabase_managed_validate(
+    _state: State<'_, AppState>,
+    request: SupabaseManagedValidateCommand,
+) -> Result<SupabaseManagedValidateResult, ErrorEnvelope> {
+    let token = request.token.trim();
+    if token.is_empty() {
+        return Err(supabase_managed_validation_error(
+            "Supabase managed token must not be empty.",
+        ));
+    }
+    let secret = SecretValue::new(token.as_bytes().to_vec());
+    let transport = LiveManagementTransport::new().map_err(|_| {
+        supabase_managed_unreachable_error("Supabase managed transport is unavailable.")
+    })?;
+    let connector = SupabaseManagedConnector::new(transport);
+    let connection_id = ConnectionId::new(format!(
+        "supabase-managed-validate-{}",
+        uuid::Uuid::new_v4()
+    ))
+    .map_err(|_| {
+        supabase_managed_validation_error("Supabase managed validation identifier is invalid.")
+    })?;
+    let connection = ConnectionInput {
+        connection_id,
+        connector_type: ConnectorType::new("supabase-managed").expect("static connector type"),
+        config: serde_json::json!({}),
+        config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+    };
+    let report = connector
+        .validate(
+            ValidationRequest {
+                connection: connection.clone(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| {
+            supabase_managed_validation_error(format!("Supabase managed validation failed ({e:?})"))
+        })?;
+    if report.status != ValidationStatus::Valid {
+        let code = report
+            .errors
+            .first()
+            .map(|issue| issue.code)
+            .unwrap_or(ErrorCode::InvalidDomainValue);
+        return Err(
+            if code == ErrorCode::AuthenticationFailed || code == ErrorCode::CredentialUnavailable {
+                supabase_managed_auth_error("Supabase managed API token is invalid.")
+            } else {
+                supabase_managed_validation_error(format!(
+                    "Supabase managed validation failed ({code:?})"
+                ))
+            },
+        );
+    }
+    let sync_run_id = SyncRunId::new(format!(
+        "supabase-managed-validate-sync-{}",
+        uuid::Uuid::new_v4()
+    ))
+    .map_err(|_| {
+        supabase_managed_validation_error("Supabase managed validation could not start.")
+    })?;
+    let scope = Scope::new("supabase-managed-validate").map_err(|_| {
+        supabase_managed_validation_error("Supabase managed validation scope is invalid.")
+    })?;
+    let outcome = connector
+        .sync(
+            SyncRequest {
+                sync_run_id,
+                connection,
+                mode: SyncMode::Full,
+                scope,
+                cursor: None,
+                targeted_resources: Vec::new(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| {
+            supabase_managed_validation_error(format!("Supabase managed validation failed ({e:?})"))
+        })?;
+    let project_count = outcome
+        .batch()
+        .resources
+        .iter()
+        .filter(|resource| resource.kind.as_str() == "supabase.managed.project")
+        .count() as u64;
+    Ok(SupabaseManagedValidateResult { project_count })
+}
+
+#[tauri::command]
+async fn supabase_managed_connect(
+    state: State<'_, AppState>,
+    request: SupabaseManagedConnectCommand,
+) -> Result<SupabaseManagedConnectResult, ErrorEnvelope> {
+    state.create_supabase_managed_connection(request).await
+}
+
+// ── Aliyun commands ───────────────────────────────────────────────────────────
+#[tauri::command]
+async fn aliyun_validate(
+    _state: State<'_, AppState>,
+    request: AliyunValidateCommand,
+) -> Result<AliyunValidateResult, ErrorEnvelope> {
+    let access_key_id = request.access_key_id.trim();
+    let region = request.region.trim();
+    if access_key_id.is_empty() {
+        return Err(aliyun_validation_error(
+            "Aliyun AccessKey ID must not be empty.",
+        ));
+    }
+    if region.is_empty() {
+        return Err(aliyun_validation_error("Aliyun region must not be empty."));
+    }
+    let secret = SecretValue::new(request.access_key_secret.into_bytes());
+    let transport = LiveAliyunTransport::new()
+        .map_err(|_| aliyun_unreachable_error("Aliyun transport is unavailable."))?;
+    let connector = AliyunConnector::new(transport);
+    let connection_id = ConnectionId::new(format!("aliyun-validate-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| aliyun_validation_error("Aliyun validation identifier is invalid."))?;
+    let connection = ConnectionInput {
+        connection_id,
+        connector_type: ConnectorType::new("aliyun").expect("static connector type"),
+        config: serde_json::json!({}),
+        config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+    };
+    let report = connector
+        .validate(
+            ValidationRequest {
+                connection: connection.clone(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| aliyun_validation_error(format!("Aliyun validation failed ({e:?})")))?;
+    if report.status != ValidationStatus::Valid {
+        let code = report
+            .errors
+            .first()
+            .map(|issue| issue.code)
+            .unwrap_or(ErrorCode::InvalidDomainValue);
+        return Err(aliyun_validation_error(format!(
+            "Aliyun validation failed ({code:?})"
+        )));
+    }
+    let sync_run_id = SyncRunId::new(format!("aliyun-validate-sync-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| aliyun_validation_error("Aliyun validation could not start."))?;
+    let scope = Scope::new(format!("aliyun:{region}"))
+        .map_err(|_| aliyun_validation_error("Aliyun validation scope is invalid."))?;
+    let outcome = connector
+        .sync(
+            SyncRequest {
+                sync_run_id,
+                connection,
+                mode: SyncMode::Full,
+                scope,
+                cursor: None,
+                targeted_resources: Vec::new(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| aliyun_validation_error(format!("Aliyun validation failed ({e:?})")))?;
+    let resource_count = outcome.batch().resources.len() as u64;
+    Ok(AliyunValidateResult { resource_count })
+}
+
+#[tauri::command]
+async fn aliyun_connect(
+    state: State<'_, AppState>,
+    request: AliyunConnectCommand,
+) -> Result<AliyunConnectResult, ErrorEnvelope> {
+    state.create_aliyun_connection(request).await
+}
+
+// ── Tencent commands ──────────────────────────────────────────────────────────
+#[tauri::command]
+async fn tencent_validate(
+    _state: State<'_, AppState>,
+    request: TencentValidateCommand,
+) -> Result<TencentValidateResult, ErrorEnvelope> {
+    let secret_id = request.secret_id.trim();
+    let region = request.region.trim();
+    if secret_id.is_empty() {
+        return Err(tencent_validation_error(
+            "Tencent Secret ID must not be empty.",
+        ));
+    }
+    if region.is_empty() {
+        return Err(tencent_validation_error(
+            "Tencent region must not be empty.",
+        ));
+    }
+    let secret = SecretValue::new(request.secret_key.into_bytes());
+    let transport = LiveTencentTransport::new()
+        .map_err(|_| tencent_unreachable_error("Tencent transport is unavailable."))?;
+    let connector = TencentConnector::new(transport);
+    let connection_id = ConnectionId::new(format!("tencent-validate-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| tencent_validation_error("Tencent validation identifier is invalid."))?;
+    let connection = ConnectionInput {
+        connection_id,
+        connector_type: ConnectorType::new("tencent").expect("static connector type"),
+        config: serde_json::json!({}),
+        config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+    };
+    let report = connector
+        .validate(
+            ValidationRequest {
+                connection: connection.clone(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| tencent_validation_error(format!("Tencent validation failed ({e:?})")))?;
+    if report.status != ValidationStatus::Valid {
+        let code = report
+            .errors
+            .first()
+            .map(|issue| issue.code)
+            .unwrap_or(ErrorCode::InvalidDomainValue);
+        return Err(tencent_validation_error(format!(
+            "Tencent validation failed ({code:?})"
+        )));
+    }
+    let sync_run_id = SyncRunId::new(format!("tencent-validate-sync-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| tencent_validation_error("Tencent validation could not start."))?;
+    let scope = Scope::new(format!("tencent:{region}"))
+        .map_err(|_| tencent_validation_error("Tencent validation scope is invalid."))?;
+    let outcome = connector
+        .sync(
+            SyncRequest {
+                sync_run_id,
+                connection,
+                mode: SyncMode::Full,
+                scope,
+                cursor: None,
+                targeted_resources: Vec::new(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| tencent_validation_error(format!("Tencent validation failed ({e:?})")))?;
+    let resource_count = outcome.batch().resources.len() as u64;
+    Ok(TencentValidateResult { resource_count })
+}
+
+#[tauri::command]
+async fn tencent_connect(
+    state: State<'_, AppState>,
+    request: TencentConnectCommand,
+) -> Result<TencentConnectResult, ErrorEnvelope> {
+    state.create_tencent_connection(request).await
 }
 
 #[tauri::command]
@@ -2550,6 +4645,181 @@ fn ssh_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
     }
 }
 
+fn cloudflare_normalizer() -> Normalizer {
+    Normalizer::new(
+        [
+            cf_schema("cloudflare.account", &[]),
+            cf_schema("cloudflare.zone", &["account_id", "status"]),
+            cf_schema(
+                "cloudflare.dns_record",
+                &["zone_id", "type", "content", "proxied"],
+            ),
+            cf_schema("cloudflare.tunnel", &["account_id", "status"]),
+            cf_schema("cloudflare.worker", &["account_id", "modified_on"]),
+        ],
+        [
+            cf_relation(
+                "cloudflare.contains",
+                "cloudflare.account",
+                "cloudflare.zone",
+            ),
+            cf_relation(
+                "cloudflare.contains",
+                "cloudflare.account",
+                "cloudflare.tunnel",
+            ),
+            cf_relation(
+                "cloudflare.contains",
+                "cloudflare.account",
+                "cloudflare.worker",
+            ),
+            cf_relation(
+                "cloudflare.contains",
+                "cloudflare.zone",
+                "cloudflare.dns_record",
+            ),
+        ],
+    )
+    .expect("static Cloudflare schemas are valid")
+}
+
+fn cf_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    prov_schema(kind, fields)
+}
+
+fn cf_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
+    prov_relation(kind, source, target)
+}
+
+fn supabase_managed_normalizer() -> Normalizer {
+    Normalizer::new(
+        [
+            sm_schema("supabase.managed.organization", &[]),
+            sm_schema(
+                "supabase.managed.project",
+                &["organization_id", "region", "status"],
+            ),
+        ],
+        [sm_relation(
+            "supabase.contains",
+            "supabase.managed.organization",
+            "supabase.managed.project",
+        )],
+    )
+    .expect("static Supabase managed schemas are valid")
+}
+
+fn sm_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    prov_schema(kind, fields)
+}
+
+fn sm_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
+    prov_relation(kind, source, target)
+}
+
+fn aliyun_normalizer() -> Normalizer {
+    Normalizer::new(
+        [
+            aliyun_schema("aliyun.ecs.instance", &["region", "status", "parent_id"]),
+            aliyun_schema("aliyun.vpc.vpc", &["region", "status", "parent_id"]),
+            aliyun_schema("aliyun.vpc.vswitch", &["region", "status", "parent_id"]),
+            aliyun_schema(
+                "aliyun.vpc.security_group",
+                &["region", "status", "parent_id"],
+            ),
+            aliyun_schema(
+                "aliyun.slb.load_balancer",
+                &["region", "status", "parent_id"],
+            ),
+            aliyun_schema("aliyun.dns.record", &["region", "status", "parent_id"]),
+            aliyun_schema("aliyun.ecs.public_ip", &["region", "status", "parent_id"]),
+        ],
+        [
+            aliyun_rel("aliyun.contains", "aliyun.vpc.vpc", "aliyun.vpc.vswitch"),
+            aliyun_rel(
+                "aliyun.contains",
+                "aliyun.vpc.vpc",
+                "aliyun.vpc.security_group",
+            ),
+            aliyun_rel(
+                "aliyun.assigned",
+                "aliyun.ecs.instance",
+                "aliyun.ecs.public_ip",
+            ),
+        ],
+    )
+    .expect("static Aliyun schemas are valid")
+}
+
+fn aliyun_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    prov_schema(kind, fields)
+}
+
+fn aliyun_rel(kind: &str, source: &str, target: &str) -> RelationSchema {
+    prov_relation(kind, source, target)
+}
+
+fn tencent_normalizer() -> Normalizer {
+    Normalizer::new(
+        [
+            tenc_schema("tencent.cvm.instance", &["region", "status", "parent_id"]),
+            tenc_schema("tencent.vpc.vpc", &["region", "status", "parent_id"]),
+            tenc_schema("tencent.vpc.subnet", &["region", "status", "parent_id"]),
+            tenc_schema(
+                "tencent.vpc.security_group",
+                &["region", "status", "parent_id"],
+            ),
+            tenc_schema(
+                "tencent.clb.load_balancer",
+                &["region", "status", "parent_id"],
+            ),
+            tenc_schema("tencent.dns.record", &["region", "status", "parent_id"]),
+            tenc_schema("tencent.cvm.public_ip", &["region", "status", "parent_id"]),
+        ],
+        [
+            tenc_rel("tencent.contains", "tencent.vpc.vpc", "tencent.vpc.subnet"),
+            tenc_rel(
+                "tencent.contains",
+                "tencent.vpc.vpc",
+                "tencent.vpc.security_group",
+            ),
+            tenc_rel(
+                "tencent.assigned",
+                "tencent.cvm.instance",
+                "tencent.cvm.public_ip",
+            ),
+        ],
+    )
+    .expect("static Tencent schemas are valid")
+}
+
+fn tenc_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    prov_schema(kind, fields)
+}
+
+fn tenc_rel(kind: &str, source: &str, target: &str) -> RelationSchema {
+    prov_relation(kind, source, target)
+}
+
+fn prov_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    AttributeSchema {
+        kind: ResourceKind::new(kind).expect("static resource kind"),
+        schema_version: SchemaVersion::new(1).expect("static schema version"),
+        allowed_attributes: fields
+            .iter()
+            .map(|field| (*field).into())
+            .collect::<BTreeSet<_>>(),
+    }
+}
+
+fn prov_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
+    RelationSchema {
+        kind: next_infra_core::RelationKind::new(kind).expect("static relation kind"),
+        source_kind: ResourceKind::new(source).expect("static resource kind"),
+        target_kind: ResourceKind::new(target).expect("static resource kind"),
+    }
+}
+
 fn dokploy_normalizer() -> Normalizer {
     Normalizer::new(
         [
@@ -2704,7 +4974,10 @@ fn committed_query_context(
 /// True only for "github" today — single source of truth per plan §2.2.
 /// Other connectors use offline replay/fixtures and are NOT scheduled.
 pub(crate) fn has_live_sync_path(connector_type: &ConnectorType) -> bool {
-    matches!(connector_type.as_str(), "github" | "ssh" | "dokploy")
+    matches!(
+        connector_type.as_str(),
+        "github" | "ssh" | "dokploy" | "cloudflare" | "supabase-managed" | "aliyun" | "tencent"
+    )
 }
 
 pub(crate) fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 {
@@ -2720,6 +4993,26 @@ pub(crate) fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 
     }
     if connector_type.as_str() == "dokploy" {
         return dokploy_descriptor()
+            .recommended_sync_interval_secs
+            .saturating_mul(1_000);
+    }
+    if connector_type.as_str() == "cloudflare" {
+        return cloudflare_descriptor()
+            .recommended_sync_interval_secs
+            .saturating_mul(1_000);
+    }
+    if connector_type.as_str() == "supabase-managed" {
+        return supabase_managed_descriptor()
+            .recommended_sync_interval_secs
+            .saturating_mul(1_000);
+    }
+    if connector_type.as_str() == "aliyun" {
+        return aliyun_descriptor()
+            .recommended_sync_interval_secs
+            .saturating_mul(1_000);
+    }
+    if connector_type.as_str() == "tencent" {
+        return tencent_descriptor()
             .recommended_sync_interval_secs
             .saturating_mul(1_000);
     }
@@ -3057,14 +5350,14 @@ mod tests {
     fn scheduler_non_live_sync_connection_not_registered() {
         let directory = test_home();
         let paths = IntegrationPaths::from_home(directory.path());
-        let conn_id = ConnectionId::new("cloudflare-conn").unwrap();
+        let conn_id = ConnectionId::new("supabase-self-hosted-conn").unwrap();
         let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
         store
             .write(|s| {
                 s.upsert_connection(Connection {
                     connection_id: conn_id.clone(),
-                    connector_type: ConnectorType::new("cloudflare").unwrap(),
-                    display_name: "Cloudflare".into(),
+                    connector_type: ConnectorType::new("supabase-self-hosted").unwrap(),
+                    display_name: "Supabase Self-Hosted".into(),
                     enabled: true,
                     config: serde_json::json!({}),
                     secret_ref: None,
@@ -3084,7 +5377,7 @@ mod tests {
         let rt = state.runtime().lock().unwrap();
         assert!(
             rt.scheduler().entry(&conn_id).is_none(),
-            "cloudflare connection should not be registered"
+            "supabase-self-hosted connection should not be registered"
         );
         drop(rt);
         assert!(

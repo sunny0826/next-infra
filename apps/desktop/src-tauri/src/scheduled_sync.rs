@@ -9,6 +9,7 @@
 //! - Tauri wrapper layer: a std thread that ticks every TICK_MILLIS ms,
 //!   calling the pure driver and dispatching via the real AppState enqueue path.
 
+use next_infra_connector_cloudflare::{CloudflareConnector, ReqwestCloudflareTransport};
 use next_infra_connector_github::{GitHubConnector, ReqwestGitHubTransport};
 use next_infra_connector_ssh::{OpenSshClient, SshConnector};
 use next_infra_core::{Connection, ConnectionId, SyncTrigger, Timestamp};
@@ -213,6 +214,78 @@ pub fn spawn_dokploy_sync(
     let queued_id = sync_run_id.as_str().to_owned();
     tauri::async_runtime::spawn(async move {
         let _ = crate::composition::sync_dokploy(store, connection, trigger, sync_run_id).await;
+        running.store(false, Ordering::Release);
+    });
+    Ok(queued_id)
+}
+
+pub fn spawn_cloudflare_sync(
+    store: next_infra_runtime::SharedStore,
+    running: Arc<AtomicBool>,
+    connector: Arc<CloudflareConnector<ReqwestCloudflareTransport>>,
+    connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: next_infra_core::SyncRunId,
+) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
+    let store = store.clone();
+    let running = running.clone();
+    let queued_id = sync_run_id.as_str().to_owned();
+    tauri::async_runtime::spawn(async move {
+        let _ =
+            crate::composition::sync_cloudflare(store, connector, connection, trigger, sync_run_id)
+                .await;
+        running.store(false, Ordering::Release);
+    });
+    Ok(queued_id)
+}
+
+pub fn spawn_supabase_managed_sync(
+    store: next_infra_runtime::SharedStore,
+    running: Arc<AtomicBool>,
+    connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: next_infra_core::SyncRunId,
+) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
+    let store = store.clone();
+    let running = running.clone();
+    let queued_id = sync_run_id.as_str().to_owned();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::composition::sync_supabase_managed(store, connection, trigger, sync_run_id)
+            .await;
+        running.store(false, Ordering::Release);
+    });
+    Ok(queued_id)
+}
+
+pub fn spawn_aliyun_sync(
+    store: next_infra_runtime::SharedStore,
+    running: Arc<AtomicBool>,
+    connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: next_infra_core::SyncRunId,
+) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
+    let store = store.clone();
+    let running = running.clone();
+    let queued_id = sync_run_id.as_str().to_owned();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::composition::sync_aliyun(store, connection, trigger, sync_run_id).await;
+        running.store(false, Ordering::Release);
+    });
+    Ok(queued_id)
+}
+
+pub fn spawn_tencent_sync(
+    store: next_infra_runtime::SharedStore,
+    running: Arc<AtomicBool>,
+    connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: next_infra_core::SyncRunId,
+) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
+    let store = store.clone();
+    let running = running.clone();
+    let queued_id = sync_run_id.as_str().to_owned();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::composition::sync_tencent(store, connection, trigger, sync_run_id).await;
         running.store(false, Ordering::Release);
     });
     Ok(queued_id)
@@ -575,17 +648,27 @@ mod tests {
         assert!(runtime.scheduler().entry(&connection_id).is_none());
     }
 
-    /// Test: has_live_sync_path returns true for github, ssh, and dokploy.
+    /// Test: has_live_sync_path returns true for all live connectors and false for non-live.
     #[test]
     fn has_live_sync_path_github_ssh_dokploy() {
         let github = ConnectorType::new("github").unwrap();
         let ssh = ConnectorType::new("ssh").unwrap();
         let dokploy = ConnectorType::new("dokploy").unwrap();
         let cloudflare = ConnectorType::new("cloudflare").unwrap();
+        let supabase_managed = ConnectorType::new("supabase-managed").unwrap();
+        let aliyun = ConnectorType::new("aliyun").unwrap();
+        let tencent = ConnectorType::new("tencent").unwrap();
+        let supabase_self_hosted = ConnectorType::new("supabase-self-hosted").unwrap();
 
         assert!(crate::composition::has_live_sync_path(&github));
         assert!(crate::composition::has_live_sync_path(&ssh));
         assert!(crate::composition::has_live_sync_path(&dokploy));
-        assert!(!crate::composition::has_live_sync_path(&cloudflare));
+        assert!(crate::composition::has_live_sync_path(&cloudflare));
+        assert!(crate::composition::has_live_sync_path(&supabase_managed));
+        assert!(crate::composition::has_live_sync_path(&aliyun));
+        assert!(crate::composition::has_live_sync_path(&tencent));
+        assert!(!crate::composition::has_live_sync_path(
+            &supabase_self_hosted
+        ));
     }
 }
