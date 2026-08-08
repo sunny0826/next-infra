@@ -21,6 +21,10 @@ use next_infra_connector_github::{
     GitHubClient, GitHubConnector, GitHubEndpoint, GitHubFetch, GitHubFetchBudget, GitHubPages,
     ReqwestGitHubTransport, github_descriptor, repository::RepositoryDto,
 };
+use next_infra_connector_ssh::{
+    HostAlias, OpenSshClient, ProbeProfile, ServiceId, SshConnectionConfigV1, SshConnector,
+    ssh_descriptor,
+};
 use next_infra_connector_supabase_managed::descriptor as supabase_managed_descriptor;
 use next_infra_connector_supabase_self_hosted::descriptor as supabase_self_hosted_descriptor;
 use next_infra_connector_tencent::descriptor as tencent_descriptor;
@@ -77,6 +81,8 @@ pub struct AppState {
     /// If-None-Match → 304 → cached-page replay. App 重启后缓存丢失，首次同步全量 —— 已知边界。
     github_connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
     github_sync_running: Arc<AtomicBool>,
+    ssh_connector: Arc<SshConnector<OpenSshClient>>,
+    ssh_sync_running: Arc<AtomicBool>,
     integration_paths: IntegrationPaths,
     current_app_bundle: PathBuf,
     scheduler_driver: Mutex<Option<DriverHandle>>,
@@ -265,6 +271,9 @@ impl AppState {
             join: Some(join),
         };
 
+        let ssh_connector = Arc::new(SshConnector::new(OpenSshClient::new()));
+        let ssh_sync_running = Arc::new(AtomicBool::new(false));
+
         let mut state = Self {
             runtime: runtime_for_driver,
             store: shared,
@@ -274,6 +283,8 @@ impl AppState {
             settings_path,
             github_connector,
             github_sync_running: running_for_driver,
+            ssh_connector,
+            ssh_sync_running,
             integration_paths: paths.clone(),
             current_app_bundle: current_app_bundle.to_path_buf(),
             scheduler_driver: Mutex::new(None),
@@ -542,6 +553,114 @@ impl AppState {
         result
     }
 
+    async fn create_ssh_connection(
+        &self,
+        request: SshConnectCommand,
+    ) -> Result<SshConnectResult, ErrorEnvelope> {
+        let display_name = request.display_name.trim();
+        if display_name.is_empty() || display_name.len() > 120 {
+            return Err(safe_error(
+                "invalid_connection",
+                "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        let host_alias = HostAlias::parse(&request.host_alias)
+            .map_err(|_| safe_error("invalid_ssh_alias", "SSH alias format is invalid."))?;
+        let timeout_secs = request.connect_timeout_secs.unwrap_or(10);
+        if !(5..=14).contains(&timeout_secs) {
+            return Err(safe_error(
+                "invalid_connection",
+                "SSH connection timeout must be between 5 and 14 seconds.",
+            ));
+        }
+        let service_ids: Result<Vec<ServiceId>, _> = request
+            .allowed_service_ids
+            .iter()
+            .map(|id| ServiceId::parse(id))
+            .collect();
+        let service_ids = service_ids
+            .map_err(|_| safe_error("invalid_ssh_service", "SSH service ID format is invalid."))?;
+        if service_ids.len() > 64 {
+            return Err(safe_error(
+                "invalid_connection",
+                "SSH connection cannot specify more than 64 services.",
+            ));
+        }
+        self.begin_ssh_sync()?;
+        let result = async {
+            let connection_id = ConnectionId::new(format!("ssh-{}", uuid::Uuid::new_v4()))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "SSH connection could not be created.",
+                    )
+                })?;
+            let config = serde_json::to_value(SshConnectionConfigV1 {
+                host_identity: next_infra_connector_ssh::HostIdentity::generate(),
+                host_alias,
+                connect_timeout_secs: timeout_secs,
+                probe_profile: ProbeProfile::BaselineV1,
+                allowed_service_ids: service_ids,
+            })
+            .map_err(|_| {
+                safe_error(
+                    "connection_unavailable",
+                    "SSH connection could not be created.",
+                )
+            })?;
+            let connection = Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("ssh").expect("static connector type"),
+                display_name: display_name.into(),
+                enabled: true,
+                config: serde_json::to_value(&config).map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "SSH connection could not be created.",
+                    )
+                })?,
+                secret_ref: None,
+                health: ConnectorHealth::Degraded,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+                deleted_at: None,
+            };
+            if self
+                .store
+                .write(|store| store.upsert_connection(connection.clone()))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "SSH connection could not be saved.",
+                ));
+            }
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            if let Err(error) = self.register_ssh_connection(&connection) {
+                eprintln!(
+                    "scheduler: SSH connection saved but registration failed: {}",
+                    error.message
+                );
+            }
+            let sync_run_id = self.enqueue_ssh_sync(connection, SyncTrigger::User)?;
+            Ok(SshConnectResult {
+                connection_id: connection_id.as_str().to_owned(),
+                sync_run_id,
+            })
+        }
+        .await;
+        if result.is_err() {
+            self.ssh_sync_running.store(false, Ordering::Release);
+        }
+        result
+    }
+
     async fn manual_github_sync(&self, connection_id: String) -> Result<String, ErrorEnvelope> {
         let connection_id = ConnectionId::new(connection_id)
             .map_err(|_| safe_error("invalid_connection", "Connection identifier is invalid."))?;
@@ -782,6 +901,51 @@ impl AppState {
             sync_run_id,
         )
     }
+
+    fn begin_ssh_sync(&self) -> Result<(), ErrorEnvelope> {
+        if self.ssh_sync_running.swap(true, Ordering::AcqRel) {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "An SSH synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn register_ssh_connection(&self, connection: &Connection) -> Result<(), DomainError> {
+        let evaluated_at = now().map_err(DomainError::invalid_value)?;
+        let interval = query_sync_interval_millis(&connection.connector_type);
+        let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
+        let next_due = Timestamp::from_unix_millis(next_due).unwrap_or(evaluated_at);
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| DomainError::invalid_value("runtime lock poisoned"))?;
+        runtime
+            .scheduler_mut()
+            .register(connection.connection_id.clone(), interval, next_due)
+            .map_err(|e| DomainError::invalid_value(format!("{:?}", e)))?;
+        Ok(())
+    }
+
+    fn enqueue_ssh_sync(
+        &self,
+        connection: Connection,
+        trigger: SyncTrigger,
+    ) -> Result<String, ErrorEnvelope> {
+        let sync_run_id = SyncRunId::new(format!("ssh-sync-{}", uuid::Uuid::new_v4()))
+            .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?;
+        scheduled_sync::spawn_ssh_sync(
+            self.store.clone(),
+            self.ssh_sync_running.clone(),
+            self.ssh_connector.clone(),
+            connection,
+            trigger,
+            sync_run_id,
+        )
+    }
 }
 
 pub(crate) async fn sync_github(
@@ -941,9 +1105,175 @@ pub(crate) async fn sync_github(
     Ok(())
 }
 
+pub(crate) async fn sync_ssh(
+    store: SharedStore,
+    connector: Arc<SshConnector<OpenSshClient>>,
+    mut connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: SyncRunId,
+) -> Result<(), ErrorEnvelope> {
+    let started_at = now()
+        .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?;
+    connection.last_attempt_at = Some(started_at);
+    store
+        .write(|store| store.upsert_connection(connection.clone()))
+        .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?;
+    let request = SyncRequest {
+        sync_run_id: sync_run_id.clone(),
+        connection: ConnectionInput {
+            connection_id: connection.connection_id.clone(),
+            connector_type: ConnectorType::new("ssh").expect("static connector type"),
+            config: connection.config.clone(),
+            config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(format!("ssh:{}", connection.connection_id.as_str()))
+            .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?,
+        cursor: None,
+        targeted_resources: Vec::new(),
+    };
+    let secret = store
+        .read(|s| s.connection_secret(&connection.connection_id))
+        .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "SSH credential is unavailable from local storage.",
+            )
+        })?
+        .ok_or_else(|| {
+            safe_error(
+                "credential_unavailable",
+                "SSH credential is unavailable from local storage.",
+            )
+        })?;
+    let mut engine = SyncEngine::new(store.clone());
+    let handle = engine
+        .start(
+            &connection,
+            SyncRunStart {
+                sync_run_id: sync_run_id.clone(),
+                mode: SyncMode::Full,
+                trigger,
+                scope: request.scope.clone(),
+                started_at,
+                targeted_resources: Vec::new(),
+            },
+        )
+        .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?;
+    let outcome = connector.sync(request.clone(), Some(&secret)).await;
+    let finished_at = now()
+        .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not finish."))?;
+
+    let health = match outcome {
+        Ok(outcome) => {
+            let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
+                ConnectorHealth::Degraded
+            } else {
+                ConnectorHealth::Healthy
+            };
+            let normalized = match ssh_normalizer().normalize(&request, outcome.batch().clone()) {
+                Ok(normalized) => normalized,
+                Err(_) => {
+                    let _ = engine.fail(
+                        handle,
+                        DomainError {
+                            code: ErrorCode::Internal,
+                            message: "SSH data normalization failed.".into(),
+                            retryable: false,
+                        },
+                        finished_at,
+                    );
+                    return Err(safe_error(
+                        "sync_unavailable",
+                        "SSH data could not be saved.",
+                    ));
+                }
+            };
+            engine
+                .commit(handle, normalized, finished_at)
+                .map_err(|_| safe_error("sync_unavailable", "SSH data could not be saved."))?;
+            connection.last_success_at = Some(finished_at);
+            health
+        }
+        Err(failure) => {
+            let health = ssh_connector_health(failure.code);
+            engine
+                .fail(
+                    handle,
+                    DomainError {
+                        code: failure.code,
+                        message: "SSH synchronization failed.".into(),
+                        retryable: failure.retryable,
+                    },
+                    finished_at,
+                )
+                .map_err(|_| {
+                    safe_error("sync_unavailable", "SSH synchronization could not finish.")
+                })?;
+            connection.health = health;
+            store
+                .write(|store| store.upsert_connection(connection))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "SSH connection status could not be saved.",
+                    )
+                })?;
+            return Err(ssh_sync_error(failure.code));
+        }
+    };
+    connection.health = health;
+    store
+        .write(|store| store.upsert_connection(connection))
+        .map_err(|_| {
+            safe_error(
+                "connection_unavailable",
+                "SSH connection status could not be saved.",
+            )
+        })?;
+    Ok(())
+}
+
+fn ssh_connector_health(code: ErrorCode) -> ConnectorHealth {
+    match code {
+        ErrorCode::HostKeyMismatch => ConnectorHealth::Degraded,
+        ErrorCode::NetworkUnreachable => ConnectorHealth::Unreachable,
+        ErrorCode::AuthenticationFailed => ConnectorHealth::Unreachable,
+        ErrorCode::ProviderUnavailable => ConnectorHealth::Unreachable,
+        _ => ConnectorHealth::Unreachable,
+    }
+}
+
+fn ssh_sync_error(code: ErrorCode) -> ErrorEnvelope {
+    let code_str = match code {
+        ErrorCode::HostKeyMismatch => "host_key_mismatch",
+        ErrorCode::NetworkUnreachable => "network_unreachable",
+        ErrorCode::AuthenticationFailed => "authentication_failed",
+        ErrorCode::ProviderUnavailable => "provider_unavailable",
+        ErrorCode::InvalidResponse => "invalid_response",
+        ErrorCode::Internal => "internal",
+        _ => "ssh_sync_failed",
+    };
+    safe_error(code_str, "SSH synchronization failed.")
+}
+
+fn ssh_validation_error(code: ErrorCode) -> ErrorEnvelope {
+    let code_str = match code {
+        ErrorCode::HostKeyMismatch => "host_key_mismatch",
+        ErrorCode::NetworkUnreachable => "network_unreachable",
+        ErrorCode::AuthenticationFailed => "authentication_failed",
+        ErrorCode::ProviderUnavailable => "provider_unavailable",
+        ErrorCode::InvalidResponse => "invalid_response",
+        ErrorCode::Internal => "internal",
+        _ => "ssh_validation_failed",
+    };
+    safe_error(code_str, "SSH validation failed.")
+}
+
 fn goal9_catalog() -> ConnectorCatalogSnapshot {
     let descriptors = [
         github_descriptor(),
+        ssh_descriptor(),
         dokploy_descriptor(),
         cloudflare_descriptor(),
         supabase_managed_descriptor(),
@@ -1050,6 +1380,8 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         github_connect,
         github_connection_purge_preview,
         github_connection_purge,
+        ssh_validate,
+        ssh_connect,
         runtime_manual_sync,
         local_settings_get,
         local_settings_update,
@@ -1139,6 +1471,37 @@ async fn github_connect(
     request: GitHubConnectCommand,
 ) -> Result<GitHubConnectResult, ErrorEnvelope> {
     state.create_github_connection(request).await
+}
+
+#[derive(Deserialize)]
+struct SshValidateCommand {
+    host_alias: String,
+    connect_timeout_secs: Option<u8>,
+}
+
+#[derive(Serialize)]
+struct SshServiceOption {
+    service_id: String,
+    service_type: String,
+}
+
+#[derive(Serialize)]
+struct SshValidateResult {
+    discovered_services: Vec<SshServiceOption>,
+}
+
+#[derive(Deserialize)]
+struct SshConnectCommand {
+    display_name: String,
+    host_alias: String,
+    connect_timeout_secs: Option<u8>,
+    allowed_service_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct SshConnectResult {
+    connection_id: String,
+    sync_run_id: String,
 }
 
 #[tauri::command]
@@ -1242,6 +1605,52 @@ fn github_connection_purge(
     request: GitHubConnectionPurgeCommand,
 ) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
     state.purge_github_connection(request.connection_id)
+}
+
+#[tauri::command]
+async fn ssh_validate(
+    state: State<'_, AppState>,
+    request: SshValidateCommand,
+) -> Result<SshValidateResult, ErrorEnvelope> {
+    let host_alias = HostAlias::parse(&request.host_alias)
+        .map_err(|_| ssh_validation_error(next_infra_core::ErrorCode::InvalidDomainValue))?;
+    let timeout_secs = request.connect_timeout_secs.unwrap_or(10);
+    let config = serde_json::to_value(SshConnectionConfigV1 {
+        host_identity: next_infra_connector_ssh::HostIdentity::generate(),
+        host_alias,
+        connect_timeout_secs: timeout_secs,
+        probe_profile: ProbeProfile::BaselineV1,
+        allowed_service_ids: Vec::new(),
+    })
+    .map_err(|_| ssh_validation_error(next_infra_core::ErrorCode::Internal))?;
+    let validation_request = ValidationRequest {
+        connection: ConnectionInput {
+            connection_id: ConnectionId::new("ssh-validate-temp").unwrap(),
+            connector_type: ConnectorType::new("ssh").unwrap(),
+            config,
+            config_schema_version: SchemaVersion::new(1).unwrap(),
+        },
+    };
+    let outcome = state
+        .ssh_connector
+        .validate(validation_request, None)
+        .await
+        .map_err(|failure| ssh_validation_error(failure.code))?;
+    let discovered_services = match outcome.status {
+        ValidationStatus::Valid => Vec::new(),
+        ValidationStatus::Invalid => Vec::new(),
+    };
+    Ok(SshValidateResult {
+        discovered_services,
+    })
+}
+
+#[tauri::command]
+async fn ssh_connect(
+    state: State<'_, AppState>,
+    request: SshConnectCommand,
+) -> Result<SshConnectResult, ErrorEnvelope> {
+    state.create_ssh_connection(request).await
 }
 
 #[tauri::command]
@@ -1614,6 +2023,65 @@ fn github_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
     }
 }
 
+fn ssh_normalizer() -> Normalizer {
+    Normalizer::new(
+        [
+            ssh_schema(
+                "ssh.host",
+                &["platform", "architecture", "uptime_bucket", "host_identity"],
+            ),
+            ssh_schema("ssh.filesystem", &["entries", "total", "host_identity"]),
+            ssh_schema("ssh.process-summary", &["total", "states", "host_identity"]),
+            ssh_schema(
+                "ssh.launchd-service",
+                &[
+                    "service_label",
+                    "loaded",
+                    "pid_present",
+                    "last_exit_status",
+                    "host_identity",
+                ],
+            ),
+            ssh_schema(
+                "ssh.systemd-service",
+                &[
+                    "unit",
+                    "load_state",
+                    "active_state",
+                    "sub_state",
+                    "host_identity",
+                ],
+            ),
+        ],
+        [
+            ssh_relation("ssh.contains", "ssh.host", "ssh.filesystem"),
+            ssh_relation("ssh.contains", "ssh.host", "ssh.process-summary"),
+            ssh_relation("ssh.contains", "ssh.host", "ssh.launchd-service"),
+            ssh_relation("ssh.contains", "ssh.host", "ssh.systemd-service"),
+        ],
+    )
+    .expect("static SSH schemas are valid")
+}
+
+fn ssh_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    AttributeSchema {
+        kind: ResourceKind::new(kind).expect("static resource kind"),
+        schema_version: SchemaVersion::new(1).expect("static schema version"),
+        allowed_attributes: fields
+            .iter()
+            .map(|field| (*field).into())
+            .collect::<BTreeSet<_>>(),
+    }
+}
+
+fn ssh_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
+    RelationSchema {
+        kind: next_infra_core::RelationKind::new(kind).expect("static relation kind"),
+        source_kind: ResourceKind::new(source).expect("static resource kind"),
+        target_kind: ResourceKind::new(target).expect("static resource kind"),
+    }
+}
+
 #[tauri::command]
 fn local_settings_get(
     app: AppHandle,
@@ -1720,12 +2188,17 @@ fn committed_query_context(
 /// True only for "github" today — single source of truth per plan §2.2.
 /// Other connectors use offline replay/fixtures and are NOT scheduled.
 pub(crate) fn has_live_sync_path(connector_type: &ConnectorType) -> bool {
-    connector_type.as_str() == "github"
+    connector_type.as_str() == "github" || connector_type.as_str() == "ssh"
 }
 
 pub(crate) fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 {
     if connector_type.as_str() == "github" {
         return github_descriptor()
+            .recommended_sync_interval_secs
+            .saturating_mul(1_000);
+    }
+    if connector_type.as_str() == "ssh" {
+        return ssh_descriptor()
             .recommended_sync_interval_secs
             .saturating_mul(1_000);
     }
@@ -2060,17 +2533,17 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_non_github_connection_not_registered() {
+    fn scheduler_non_live_sync_connection_not_registered() {
         let directory = test_home();
         let paths = IntegrationPaths::from_home(directory.path());
-        let conn_id = ConnectionId::new("ssh-conn").unwrap();
+        let conn_id = ConnectionId::new("dokploy-conn").unwrap();
         let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
         store
             .write(|s| {
                 s.upsert_connection(Connection {
                     connection_id: conn_id.clone(),
-                    connector_type: ConnectorType::new("ssh").unwrap(),
-                    display_name: "SSH".into(),
+                    connector_type: ConnectorType::new("dokploy").unwrap(),
+                    display_name: "Dokploy".into(),
                     enabled: true,
                     config: serde_json::json!({}),
                     secret_ref: None,
@@ -2090,7 +2563,7 @@ mod tests {
         let rt = state.runtime().lock().unwrap();
         assert!(
             rt.scheduler().entry(&conn_id).is_none(),
-            "ssh connection should not be registered"
+            "dokploy connection should not be registered"
         );
         drop(rt);
         assert!(

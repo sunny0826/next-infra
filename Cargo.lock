@@ -2432,6 +2432,7 @@ dependencies = [
  "next-infra-connector-cloudflare",
  "next-infra-connector-dokploy",
  "next-infra-connector-github",
+ "next-infra-connector-ssh",
  "next-infra-connector-supabase-managed",
  "next-infra-connector-supabase-self-hosted",
  "next-infra-connector-tencent",

@@ -10,6 +10,7 @@
 //!   calling the pure driver and dispatching via the real AppState enqueue path.
 
 use next_infra_connector_github::{GitHubConnector, ReqwestGitHubTransport};
+use next_infra_connector_ssh::{OpenSshClient, SshConnector};
 use next_infra_core::{Connection, ConnectionId, SyncTrigger, Timestamp};
 use next_infra_runtime::{Runtime, ScheduledSync};
 use std::collections::VecDeque;
@@ -179,6 +180,25 @@ pub fn begin_github_sync(running: &AtomicBool) -> Result<(), EnqueueError> {
     } else {
         Ok(())
     }
+}
+
+pub fn spawn_ssh_sync(
+    store: next_infra_runtime::SharedStore,
+    running: Arc<AtomicBool>,
+    connector: Arc<SshConnector<OpenSshClient>>,
+    connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: next_infra_core::SyncRunId,
+) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
+    let store = store.clone();
+    let running = running.clone();
+    let queued_id = sync_run_id.as_str().to_owned();
+    tauri::async_runtime::spawn(async move {
+        let _ =
+            crate::composition::sync_ssh(store, connector, connection, trigger, sync_run_id).await;
+        running.store(false, Ordering::Release);
+    });
+    Ok(queued_id)
 }
 
 #[cfg(test)]
@@ -540,13 +560,13 @@ mod tests {
 
     /// Test: has_live_sync_path returns true only for github.
     #[test]
-    fn has_live_sync_path_github_only() {
+    fn has_live_sync_path_github_and_ssh() {
         let github = ConnectorType::new("github").unwrap();
         let ssh = ConnectorType::new("ssh").unwrap();
         let dokploy = ConnectorType::new("dokploy").unwrap();
 
         assert!(crate::composition::has_live_sync_path(&github));
-        assert!(!crate::composition::has_live_sync_path(&ssh));
+        assert!(crate::composition::has_live_sync_path(&ssh));
         assert!(!crate::composition::has_live_sync_path(&dokploy));
     }
 }

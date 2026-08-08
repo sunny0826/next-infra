@@ -24,6 +24,7 @@ next-infra-connector-api = { workspace = true }
 next-infra-connector-supabase-managed = { workspace = true }
 next-infra-connector-supabase-self-hosted = { workspace = true }
 next-infra-connector-aliyun = { workspace = true }
+next-infra-connector-ssh = { workspace = true }
 next-infra-connector-tencent = { workspace = true }
 next-infra-binding = { workspace = true }
 next-infra-host-integration = { workspace = true }

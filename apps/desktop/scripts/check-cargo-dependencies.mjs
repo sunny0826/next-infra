@@ -65,7 +65,7 @@ const allowedNormal = new Map([
   ["next-infra-local-rpc", ["next-infra-query"]],
   ["next-infra-host-integration", ["next-infra-local-rpc"]],
   ["next-infra-mcp", ["next-infra-local-rpc"]],
-  ["next-infra-desktop-adapter", ["next-infra-binding", "next-infra-connector-api", "next-infra-connector-aliyun", "next-infra-connector-catalog", "next-infra-connector-cloudflare", "next-infra-connector-dokploy", "next-infra-connector-github", "next-infra-connector-supabase-managed", "next-infra-connector-supabase-self-hosted", "next-infra-connector-tencent", "next-infra-core", "next-infra-host-integration", "next-infra-local-rpc", "next-infra-normalizer", "next-infra-query", "next-infra-runtime", "next-infra-store", "next-infra-sync"]],
+  ["next-infra-desktop-adapter", ["next-infra-binding", "next-infra-connector-api", "next-infra-connector-aliyun", "next-infra-connector-catalog", "next-infra-connector-cloudflare", "next-infra-connector-dokploy", "next-infra-connector-github", "next-infra-connector-ssh", "next-infra-connector-supabase-managed", "next-infra-connector-supabase-self-hosted", "next-infra-connector-tencent", "next-infra-core", "next-infra-host-integration", "next-infra-local-rpc", "next-infra-normalizer", "next-infra-query", "next-infra-runtime", "next-infra-store", "next-infra-sync"]],
   ["next-infra-mcp-bridge", ["next-infra-host-integration", "next-infra-local-rpc", "next-infra-mcp"]],
   [
     "next-infra-store-sync-integration",
