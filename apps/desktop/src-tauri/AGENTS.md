@@ -10,10 +10,9 @@ src/
 ├── lib.rs            # TauriBuilder：single_instance/autostart 插件、setup、invoke_handler、退出语义
 ├── composition/      # ★ 组合根：AppState、命令注册、sync_github、scheduler 接线、purge
 ├── scheduled_sync.rs # 定时同步驱动（std thread，10s tick，仅 github live 路径）
-├── github_live.rs    # GitHub Token 本地文件（0700/0600、O_NOFOLLOW、非 symlink）
 ├── host/             # lifecycle（LaunchSource）、authorization、local_rpc（Unix socket）、effects（NSWorkspace 睡眠/唤醒）
 ├── adapter/          # DesktopQueryAdapter + 命令 DTO + LocalSettings/RuntimeCapabilities
-└── keychain/         # Keychain 平台封装（MVP 未启用，Token 走文件）
+└── keychain/         # Keychain 平台封装（未来目标；MVP token 存 SQLite connection_secrets）
 ```
 
 ## 生命周期关键语义
@@ -26,7 +25,7 @@ src/
 - 竞态安全顺序：resolve 连接 → begin（swap 单飞守卫）→ enqueue；purge 全程持守卫。
 
 ## 安全边界
-- Token 只进 `github_secrets`（0700/0600）；不进入 SQLite/日志/错误/DTO/URL/命令行。
+- Token 只进 SQLite `connection_secrets`（0600 DB/0700 目录、FK 级联清理）；不进入投影/DTO/日志/错误/URL/命令行。
 - 命令错误统一 `ErrorEnvelope{code,message,retryable}`，不暴露 store/内部错误原文。
 - MCP 自动拉起需授权；显式 Quit 后不自动拉起。
 - Provider 只读：无写命令；GitHub 两阶段建连（验证→选仓库）后才同步，全量同步强制 `selected_repository_ids`。

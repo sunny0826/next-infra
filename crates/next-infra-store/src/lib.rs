@@ -79,6 +79,63 @@ impl Store {
     pub fn projection_metadata(&self) -> Result<ProjectionMetadata, StoreError> {
         query_projection::read_projection_metadata(&self.connection)
     }
+
+    /// Store a connection secret (plaintext BLOB), replacing any existing value.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Sqlite` on database errors.
+    pub fn upsert_connection_secret(
+        &self,
+        connection_id: &next_infra_core::ConnectionId,
+        secret: &next_infra_core::SecretValue,
+    ) -> Result<(), StoreError> {
+        self.connection
+            .execute(
+                "INSERT OR REPLACE INTO connection_secrets (connection_id, secret) VALUES (?1, ?2)",
+                rusqlite::params![connection_id.as_str(), secret.expose()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
+
+    /// Read a connection secret, returning `None` if no secret is stored.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Sqlite` on database errors.
+    pub fn connection_secret(
+        &self,
+        connection_id: &next_infra_core::ConnectionId,
+    ) -> Result<Option<next_infra_core::SecretValue>, StoreError> {
+        use rusqlite::OptionalExtension;
+        self.connection
+            .query_row(
+                "SELECT secret FROM connection_secrets WHERE connection_id = ?1",
+                rusqlite::params![connection_id.as_str()],
+                |row| {
+                    let blob: Vec<u8> = row.get(0)?;
+                    Ok(next_infra_core::SecretValue::new(blob))
+                },
+            )
+            .optional()
+            .map_err(StoreError::Sqlite)
+    }
+
+    /// Remove a connection secret, if present. Silently succeeds if no secret exists.
+    ///
+    /// # Errors
+    /// Returns `StoreError::Sqlite` on database errors.
+    pub fn remove_connection_secret(
+        &self,
+        connection_id: &next_infra_core::ConnectionId,
+    ) -> Result<(), StoreError> {
+        self.connection
+            .execute(
+                "DELETE FROM connection_secrets WHERE connection_id = ?1",
+                rusqlite::params![connection_id.as_str()],
+            )
+            .map_err(StoreError::Sqlite)?;
+        Ok(())
+    }
 }
 
 fn configure_connection(connection: &Connection) -> Result<(), StoreError> {
@@ -278,5 +335,174 @@ mod tests {
             fs::metadata(database).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn upsert_and_read_connection_secret() {
+        use next_infra_core::{ConnectorHealth, ConnectorType, SchemaVersion, StoreWriter};
+        let directory = TempDir::new().unwrap();
+        let mut store = Store::open(&path(&directory)).unwrap();
+        let connection_id = next_infra_core::ConnectionId::new("github-test-conn").unwrap();
+        let secret = next_infra_core::SecretValue::new(b"test-token".to_vec());
+
+        store
+            .upsert_connection(next_infra_core::Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("github").unwrap(),
+                display_name: "Test".into(),
+                enabled: true,
+                config: serde_json::json!({}),
+                secret_ref: None,
+                health: ConnectorHealth::Healthy,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).unwrap(),
+                deleted_at: None,
+            })
+            .unwrap();
+
+        assert!(store.connection_secret(&connection_id).unwrap().is_none());
+
+        store
+            .upsert_connection_secret(&connection_id, &secret)
+            .unwrap();
+
+        let read = store.connection_secret(&connection_id).unwrap();
+        assert!(read.is_some());
+        assert_eq!(read.unwrap().expose(), b"test-token");
+    }
+
+    #[test]
+    fn upsert_connection_secret_overwrites_existing() {
+        use next_infra_core::{ConnectorHealth, ConnectorType, SchemaVersion, StoreWriter};
+        let directory = TempDir::new().unwrap();
+        let mut store = Store::open(&path(&directory)).unwrap();
+        let connection_id = next_infra_core::ConnectionId::new("github-overwrite").unwrap();
+
+        store
+            .upsert_connection(next_infra_core::Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("github").unwrap(),
+                display_name: "Test".into(),
+                enabled: true,
+                config: serde_json::json!({}),
+                secret_ref: None,
+                health: ConnectorHealth::Healthy,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).unwrap(),
+                deleted_at: None,
+            })
+            .unwrap();
+
+        store
+            .upsert_connection_secret(
+                &connection_id,
+                &next_infra_core::SecretValue::new(b"first".to_vec()),
+            )
+            .unwrap();
+        store
+            .upsert_connection_secret(
+                &connection_id,
+                &next_infra_core::SecretValue::new(b"second".to_vec()),
+            )
+            .unwrap();
+
+        let read = store.connection_secret(&connection_id).unwrap().unwrap();
+        assert_eq!(read.expose(), b"second");
+    }
+
+    #[test]
+    fn remove_connection_secret_deletes_existing() {
+        use next_infra_core::{ConnectorHealth, ConnectorType, SchemaVersion, StoreWriter};
+        let directory = TempDir::new().unwrap();
+        let mut store = Store::open(&path(&directory)).unwrap();
+        let connection_id = next_infra_core::ConnectionId::new("github-remove").unwrap();
+
+        store
+            .upsert_connection(next_infra_core::Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("github").unwrap(),
+                display_name: "Test".into(),
+                enabled: true,
+                config: serde_json::json!({}),
+                secret_ref: None,
+                health: ConnectorHealth::Healthy,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).unwrap(),
+                deleted_at: None,
+            })
+            .unwrap();
+
+        store
+            .upsert_connection_secret(
+                &connection_id,
+                &next_infra_core::SecretValue::new(b"token".to_vec()),
+            )
+            .unwrap();
+        store.remove_connection_secret(&connection_id).unwrap();
+
+        assert!(store.connection_secret(&connection_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn remove_connection_secret_silently_succeeds_when_missing() {
+        let directory = TempDir::new().unwrap();
+        let store = Store::open(&path(&directory)).unwrap();
+        let connection_id = next_infra_core::ConnectionId::new("github-nonexistent").unwrap();
+
+        store.remove_connection_secret(&connection_id).unwrap();
+        assert!(store.connection_secret(&connection_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn connection_secret_returns_none_when_not_stored() {
+        let directory = TempDir::new().unwrap();
+        let store = Store::open(&path(&directory)).unwrap();
+        let connection_id = next_infra_core::ConnectionId::new("github-empty").unwrap();
+
+        assert!(store.connection_secret(&connection_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn purge_connection_removes_secret_via_fk_cascade() {
+        use next_infra_core::{ConnectorHealth, ConnectorType, SchemaVersion, StoreWriter};
+
+        let directory = TempDir::new().unwrap();
+        let connection_id = next_infra_core::ConnectionId::new("github-cascade").unwrap();
+
+        let mut store = Store::open(&path(&directory)).unwrap();
+        store
+            .upsert_connection(next_infra_core::Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("github").unwrap(),
+                display_name: "Cascade Test".into(),
+                enabled: true,
+                config: serde_json::json!({}),
+                secret_ref: None,
+                health: ConnectorHealth::Healthy,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).unwrap(),
+                deleted_at: None,
+            })
+            .unwrap();
+        drop(store);
+
+        let mut store = Store::open(&path(&directory)).unwrap();
+        store
+            .upsert_connection_secret(
+                &connection_id,
+                &next_infra_core::SecretValue::new(b"cascade-token".to_vec()),
+            )
+            .unwrap();
+        assert!(store.connection_secret(&connection_id).unwrap().is_some());
+
+        store.purge_connection(&connection_id).unwrap();
+        drop(store);
+
+        let store = Store::open(&path(&directory)).unwrap();
+        assert!(store.connection_secret(&connection_id).unwrap().is_none());
     }
 }

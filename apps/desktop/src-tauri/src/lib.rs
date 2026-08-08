@@ -10,7 +10,6 @@ use tauri::Manager;
 
 pub mod adapter;
 pub mod composition;
-pub mod github_live;
 pub mod host;
 pub mod keychain;
 pub mod scheduled_sync;

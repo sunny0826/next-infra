@@ -5,7 +5,6 @@ use crate::adapter::{
     RecentChangesCommand, RuntimeCapabilities, SearchResourcesCommand, SyncStatusCommand,
     TimelineCommand, validate_settings_update,
 };
-use crate::github_live::GitHubSecretFiles;
 use crate::host::authorization::authorize_launch;
 use crate::host::lifecycle::LaunchSource;
 use crate::host::local_rpc::LocalRpcHost;
@@ -72,7 +71,6 @@ pub struct AppState {
     query_context: QueryContextRefreshHandle,
     settings: Mutex<LocalSettings>,
     settings_path: PathBuf,
-    github_secrets: GitHubSecretFiles,
     /// Shared GitHub connector instance (Arc-wrapped, not Clone). Reused across all syncs
     /// (scheduled, manual, connect-first-sync) so that `page_cache` (ETag + pages) and
     /// `route_cache` survive between runs within the same App lifetime — unchanged data hits
@@ -141,8 +139,6 @@ impl AppState {
 
         let settings_path = data_directory.join("settings-v1.json");
         let settings = load_settings(&settings_path)?;
-        let github_secrets = GitHubSecretFiles::open(data_directory)
-            .map_err(|_| "GitHub secret storage unavailable")?;
         let github_connector = Arc::new(github_connector()?);
 
         if let Ok(connections) = shared.read(|s| s.query_connections()) {
@@ -167,7 +163,6 @@ impl AppState {
         }
 
         let store_for_driver = shared.clone();
-        let github_secrets_for_driver = github_secrets.clone();
         let runtime_for_driver = Arc::new(Mutex::new(runtime));
         let runtime_for_driver_clone = runtime_for_driver.clone();
         let pending_for_driver: Arc<Mutex<VecDeque<ScheduledSync>>> =
@@ -176,7 +171,6 @@ impl AppState {
         let running_for_driver = Arc::new(AtomicBool::new(false));
         let running_for_driver_clone = running_for_driver.clone();
         let store_for_driver_clone = store_for_driver.clone();
-        let github_secrets_for_driver_clone = github_secrets_for_driver.clone();
         let query_context_for_driver = query_context.clone();
         let github_connector_for_driver = github_connector.clone();
 
@@ -184,7 +178,6 @@ impl AppState {
         let join = std::thread::spawn(move || {
             let rt = runtime_for_driver_clone;
             let store = store_for_driver_clone;
-            let github_secrets = github_secrets_for_driver_clone;
             let pending = pending_for_driver_clone;
             let running = running_for_driver_clone;
             let query_context = query_context_for_driver;
@@ -213,7 +206,6 @@ impl AppState {
                                 },
                                 {
                                     let store = store.clone();
-                                    let github_secrets = github_secrets.clone();
                                     let running = running.clone();
                                     move |conn: Connection, trigger: SyncTrigger| {
                                         if running.swap(true, Ordering::AcqRel) {
@@ -231,7 +223,6 @@ impl AppState {
                                         })?;
                                         scheduled_sync::spawn_github_sync(
                                             store.clone(),
-                                            github_secrets.clone(),
                                             running.clone(),
                                             github_connector.clone(),
                                             conn,
@@ -281,7 +272,6 @@ impl AppState {
             query_context,
             settings: Mutex::new(settings),
             settings_path,
-            github_secrets,
             github_connector,
             github_sync_running: running_for_driver,
             integration_paths: paths.clone(),
@@ -492,14 +482,6 @@ impl AppState {
                 ));
             }
 
-            self.github_secrets
-                .replace(&connection_id, &secret)
-                .map_err(|_| {
-                    safe_error(
-                        "secret_storage_unavailable",
-                        "GitHub token could not be stored locally.",
-                    )
-                })?;
             let connection = Connection {
                 connection_id: connection_id.clone(),
                 connector_type: ConnectorType::new("github").expect("static connector type"),
@@ -518,10 +500,21 @@ impl AppState {
                 .write(|store| store.upsert_connection(connection.clone()))
                 .is_err()
             {
-                let _ = self.github_secrets.remove(&connection_id);
                 return Err(safe_error(
                     "connection_unavailable",
                     "GitHub connection could not be saved.",
+                ));
+            }
+            if self
+                .store
+                .write(|s| s.upsert_connection_secret(&connection_id, &secret))
+                .is_err()
+            {
+                let _ = self.store.write(|s| s.remove_connection_secret(&connection_id));
+                let _ = self.store.write(|s| s.purge_connection(&connection_id));
+                return Err(safe_error(
+                    "secret_storage_unavailable",
+                    "GitHub token could not be stored locally.",
                 ));
             }
             self.refresh_query_context(now().map_err(|_| {
@@ -662,12 +655,6 @@ impl AppState {
         }
         let result = (|| {
             let connection_id = self.github_connection_id(&connection_id)?;
-            self.github_secrets.remove(&connection_id).map_err(|_| {
-                safe_error(
-                    "secret_cleanup_unavailable",
-                    "The local GitHub credential could not be removed.",
-                )
-            })?;
             let summary = self
                 .store
                 .write(|store| store.purge_connection(&connection_id))
@@ -788,7 +775,6 @@ impl AppState {
             })?;
         scheduled_sync::spawn_github_sync(
             self.store.clone(),
-            self.github_secrets.clone(),
             self.github_sync_running.clone(),
             self.github_connector.clone(),
             connection,
@@ -800,7 +786,6 @@ impl AppState {
 
 pub(crate) async fn sync_github(
     store: SharedStore,
-    github_secrets: GitHubSecretFiles,
     connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
     mut connection: Connection,
     trigger: SyncTrigger,
@@ -841,9 +826,15 @@ pub(crate) async fn sync_github(
         cursor: None,
         targeted_resources: Vec::new(),
     };
-    let secret = github_secrets
-        .read(&connection.connection_id)
+    let secret = store
+        .read(|s| s.connection_secret(&connection.connection_id))
         .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "GitHub token is unavailable from local storage.",
+            )
+        })?
+        .ok_or_else(|| {
             safe_error(
                 "credential_unavailable",
                 "GitHub token is unavailable from local storage.",
@@ -1898,8 +1889,10 @@ mod tests {
             })
             .unwrap();
         state
-            .github_secrets
-            .replace(&connection_id, &SecretValue::new("fixture-token"))
+            .store
+            .write(|s| {
+                s.upsert_connection_secret(&connection_id, &SecretValue::new("fixture-token"))
+            })
             .unwrap();
 
         let preview = state
@@ -1912,7 +1905,13 @@ mod tests {
 
         assert_eq!(result.resources, 0);
         assert_eq!(state.store.get_connection(&connection_id).unwrap(), None);
-        assert!(state.github_secrets.read(&connection_id).is_err());
+        assert!(
+            state
+                .store
+                .read(|s| s.connection_secret(&connection_id))
+                .unwrap()
+                .is_none()
+        );
         assert!(state.query.list_connections().unwrap().items.is_empty());
     }
 

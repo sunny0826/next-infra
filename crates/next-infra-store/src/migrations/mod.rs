@@ -1,7 +1,7 @@
 use crate::StoreError;
 use rusqlite::{Connection, TransactionBehavior, params};
 
-pub const LATEST_SCHEMA_VERSION: u32 = 4;
+pub const LATEST_SCHEMA_VERSION: u32 = 5;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE schema_migrations (
@@ -180,6 +180,13 @@ const MIGRATION_4: &str = r#"
 ALTER TABLE sync_runs ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]';
 "#;
 
+const MIGRATION_5: &str = r#"
+CREATE TABLE connection_secrets (
+    connection_id TEXT PRIMARY KEY REFERENCES connections(connection_id) ON DELETE CASCADE,
+    secret BLOB NOT NULL
+) STRICT;
+"#;
+
 pub fn apply(connection: &mut Connection) -> Result<(), StoreError> {
     let current: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -253,6 +260,20 @@ pub fn apply(connection: &mut Connection) -> Result<(), StoreError> {
             .pragma_update(None, "user_version", 4_u32)
             .map_err(StoreError::Sqlite)?;
     }
+    if current < 5 {
+        transaction
+            .execute_batch(MIGRATION_5)
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?1, unixepoch('subsec') * 1000)",
+                params![5_u32],
+            )
+            .map_err(StoreError::Sqlite)?;
+        transaction
+            .pragma_update(None, "user_version", 5_u32)
+            .map_err(StoreError::Sqlite)?;
+    }
     transaction.commit().map_err(StoreError::Sqlite)
 }
 
@@ -286,7 +307,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         assert_eq!(metadata.0, 0);
         assert!(metadata.1 > 0);
     }
@@ -343,7 +364,7 @@ mod tests {
         let inference_table: i64 = connection
             .query_row("SELECT COUNT(*) FROM inference_runs", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 4);
+        assert_eq!(version, 5);
         assert_eq!(binding, "fixture-binding");
         assert_eq!(inference_table, 0);
     }

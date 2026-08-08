@@ -58,8 +58,7 @@ next-infra/
 - `docs/tasks/README.md` §3 定义单写所有权表：修改共享契约前先读。
 
 ## ANTI-PATTERNS（本项目禁止）
-- Token/Secret/真实 Provider 响应/主机名/IP/仓库名**永不**进入 Git、Fixture、日志、错误、文档、URL、命令行、SQLite。
-- GitHub Token 文件必须 `0700` 目录 / `0600` 文件、非 symlink、属当前用户；**不得**放宽权限绕过 `credential_unavailable`。
+- Token/Secret/真实 Provider 响应/主机名/IP/仓库名**永不**进入 Git、Fixture、日志、错误、文档、URL、命令行、DTO。明文 Secret 仅存 SQLite `connection_secrets`（DB 0600/目录 0700、FK 级联清理、无投影读取）；Token 仍**永不**进入 Git/Fixture/日志/错误/文档/URL/命令行/DTO。
 - **不**手工编辑 SQLite / Application Support / Token 文件清理数据。
 - **不**实现 Provider 写操作/部署/重启/外部删除/任意 SSH 命令（Goal 10 仅设计）。
 - local replay / Fixture / Browser-Vite 测试**不得**冒充真实 Provider、真实 Tauri Host 或 MCP live 验收（live 需真实凭据/真实 Agent/签名身份/原生 App smoke）。

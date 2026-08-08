@@ -151,7 +151,6 @@ where
 /// See plan §2.5 for race safety argument (resolve → begin → enqueue order).
 pub fn spawn_github_sync(
     store: next_infra_runtime::SharedStore,
-    github_secrets: crate::github_live::GitHubSecretFiles,
     running: Arc<AtomicBool>,
     connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
     connection: Connection,
@@ -159,19 +158,11 @@ pub fn spawn_github_sync(
     sync_run_id: next_infra_core::SyncRunId,
 ) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
     let store = store.clone();
-    let github_secrets = github_secrets.clone();
     let running = running.clone();
     let queued_id = sync_run_id.as_str().to_owned();
     tauri::async_runtime::spawn(async move {
-        let _ = crate::composition::sync_github(
-            store,
-            github_secrets,
-            connector,
-            connection,
-            trigger,
-            sync_run_id,
-        )
-        .await;
+        let _ = crate::composition::sync_github(store, connector, connection, trigger, sync_run_id)
+            .await;
         running.store(false, Ordering::Release);
     });
     Ok(queued_id)
