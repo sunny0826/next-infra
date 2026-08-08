@@ -89,27 +89,32 @@ impl<T: ManagementTransport> next_infra_connector_api::ReadConnector
             retryable: false,
             retry_after_ms: None,
         })?;
-        let body = self
+        let projects_body = self
             .transport
             .get(ManagementRequest::new("/v1/projects", secret).map_err(|_| invalid_response())?)
             .await?;
-        #[derive(Deserialize)]
-        struct Envelope {
-            organizations: Vec<OrganizationDto>,
-            projects: Vec<ProjectDto>,
-        }
-        let envelope: Envelope = serde_json::from_slice(&body).map_err(|_| invalid_response())?;
+        let organizations_body = self
+            .transport
+            .get(
+                ManagementRequest::new("/v1/organizations", secret)
+                    .map_err(|_| invalid_response())?,
+            )
+            .await?;
+        let projects: Vec<ProjectDto> =
+            serde_json::from_slice(&projects_body).map_err(|_| invalid_response())?;
+        let organizations: Vec<OrganizationDto> =
+            serde_json::from_slice(&organizations_body).map_err(|_| invalid_response())?;
         let mut resources = map_organizations(
             &request.scope,
             Timestamp::from_unix_millis(0).unwrap(),
-            envelope.organizations,
+            organizations,
         )
         .map_err(|_| invalid_response())?;
         resources.extend(
             map_projects(
                 &request.scope,
                 Timestamp::from_unix_millis(0).unwrap(),
-                envelope.projects,
+                projects,
             )
             .map_err(|_| invalid_response())?,
         );
@@ -125,7 +130,7 @@ impl<T: ManagementTransport> next_infra_connector_api::ReadConnector
             warnings: vec![],
             redaction_report: Default::default(),
             provider_request_summary: next_infra_connector_api::ProviderRequestSummary {
-                request_count: 1,
+                request_count: 2,
                 ..Default::default()
             },
         };
@@ -410,7 +415,7 @@ mod tests {
         );
     }
     struct FakeManagementTransport {
-        body: Mutex<Vec<u8>>,
+        bodies: Mutex<Vec<Vec<u8>>>,
     }
     #[async_trait]
     impl ManagementTransport for FakeManagementTransport {
@@ -418,9 +423,8 @@ mod tests {
             &self,
             request: ManagementRequest,
         ) -> Result<Vec<u8>, next_infra_connector_api::ConnectorFailure> {
-            assert_eq!(request.url.path(), "/v1/projects");
             assert!(request.authorization.is_sensitive());
-            Ok(self.body.lock().unwrap().clone())
+            Ok(self.bodies.lock().unwrap().pop().expect("response queued"))
         }
     }
     fn sync_request() -> next_infra_connector_api::SyncRequest {
@@ -443,7 +447,12 @@ mod tests {
     }
     #[tokio::test]
     async fn read_connector_replays_allowlisted_management_summary() {
-        let connector = SupabaseManagedConnector::new(FakeManagementTransport { body: Mutex::new(br#"{"organizations":[{"id":"org-1","name":"Fixture Org","token":"must-not-appear"}],"projects":[{"id":"project-1","name":"Fixture Project","organization_id":"org-1","region":"ap-example-1","secret":"must-not-appear"}]}"#.to_vec()) });
+        let connector = SupabaseManagedConnector::new(FakeManagementTransport {
+            bodies: Mutex::new(vec![
+                br#"[{"id":"org-1","name":"Fixture Org","token":"must-not-appear"}]"#.to_vec(),
+                br#"[{"id":"project-1","name":"Fixture Project","organization_id":"org-1","region":"ap-example-1","secret":"must-not-appear"}]"#.to_vec(),
+            ]),
+        });
         let outcome = connector
             .sync(
                 sync_request(),
