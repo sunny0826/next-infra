@@ -69,7 +69,8 @@ impl DokployTransport for ReqwestDokployTransport {
         let response = self
             .client
             .get(request.url)
-            .header(reqwest::header::AUTHORIZATION, request.authorization)
+            .header("accept", "application/json")
+            .header("x-api-key", request.authorization)
             .send()
             .await
             .map_err(|_| error(ErrorCode::NetworkUnreachable, None))?;
@@ -213,7 +214,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             client
-                .fetch_pages("/api/projects", &SecretValue::new("token"))
+                .fetch_pages("/api/project.all", &SecretValue::new("token"))
                 .await
                 .unwrap()
                 .len(),
@@ -232,7 +233,7 @@ mod tests {
         )
         .unwrap();
         let failure = client
-            .fetch_pages("/api/projects", &SecretValue::new("token"))
+            .fetch_pages("/api/project.all", &SecretValue::new("token"))
             .await
             .unwrap_err();
         assert_eq!(failure.code, ErrorCode::RateLimited);

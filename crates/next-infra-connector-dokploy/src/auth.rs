@@ -22,8 +22,7 @@ pub fn authorization_header(secret: &SecretValue) -> Result<HeaderValue, Dokploy
     {
         return Err(DokployAuthError);
     }
-    let mut header =
-        HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| DokployAuthError)?;
+    let mut header = HeaderValue::from_str(token).map_err(|_| DokployAuthError)?;
     header.set_sensitive(true);
     Ok(header)
 }

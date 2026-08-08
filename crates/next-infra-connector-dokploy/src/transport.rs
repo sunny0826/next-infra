@@ -23,7 +23,7 @@ impl DokployEndpoint {
     }
 
     pub fn resource(&self, path: &str) -> Result<Url, DokployAuthError> {
-        if !path.starts_with('/') || path.contains(['?', '#']) {
+        if !path.starts_with('/') || path.contains('#') {
             return Err(DokployAuthError);
         }
         self.base_url.join(path).map_err(|_| DokployAuthError)
@@ -63,7 +63,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn endpoint_rejects_credentials_and_query_in_base_url() {
+    fn endpoint_rejects_credentials_and_fragment_in_base_url() {
         assert!(DokployEndpoint::new("dokploy://host").is_err());
         assert!(DokployEndpoint::new("https://user:pass@example.test").is_err());
         assert!(DokployEndpoint::new("https://example.test?token=secret").is_err());
@@ -75,5 +75,33 @@ mod tests {
         )
         .unwrap();
         assert!(!format!("{request:?}").contains("token-sentinel"));
+    }
+
+    #[test]
+    fn endpoint_allows_query_string_in_resource_path() {
+        let endpoint = DokployEndpoint::new("https://dokploy.example.test").unwrap();
+        let request = DokployRequest::new(
+            &endpoint,
+            "/api/deployment.all?applicationId=app-123",
+            &SecretValue::new("token"),
+        )
+        .unwrap();
+        assert_eq!(
+            request.url.as_str(),
+            "https://dokploy.example.test/api/deployment.all?applicationId=app-123"
+        );
+    }
+
+    #[test]
+    fn endpoint_rejects_fragment_in_resource_path() {
+        let endpoint = DokployEndpoint::new("https://dokploy.example.test").unwrap();
+        assert!(
+            DokployRequest::new(
+                &endpoint,
+                "/api/project#fragment",
+                &SecretValue::new("token"),
+            )
+            .is_err()
+        );
     }
 }

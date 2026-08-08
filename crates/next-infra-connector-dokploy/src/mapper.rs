@@ -4,47 +4,92 @@ use next_infra_core::{
     SchemaVersion, Scope, Timestamp,
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::collections::BTreeMap;
+
+// ---------------------------------------------------------------------------
+// DTOs — Dokploy v2 REST API shape (tolerant of unknown fields via serde)
+// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ProjectDto {
+    #[serde(rename = "projectId")]
     pub id: String,
     pub name: String,
     pub description: Option<String>,
+    /// Old-shape applications (top-level field, pre-v2 API shape)
+    #[serde(default)]
+    pub applications: Vec<ApplicationDto>,
+    /// New-shape environments containing nested applications
+    #[serde(default)]
+    pub environments: Vec<EnvironmentDto>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct EnvironmentDto {
+    #[serde(rename = "environmentId")]
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub applications: Vec<ApplicationDto>,
+    /// Compose services — tolerated as raw Value (serde drops unknowns)
+    #[serde(default)]
+    pub compose: Vec<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ApplicationDto {
+    #[serde(rename = "applicationId")]
     pub id: String,
     pub name: String,
-    pub project_id: Option<String>,
+    #[serde(rename = "serverId", default)]
     pub server_id: Option<String>,
+    #[serde(rename = "environmentId", default)]
+    pub environment_id: Option<String>,
+    /// Filled by the connector from parent project context — not in JSON
+    #[serde(skip, default)]
+    pub project_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DeploymentDto {
+    #[serde(rename = "deploymentId")]
     pub id: String,
-    pub application_id: String,
+    #[serde(rename = "applicationId", default)]
+    pub application_id: Option<String>,
     pub status: Option<String>,
+    #[serde(rename = "createdAt", default)]
     pub created_at: Option<String>,
+    pub title: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ServerDto {
+    #[serde(rename = "serverId")]
     pub id: String,
     pub name: String,
-    pub address: Option<String>,
+    pub description: Option<String>,
+    #[serde(rename = "ipAddress", default)]
+    pub ip_address: Option<String>,
+    #[serde(default)]
     pub status: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct DomainDto {
+    #[serde(rename = "domainId")]
     pub id: String,
-    pub domain: String,
+    /// The JSON field is `host`; we deserialize into `domain` for display compat
+    pub host: String,
+    #[serde(rename = "applicationId", default)]
     pub application_id: Option<String>,
-    pub zone: Option<String>,
+    pub https: Option<bool>,
+    pub path: Option<String>,
 }
+
+// ---------------------------------------------------------------------------
+// Mapper output
+// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DokployMapperOutput {
@@ -52,6 +97,10 @@ pub struct DokployMapperOutput {
     pub relations: Vec<RelationObservation>,
     pub redacted_fields: u64,
 }
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
 
 pub fn map_resources(
     scope: &Scope,
@@ -169,6 +218,10 @@ pub fn map_resources(
     Ok(output)
 }
 
+// ---------------------------------------------------------------------------
+// Relation builder
+// ---------------------------------------------------------------------------
+
 fn provider_relation(
     source_kind: &str,
     source_id: ExternalId,
@@ -197,6 +250,10 @@ fn provider_relation(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Resource builders
+// ---------------------------------------------------------------------------
+
 fn project(scope: &Scope, at: Timestamp, value: ProjectDto) -> Result<ResourceObservation, String> {
     resource(
         "dokploy.project",
@@ -207,6 +264,7 @@ fn project(scope: &Scope, at: Timestamp, value: ProjectDto) -> Result<ResourceOb
         json!({"description": value.description}),
     )
 }
+
 fn application(
     scope: &Scope,
     at: Timestamp,
@@ -218,9 +276,14 @@ fn application(
         &value.name,
         scope,
         at,
-        json!({"project_id": value.project_id, "server_id": value.server_id}),
+        json!({
+            "project_id": value.project_id,
+            "server_id": value.server_id,
+            "environment_id": value.environment_id,
+        }),
     )
 }
+
 fn deployment(
     scope: &Scope,
     at: Timestamp,
@@ -232,9 +295,15 @@ fn deployment(
         &value.id,
         scope,
         at,
-        json!({"application_id": value.application_id, "status": value.status, "created_at": value.created_at}),
+        json!({
+            "application_id": value.application_id,
+            "status": value.status,
+            "created_at": value.created_at,
+            "title": value.title,
+        }),
     )
 }
+
 fn server(scope: &Scope, at: Timestamp, value: ServerDto) -> Result<ResourceObservation, String> {
     resource(
         "dokploy.server",
@@ -242,17 +311,26 @@ fn server(scope: &Scope, at: Timestamp, value: ServerDto) -> Result<ResourceObse
         &value.name,
         scope,
         at,
-        json!({"address": value.address, "status": value.status}),
+        json!({
+            "address": value.ip_address,
+            "description": value.description,
+            "status": value.status,
+        }),
     )
 }
+
 fn domain(scope: &Scope, at: Timestamp, value: DomainDto) -> Result<ResourceObservation, String> {
     resource(
         "dokploy.domain",
         &value.id,
-        &value.domain,
+        &value.host,
         scope,
         at,
-        json!({"application_id": value.application_id, "zone": value.zone}),
+        json!({
+            "application_id": value.application_id,
+            "https": value.https,
+            "path": value.path,
+        }),
     )
 }
 
@@ -288,25 +366,64 @@ fn external(kind: &str, id: &str) -> Result<ExternalId, String> {
     ExternalId::new(format!("{kind}:{id}")).map_err(|_| "invalid external id".into())
 }
 
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn mapping_is_stable_and_drops_unknown_fields() {
-        let application: ApplicationDto = serde_json::from_str(r#"{"id":"app-1","name":"Fixture App","project_id":"project-1","server_id":"server-1","secret":"must-drop"}"#).unwrap();
-        let project: ProjectDto = serde_json::from_str(r#"{"id":"project-1","name":"Fixture Project","description":"safe","token":"must-drop"}"#).unwrap();
+        // v2-shaped JSON with environment nesting + unknown fields
+        let project_json = r#"{
+            "projectId": "project-1",
+            "name": "Fixture Project",
+            "description": "safe",
+            "token": "must-drop",
+            "environments": [{
+                "environmentId": "env-1",
+                "name": "Production",
+                "applications": [{
+                    "applicationId": "app-1",
+                    "name": "Fixture App",
+                    "serverId": "server-1",
+                    "secret": "must-drop"
+                }],
+                "compose": []
+            }]
+        }"#;
+        let project: ProjectDto = serde_json::from_str(project_json).unwrap();
+        assert_eq!(project.id, "project-1");
+        assert_eq!(project.environments.len(), 1);
+        assert_eq!(project.environments[0].applications.len(), 1);
+        assert_eq!(project.environments[0].applications[0].id, "app-1");
+
+        // Old-shape top-level applications also tolerated
+        let old_shape: ProjectDto = serde_json::from_str(
+            r#"{
+            "projectId": "project-old",
+            "name": "Old Shape",
+            "applications": [{"applicationId": "app-old", "name": "Old App"}]
+        }"#,
+        )
+        .unwrap();
+        assert_eq!(old_shape.applications.len(), 1);
+
         let output = map_resources(
             &Scope::new("fixture-scope").unwrap(),
             Timestamp::from_unix_millis(1).unwrap(),
-            [project],
-            [application],
+            [project, old_shape],
+            [], // applications come from embedded flattening in connector
             [],
             [],
             [],
         )
         .unwrap();
+        // 2 projects, 0 applications (not passed separately here)
         assert_eq!(output.resources.len(), 2);
-        assert_eq!(output.relations.len(), 1);
+        assert_eq!(output.relations.len(), 0);
         let json = serde_json::to_string(&output.resources).unwrap();
         assert!(!json.contains("must-drop"));
     }
@@ -320,30 +437,36 @@ mod tests {
                 id: "project".into(),
                 name: "Project".into(),
                 description: None,
+                applications: vec![],
+                environments: vec![],
             }],
             [ApplicationDto {
                 id: "application".into(),
                 name: "Application".into(),
-                project_id: Some("project".into()),
                 server_id: Some("server".into()),
+                environment_id: Some("env-1".into()),
+                project_id: Some("project".into()),
             }],
             [DeploymentDto {
                 id: "deployment".into(),
-                application_id: "application".into(),
+                application_id: Some("application".into()),
                 status: Some("running".into()),
                 created_at: None,
+                title: None,
             }],
             [ServerDto {
                 id: "server".into(),
                 name: "Server".into(),
-                address: None,
+                description: None,
+                ip_address: Some("10.0.0.1".into()),
                 status: None,
             }],
             [DomainDto {
                 id: "domain".into(),
-                domain: "fixture.example.test".into(),
+                host: "fixture.example.test".into(),
                 application_id: Some("application".into()),
-                zone: None,
+                https: Some(true),
+                path: Some("/".into()),
             }],
         )
         .unwrap();
@@ -361,5 +484,41 @@ mod tests {
                 "dokploy.contains"
             ],
         );
+    }
+
+    #[test]
+    fn deployment_and_domain_dto_tolerates_missing_fields() {
+        // Deployment with only deploymentId filled
+        let dep_json = r#"{"deploymentId": "deploy-1"}"#;
+        let dep: DeploymentDto = serde_json::from_str(dep_json).unwrap();
+        assert_eq!(dep.id, "deploy-1");
+        assert!(dep.application_id.is_none());
+        assert!(dep.status.is_none());
+        assert!(dep.created_at.is_none());
+        assert!(dep.title.is_none());
+
+        // Domain with only domainId and host
+        let dom_json = r#"{"domainId": "dom-1", "host": "example.test"}"#;
+        let dom: DomainDto = serde_json::from_str(dom_json).unwrap();
+        assert_eq!(dom.id, "dom-1");
+        assert_eq!(dom.host, "example.test");
+        assert!(dom.application_id.is_none());
+    }
+
+    #[test]
+    fn server_dto_v2_field_names() {
+        let json = r#"{
+            "serverId": "srv-1",
+            "name": "Prod Server",
+            "description": "Production",
+            "ipAddress": "10.0.0.5",
+            "status": "online"
+        }"#;
+        let srv: ServerDto = serde_json::from_str(json).unwrap();
+        assert_eq!(srv.id, "srv-1");
+        assert_eq!(srv.name, "Prod Server");
+        assert_eq!(srv.description, Some("Production".into()));
+        assert_eq!(srv.ip_address, Some("10.0.0.5".into()));
+        assert_eq!(srv.status, Some("online".into()));
     }
 }
