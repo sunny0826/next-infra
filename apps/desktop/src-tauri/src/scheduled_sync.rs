@@ -201,6 +201,23 @@ pub fn spawn_ssh_sync(
     Ok(queued_id)
 }
 
+pub fn spawn_dokploy_sync(
+    store: next_infra_runtime::SharedStore,
+    running: Arc<AtomicBool>,
+    connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: next_infra_core::SyncRunId,
+) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
+    let store = store.clone();
+    let running = running.clone();
+    let queued_id = sync_run_id.as_str().to_owned();
+    tauri::async_runtime::spawn(async move {
+        let _ = crate::composition::sync_dokploy(store, connection, trigger, sync_run_id).await;
+        running.store(false, Ordering::Release);
+    });
+    Ok(queued_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,15 +575,17 @@ mod tests {
         assert!(runtime.scheduler().entry(&connection_id).is_none());
     }
 
-    /// Test: has_live_sync_path returns true only for github.
+    /// Test: has_live_sync_path returns true for github, ssh, and dokploy.
     #[test]
-    fn has_live_sync_path_github_and_ssh() {
+    fn has_live_sync_path_github_ssh_dokploy() {
         let github = ConnectorType::new("github").unwrap();
         let ssh = ConnectorType::new("ssh").unwrap();
         let dokploy = ConnectorType::new("dokploy").unwrap();
+        let cloudflare = ConnectorType::new("cloudflare").unwrap();
 
         assert!(crate::composition::has_live_sync_path(&github));
         assert!(crate::composition::has_live_sync_path(&ssh));
-        assert!(!crate::composition::has_live_sync_path(&dokploy));
+        assert!(crate::composition::has_live_sync_path(&dokploy));
+        assert!(!crate::composition::has_live_sync_path(&cloudflare));
     }
 }

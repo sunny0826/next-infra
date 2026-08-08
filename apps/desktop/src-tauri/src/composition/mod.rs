@@ -16,7 +16,9 @@ use next_infra_connector_api::{
 };
 use next_infra_connector_catalog::ConnectorCoverageSnapshot;
 use next_infra_connector_cloudflare::cloudflare_descriptor;
-use next_infra_connector_dokploy::dokploy_descriptor;
+use next_infra_connector_dokploy::{
+    DokployConnector, DokployEndpoint, ReqwestDokployTransport, dokploy_descriptor,
+};
 use next_infra_connector_github::{
     GitHubClient, GitHubConnector, GitHubEndpoint, GitHubFetch, GitHubFetchBudget, GitHubPages,
     ReqwestGitHubTransport, github_descriptor, repository::RepositoryDto,
@@ -83,6 +85,7 @@ pub struct AppState {
     github_sync_running: Arc<AtomicBool>,
     ssh_connector: Arc<SshConnector<OpenSshClient>>,
     ssh_sync_running: Arc<AtomicBool>,
+    dokploy_sync_running: Arc<AtomicBool>,
     integration_paths: IntegrationPaths,
     current_app_bundle: PathBuf,
     scheduler_driver: Mutex<Option<DriverHandle>>,
@@ -179,6 +182,8 @@ impl AppState {
         let store_for_driver_clone = store_for_driver.clone();
         let query_context_for_driver = query_context.clone();
         let github_connector_for_driver = github_connector.clone();
+        let dokploy_running_for_driver = Arc::new(AtomicBool::new(false));
+        let dokploy_running_for_driver_clone = dokploy_running_for_driver.clone();
 
         let (tx, rx) = std::sync::mpsc::channel();
         let join = std::thread::spawn(move || {
@@ -187,6 +192,7 @@ impl AppState {
             let pending = pending_for_driver_clone;
             let running = running_for_driver_clone;
             let query_context = query_context_for_driver;
+            let dokploy_running = dokploy_running_for_driver_clone;
             loop {
                 match rx.recv_timeout(Duration::from_millis(scheduled_sync::TICK_MILLIS)) {
                     Ok(()) => break,
@@ -195,9 +201,6 @@ impl AppState {
                         let Ok(at) = now() else {
                             continue;
                         };
-                        // Collect the next_due map inside the same runtime lock that
-                        // drives the tick, then drop the guard before any store read
-                        // or context refresh (std::sync::Mutex is not reentrant).
                         let next_due: std::collections::BTreeMap<ConnectionId, Timestamp> = {
                             let Ok(mut guard) = rt.lock() else {
                                 continue;
@@ -213,33 +216,71 @@ impl AppState {
                                 {
                                     let store = store.clone();
                                     let running = running.clone();
-                                    move |conn: Connection, trigger: SyncTrigger| {
-                                        if running.swap(true, Ordering::AcqRel) {
-                                            return Err(
-                                                scheduled_sync::EnqueueError::SyncInProgress,
-                                            );
+                                    let dokploy_running = dokploy_running.clone();
+                                    move |conn: Connection, trigger: SyncTrigger| match conn
+                                        .connector_type
+                                        .as_str()
+                                    {
+                                        "github" => {
+                                            if running.swap(true, Ordering::AcqRel) {
+                                                return Err(
+                                                    scheduled_sync::EnqueueError::SyncInProgress,
+                                                );
+                                            }
+                                            let sync_run_id = SyncRunId::new(format!(
+                                                "github-scheduled-{}",
+                                                uuid::Uuid::new_v4()
+                                            ))
+                                            .map_err(|_| {
+                                                running.store(false, Ordering::Release);
+                                                scheduled_sync::EnqueueError::Unavailable
+                                            })?;
+                                            scheduled_sync::spawn_github_sync(
+                                                store.clone(),
+                                                running.clone(),
+                                                github_connector.clone(),
+                                                conn,
+                                                trigger,
+                                                sync_run_id,
+                                            )
+                                            .map_err(
+                                                |_| {
+                                                    running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                },
+                                            )?;
+                                            Ok(())
                                         }
-                                        let sync_run_id = SyncRunId::new(format!(
-                                            "github-scheduled-{}",
-                                            uuid::Uuid::new_v4()
-                                        ))
-                                        .map_err(|_| {
-                                            running.store(false, Ordering::Release);
-                                            scheduled_sync::EnqueueError::Unavailable
-                                        })?;
-                                        scheduled_sync::spawn_github_sync(
-                                            store.clone(),
-                                            running.clone(),
-                                            github_connector.clone(),
-                                            conn,
-                                            trigger,
-                                            sync_run_id,
-                                        )
-                                        .map_err(|_| {
-                                            running.store(false, Ordering::Release);
-                                            scheduled_sync::EnqueueError::Unavailable
-                                        })?;
-                                        Ok(())
+                                        "dokploy" => {
+                                            if dokploy_running.swap(true, Ordering::AcqRel) {
+                                                return Err(
+                                                    scheduled_sync::EnqueueError::SyncInProgress,
+                                                );
+                                            }
+                                            let sync_run_id = SyncRunId::new(format!(
+                                                "dokploy-scheduled-{}",
+                                                uuid::Uuid::new_v4()
+                                            ))
+                                            .map_err(|_| {
+                                                dokploy_running.store(false, Ordering::Release);
+                                                scheduled_sync::EnqueueError::Unavailable
+                                            })?;
+                                            scheduled_sync::spawn_dokploy_sync(
+                                                store.clone(),
+                                                dokploy_running.clone(),
+                                                conn,
+                                                trigger,
+                                                sync_run_id,
+                                            )
+                                            .map_err(
+                                                |_| {
+                                                    dokploy_running.store(false, Ordering::Release);
+                                                    scheduled_sync::EnqueueError::Unavailable
+                                                },
+                                            )?;
+                                            Ok(())
+                                        }
+                                        _ => Err(scheduled_sync::EnqueueError::Unavailable),
                                     }
                                 },
                             )
@@ -252,8 +293,6 @@ impl AppState {
                                 .collect()
                         };
 
-                        // Refresh query context after each tick so next_due reflects
-                        // any scheduler state change (entries added, removed, or advanced).
                         if !next_due.is_empty() {
                             let revision = query_context.revision().unwrap_or(0).saturating_add(1);
                             let context = committed_query_context(&store, at, revision, &next_due);
@@ -273,6 +312,7 @@ impl AppState {
 
         let ssh_connector = Arc::new(SshConnector::new(OpenSshClient::new()));
         let ssh_sync_running = Arc::new(AtomicBool::new(false));
+        let dokploy_sync_running = dokploy_running_for_driver.clone();
 
         let mut state = Self {
             runtime: runtime_for_driver,
@@ -285,6 +325,7 @@ impl AppState {
             github_sync_running: running_for_driver,
             ssh_connector,
             ssh_sync_running,
+            dokploy_sync_running,
             integration_paths: paths.clone(),
             current_app_bundle: current_app_bundle.to_path_buf(),
             scheduler_driver: Mutex::new(None),
@@ -661,6 +702,81 @@ impl AppState {
         result
     }
 
+    async fn create_dokploy_connection(
+        &self,
+        request: DokployConnectCommand,
+    ) -> Result<DokployConnectResult, ErrorEnvelope> {
+        let display_name = request.display_name.trim();
+        if display_name.is_empty() || display_name.len() > 120 {
+            return Err(safe_error(
+                "invalid_connection",
+                "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        let _endpoint = DokployEndpoint::new(&request.url)
+            .map_err(|_| safe_error("invalid_dokploy_url", "Dokploy URL format is invalid."))?;
+        self.begin_dokploy_sync()?;
+        let result = async {
+            let connection_id = ConnectionId::new(format!("dokploy-{}", uuid::Uuid::new_v4()))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Dokploy connection could not be created.",
+                    )
+                })?;
+            let mut config = serde_json::Map::new();
+            config.insert(
+                "base_url".to_owned(),
+                serde_json::Value::String(request.url.clone()),
+            );
+            let connection = Connection {
+                connection_id: connection_id.clone(),
+                connector_type: ConnectorType::new("dokploy").expect("static connector type"),
+                display_name: display_name.into(),
+                enabled: true,
+                config: serde_json::Value::Object(config),
+                secret_ref: None,
+                health: ConnectorHealth::Degraded,
+                last_success_at: None,
+                last_attempt_at: None,
+                config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+                deleted_at: None,
+            };
+            if self
+                .store
+                .write(|store| store.upsert_connection(connection.clone()))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Dokploy connection could not be saved.",
+                ));
+            }
+            self.refresh_query_context(now().map_err(|_| {
+                safe_error(
+                    "query_context_unavailable",
+                    "Local query context is unavailable.",
+                )
+            })?)?;
+            if let Err(error) = self.register_dokploy_connection(&connection) {
+                eprintln!(
+                    "scheduler: Dokploy connection saved but registration failed: {}",
+                    error.message
+                );
+            }
+            let sync_run_id = self.enqueue_dokploy_sync(connection, SyncTrigger::User)?;
+            Ok(DokployConnectResult {
+                connection_id: connection_id.as_str().to_owned(),
+                sync_run_id,
+            })
+        }
+        .await;
+        if result.is_err() {
+            self.dokploy_sync_running.store(false, Ordering::Release);
+        }
+        result
+    }
+
     async fn manual_github_sync(&self, connection_id: String) -> Result<String, ErrorEnvelope> {
         let connection_id = ConnectionId::new(connection_id)
             .map_err(|_| safe_error("invalid_connection", "Connection identifier is invalid."))?;
@@ -941,6 +1057,55 @@ impl AppState {
             self.store.clone(),
             self.ssh_sync_running.clone(),
             self.ssh_connector.clone(),
+            connection,
+            trigger,
+            sync_run_id,
+        )
+    }
+
+    fn begin_dokploy_sync(&self) -> Result<(), ErrorEnvelope> {
+        if self.dokploy_sync_running.swap(true, Ordering::AcqRel) {
+            return Err(ErrorEnvelope {
+                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+                code: "sync_in_progress".into(),
+                message: "A Dokploy synchronization is already running.".into(),
+                retryable: true,
+            });
+        }
+        Ok(())
+    }
+
+    fn register_dokploy_connection(&self, connection: &Connection) -> Result<(), DomainError> {
+        let evaluated_at = now().map_err(DomainError::invalid_value)?;
+        let interval = query_sync_interval_millis(&connection.connector_type);
+        let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
+        let next_due = Timestamp::from_unix_millis(next_due).unwrap_or(evaluated_at);
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| DomainError::invalid_value("runtime lock poisoned"))?;
+        runtime
+            .scheduler_mut()
+            .register(connection.connection_id.clone(), interval, next_due)
+            .map_err(|e| DomainError::invalid_value(format!("{:?}", e)))?;
+        Ok(())
+    }
+
+    fn enqueue_dokploy_sync(
+        &self,
+        connection: Connection,
+        trigger: SyncTrigger,
+    ) -> Result<String, ErrorEnvelope> {
+        let sync_run_id = SyncRunId::new(format!("dokploy-sync-{}", uuid::Uuid::new_v4()))
+            .map_err(|_| {
+                safe_error(
+                    "sync_unavailable",
+                    "Dokploy synchronization could not start.",
+                )
+            })?;
+        scheduled_sync::spawn_dokploy_sync(
+            self.store.clone(),
+            self.dokploy_sync_running.clone(),
             connection,
             trigger,
             sync_run_id,
@@ -1244,6 +1409,191 @@ fn ssh_connector_health(code: ErrorCode) -> ConnectorHealth {
     }
 }
 
+pub(crate) async fn sync_dokploy(
+    store: SharedStore,
+    mut connection: Connection,
+    trigger: SyncTrigger,
+    sync_run_id: SyncRunId,
+) -> Result<(), ErrorEnvelope> {
+    let started_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Dokploy synchronization could not start.",
+        )
+    })?;
+    connection.last_attempt_at = Some(started_at);
+    store
+        .write(|store| store.upsert_connection(connection.clone()))
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Dokploy synchronization could not start.",
+            )
+        })?;
+
+    // Extract base_url from connection config
+    let base_url = connection
+        .config
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            safe_error(
+                "sync_unavailable",
+                "Dokploy base_url is missing from connection config.",
+            )
+        })?;
+
+    let request = SyncRequest {
+        sync_run_id: sync_run_id.clone(),
+        connection: ConnectionInput {
+            connection_id: connection.connection_id.clone(),
+            connector_type: ConnectorType::new("dokploy").expect("static connector type"),
+            config: connection.config.clone(),
+            config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+        },
+        mode: SyncMode::Full,
+        scope: Scope::new(format!("dokploy:{}", connection.connection_id.as_str())).map_err(
+            |_| {
+                safe_error(
+                    "sync_unavailable",
+                    "Dokploy synchronization could not start.",
+                )
+            },
+        )?,
+        cursor: None,
+        targeted_resources: Vec::new(),
+    };
+    let secret = store
+        .read(|s| s.connection_secret(&connection.connection_id))
+        .map_err(|_| {
+            safe_error(
+                "credential_unavailable",
+                "Dokploy credential is unavailable from local storage.",
+            )
+        })?
+        .ok_or_else(|| {
+            safe_error(
+                "credential_unavailable",
+                "Dokploy credential is unavailable from local storage.",
+            )
+        })?;
+
+    // Create a new connector instance with the per-connection base_url
+    let transport =
+        ReqwestDokployTransport::new().map_err(|e| dokploy_unreachable_error(e.to_string()))?;
+    let dokploy_connector = DokployConnector::new(base_url, transport)
+        .map_err(|e| dokploy_unreachable_error(e.to_string()))?;
+    let dokploy_connector = Arc::new(dokploy_connector);
+
+    let mut engine = SyncEngine::new(store.clone());
+    let handle = engine
+        .start(
+            &connection,
+            SyncRunStart {
+                sync_run_id: sync_run_id.clone(),
+                mode: SyncMode::Full,
+                trigger,
+                scope: request.scope.clone(),
+                started_at,
+                targeted_resources: Vec::new(),
+            },
+        )
+        .map_err(|_| {
+            safe_error(
+                "sync_unavailable",
+                "Dokploy synchronization could not start.",
+            )
+        })?;
+    let outcome = dokploy_connector.sync(request.clone(), Some(&secret)).await;
+    let finished_at = now().map_err(|_| {
+        safe_error(
+            "sync_unavailable",
+            "Dokploy synchronization could not finish.",
+        )
+    })?;
+
+    let health = match outcome {
+        Ok(outcome) => {
+            let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
+                ConnectorHealth::Degraded
+            } else {
+                ConnectorHealth::Healthy
+            };
+            let normalized = match dokploy_normalizer().normalize(&request, outcome.batch().clone())
+            {
+                Ok(normalized) => normalized,
+                Err(_) => {
+                    let _ = engine.fail(
+                        handle,
+                        DomainError {
+                            code: ErrorCode::Internal,
+                            message: "Dokploy data normalization failed.".into(),
+                            retryable: false,
+                        },
+                        finished_at,
+                    );
+                    return Err(safe_error(
+                        "sync_unavailable",
+                        "Dokploy data could not be saved.",
+                    ));
+                }
+            };
+            engine
+                .commit(handle, normalized, finished_at)
+                .map_err(|_| safe_error("sync_unavailable", "Dokploy data could not be saved."))?;
+            connection.last_success_at = Some(finished_at);
+            health
+        }
+        Err(failure) => {
+            let health = match failure.code {
+                ErrorCode::NetworkUnreachable => ConnectorHealth::Unreachable,
+                ErrorCode::AuthenticationFailed => ConnectorHealth::Unreachable,
+                ErrorCode::ProviderUnavailable => ConnectorHealth::Unreachable,
+                _ => ConnectorHealth::Unreachable,
+            };
+            engine
+                .fail(
+                    handle,
+                    DomainError {
+                        code: failure.code,
+                        message: "Dokploy synchronization failed.".into(),
+                        retryable: failure.retryable,
+                    },
+                    finished_at,
+                )
+                .map_err(|_| {
+                    safe_error(
+                        "sync_unavailable",
+                        "Dokploy synchronization could not finish.",
+                    )
+                })?;
+            connection.health = health;
+            store
+                .write(|store| store.upsert_connection(connection))
+                .map_err(|_| {
+                    safe_error(
+                        "connection_unavailable",
+                        "Dokploy connection status could not be saved.",
+                    )
+                })?;
+            return Err(safe_error(
+                "dokploy_sync_failed",
+                "Dokploy synchronization failed.",
+            ));
+        }
+    };
+    connection.health = health;
+    store
+        .write(|store| store.upsert_connection(connection))
+        .map_err(|_| {
+            safe_error(
+                "connection_unavailable",
+                "Dokploy connection status could not be saved.",
+            )
+        })?;
+    Ok(())
+}
+
 fn ssh_sync_error(code: ErrorCode) -> ErrorEnvelope {
     let code_str = match code {
         ErrorCode::HostKeyMismatch => "host_key_mismatch",
@@ -1262,12 +1612,28 @@ fn ssh_validation_error(code: ErrorCode) -> ErrorEnvelope {
         ErrorCode::HostKeyMismatch => "host_key_mismatch",
         ErrorCode::NetworkUnreachable => "network_unreachable",
         ErrorCode::AuthenticationFailed => "authentication_failed",
-        ErrorCode::ProviderUnavailable => "provider_unavailable",
+        ErrorCode::ProviderUnavailable => "provider_unreachable",
         ErrorCode::InvalidResponse => "invalid_response",
         ErrorCode::Internal => "internal",
         _ => "ssh_validation_failed",
     };
     safe_error(code_str, "SSH validation failed.")
+}
+
+#[allow(dead_code)]
+fn dokploy_validation_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("dokploy_validation_failed", &msg.into())
+}
+
+fn dokploy_unreachable_error(msg: impl Into<String>) -> ErrorEnvelope {
+    let mut e = safe_error("dokploy_unreachable", &msg.into());
+    e.retryable = true;
+    e
+}
+
+#[allow(dead_code)]
+fn dokploy_auth_error(msg: impl Into<String>) -> ErrorEnvelope {
+    safe_error("dokploy_auth_failed", &msg.into())
 }
 
 fn goal9_catalog() -> ConnectorCatalogSnapshot {
@@ -1504,6 +1870,32 @@ struct SshConnectResult {
     sync_run_id: String,
 }
 
+#[derive(Deserialize)]
+struct DokployValidateCommand {
+    url: String,
+    #[allow(unused)]
+    token: String,
+}
+
+#[derive(Serialize)]
+struct DokployValidateResult {
+    project_count: u64,
+}
+
+#[derive(Deserialize)]
+struct DokployConnectCommand {
+    display_name: String,
+    url: String,
+    #[allow(unused)]
+    token: String,
+}
+
+#[derive(Serialize)]
+struct DokployConnectResult {
+    connection_id: String,
+    sync_run_id: String,
+}
+
 #[tauri::command]
 async fn github_discover_repositories(
     request: GitHubRepositoryDiscoveryCommand,
@@ -1651,6 +2043,82 @@ async fn ssh_connect(
     request: SshConnectCommand,
 ) -> Result<SshConnectResult, ErrorEnvelope> {
     state.create_ssh_connection(request).await
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+async fn dokploy_validate(
+    _state: State<'_, AppState>,
+    request: DokployValidateCommand,
+) -> Result<DokployValidateResult, ErrorEnvelope> {
+    DokployEndpoint::new(&request.url)
+        .map_err(|_| dokploy_validation_error("Dokploy URL format is invalid."))?;
+    let secret = SecretValue::new(request.token.into_bytes());
+    let transport =
+        ReqwestDokployTransport::new().map_err(|e| dokploy_unreachable_error(e.to_string()))?;
+    let connector = DokployConnector::new(&request.url, transport)
+        .map_err(|e| dokploy_unreachable_error(e.to_string()))?;
+    let connection_id = ConnectionId::new(format!("dokploy-validate-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| dokploy_validation_error("Dokploy connection identifier is invalid."))?;
+    let connection = ConnectionInput {
+        connection_id,
+        connector_type: ConnectorType::new("dokploy").expect("static connector type"),
+        config: serde_json::json!({ "base_url": request.url }),
+        config_schema_version: SchemaVersion::new(1).expect("static schema version"),
+    };
+    let report = connector
+        .validate(
+            ValidationRequest {
+                connection: connection.clone(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| dokploy_unreachable_error(e.to_string()))?;
+    if report.status != ValidationStatus::Valid {
+        let code = report
+            .errors
+            .first()
+            .map(|issue| issue.code)
+            .unwrap_or(ErrorCode::InvalidDomainValue);
+        return Err(dokploy_validation_error(format!(
+            "Dokploy validation failed ({code:?})"
+        )));
+    }
+    let sync_run_id = SyncRunId::new(format!("dokploy-validate-sync-{}", uuid::Uuid::new_v4()))
+        .map_err(|_| dokploy_validation_error("Dokploy validation could not start."))?;
+    let scope = Scope::new("dokploy-validate")
+        .map_err(|_| dokploy_validation_error("Dokploy validation scope is invalid."))?;
+    let outcome = connector
+        .sync(
+            SyncRequest {
+                sync_run_id,
+                connection,
+                mode: SyncMode::Full,
+                scope,
+                cursor: None,
+                targeted_resources: Vec::new(),
+            },
+            Some(&secret),
+        )
+        .await
+        .map_err(|e| dokploy_validation_error(format!("Dokploy validation failed ({e:?})")))?;
+    let project_count = outcome
+        .batch()
+        .resources
+        .iter()
+        .filter(|resource| resource.kind.as_str() == "dokploy.project")
+        .count() as u64;
+    Ok(DokployValidateResult { project_count })
+}
+
+#[tauri::command]
+#[allow(dead_code)]
+async fn dokploy_connect(
+    state: State<'_, AppState>,
+    request: DokployConnectCommand,
+) -> Result<DokployConnectResult, ErrorEnvelope> {
+    state.create_dokploy_connection(request).await
 }
 
 #[tauri::command]
@@ -2082,6 +2550,54 @@ fn ssh_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
     }
 }
 
+fn dokploy_normalizer() -> Normalizer {
+    Normalizer::new(
+        [
+            dokploy_schema("dokploy.project", &["description"]),
+            dokploy_schema(
+                "dokploy.application",
+                &["project_id", "server_id", "environment_id"],
+            ),
+            dokploy_schema(
+                "dokploy.deployment",
+                &["application_id", "status", "created_at", "title"],
+            ),
+            dokploy_schema("dokploy.server", &["address", "description", "status"]),
+            dokploy_schema("dokploy.domain", &["application_id", "https", "path"]),
+        ],
+        [
+            dokploy_relation("dokploy.contains", "dokploy.project", "dokploy.application"),
+            dokploy_relation("dokploy.runs_on", "dokploy.application", "dokploy.server"),
+            dokploy_relation(
+                "dokploy.deploys",
+                "dokploy.application",
+                "dokploy.deployment",
+            ),
+            dokploy_relation("dokploy.exposes", "dokploy.application", "dokploy.domain"),
+        ],
+    )
+    .expect("static Dokploy schemas are valid")
+}
+
+fn dokploy_schema(kind: &str, fields: &[&str]) -> AttributeSchema {
+    AttributeSchema {
+        kind: ResourceKind::new(kind).expect("static resource kind"),
+        schema_version: SchemaVersion::new(1).expect("static schema version"),
+        allowed_attributes: fields
+            .iter()
+            .map(|field| (*field).into())
+            .collect::<BTreeSet<_>>(),
+    }
+}
+
+fn dokploy_relation(kind: &str, source: &str, target: &str) -> RelationSchema {
+    RelationSchema {
+        kind: next_infra_core::RelationKind::new(kind).expect("static relation kind"),
+        source_kind: ResourceKind::new(source).expect("static resource kind"),
+        target_kind: ResourceKind::new(target).expect("static resource kind"),
+    }
+}
+
 #[tauri::command]
 fn local_settings_get(
     app: AppHandle,
@@ -2188,7 +2704,7 @@ fn committed_query_context(
 /// True only for "github" today — single source of truth per plan §2.2.
 /// Other connectors use offline replay/fixtures and are NOT scheduled.
 pub(crate) fn has_live_sync_path(connector_type: &ConnectorType) -> bool {
-    connector_type.as_str() == "github" || connector_type.as_str() == "ssh"
+    matches!(connector_type.as_str(), "github" | "ssh" | "dokploy")
 }
 
 pub(crate) fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 {
@@ -2199,6 +2715,11 @@ pub(crate) fn query_sync_interval_millis(connector_type: &ConnectorType) -> u64 
     }
     if connector_type.as_str() == "ssh" {
         return ssh_descriptor()
+            .recommended_sync_interval_secs
+            .saturating_mul(1_000);
+    }
+    if connector_type.as_str() == "dokploy" {
+        return dokploy_descriptor()
             .recommended_sync_interval_secs
             .saturating_mul(1_000);
     }
@@ -2234,7 +2755,7 @@ mod tests {
             .collect::<Vec<_>>();
         for expected in [
             "supabase.managed.projects",
-            "supabase.self_hosted.service_api",
+            "supabase.self_hosted.tables",
             "aliyun.network.security_group",
             "tencent.edge.public_ip",
         ] {
@@ -2536,14 +3057,14 @@ mod tests {
     fn scheduler_non_live_sync_connection_not_registered() {
         let directory = test_home();
         let paths = IntegrationPaths::from_home(directory.path());
-        let conn_id = ConnectionId::new("dokploy-conn").unwrap();
+        let conn_id = ConnectionId::new("cloudflare-conn").unwrap();
         let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
         store
             .write(|s| {
                 s.upsert_connection(Connection {
                     connection_id: conn_id.clone(),
-                    connector_type: ConnectorType::new("dokploy").unwrap(),
-                    display_name: "Dokploy".into(),
+                    connector_type: ConnectorType::new("cloudflare").unwrap(),
+                    display_name: "Cloudflare".into(),
                     enabled: true,
                     config: serde_json::json!({}),
                     secret_ref: None,
@@ -2563,7 +3084,7 @@ mod tests {
         let rt = state.runtime().lock().unwrap();
         assert!(
             rt.scheduler().entry(&conn_id).is_none(),
-            "dokploy connection should not be registered"
+            "cloudflare connection should not be registered"
         );
         drop(rt);
         assert!(
