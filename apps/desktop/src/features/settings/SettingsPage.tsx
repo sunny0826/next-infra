@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { LocalSettings, RuntimeCapabilities } from "../../platform/desktop-adapter/desktop-adapter";
 import { displayRuntimeReason } from "../../i18n";
+import { useTheme } from "../../hooks/useTheme";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 
 import "./settings.css";
@@ -10,6 +11,7 @@ interface SettingsState { readonly settings: LocalSettings; readonly capabilitie
 
 export function SettingsPage() {
   const adapter = useDesktopAdapter();
+  const { theme, toggleTheme } = useTheme();
   const [state, setState] = useState<SettingsState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,6 +50,9 @@ export function SettingsPage() {
         <label className="settings-row"><div><strong>保留期限</strong><p>保留受限本地历史的天数。</p></div><input min="1" onChange={(event) => save({ ...settings, retention_days: Number(event.currentTarget.value) })} type="number" value={settings.retention_days} /></label>
       </section>
       <section aria-labelledby="settings-boundary"><h2 id="settings-boundary">安全边界</h2><div className="settings-notice">GitHub MVP 凭据保存在受限本地文件中；本页面不会显示 Secret 值或 SecretRef 标识符。</div></section>
+      <section aria-labelledby="settings-appearance"><h2 id="settings-appearance">外观</h2>
+        <div className="settings-row"><div><strong>主题</strong><p>在亮色与暗色之间切换显示。</p></div><button aria-pressed={theme === "light"} className="settings-switch" onClick={toggleTheme} type="button"><span />{theme === "light" ? "亮色" : "暗色"}</button></div>
+      </section>
     </div>
   );
 }
