@@ -1,0 +1,27 @@
+[package]
+name = "next-infra-live-smoke"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "next-infra-live-smoke"
+path = "src/main.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+next-infra-connector-api = { workspace = true }
+next-infra-connector-contract-tests = { workspace = true }
+next-infra-connector-dokploy = { workspace = true }
+next-infra-connector-cloudflare = { workspace = true }
+next-infra-connector-supabase-managed = { workspace = true }
+next-infra-connector-supabase-self-hosted = { workspace = true }
+next-infra-connector-aliyun = { workspace = true }
+next-infra-connector-tencent = { workspace = true }
+next-infra-core = { workspace = true }
+next-infra-connector-fixture = { workspace = true }
+reqwest = { workspace = true }
+tokio = { version = "=1.53.1", features = ["rt", "rt-multi-thread", "macros", "io-std", "sync"] }
+serde_json = { workspace = true }
+url = { workspace = true }

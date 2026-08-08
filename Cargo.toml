@@ -28,6 +28,7 @@ members = [
   "tests/integration/store-sync",
   "tests/integration/connector-pipeline",
   "tests/integration/topology/repo-deployment-host-dns",
+  "tests/live-smoke",
 ]
 resolver = "3"
 

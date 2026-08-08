@@ -103,6 +103,21 @@ const allowedNormal = new Map([
       "next-infra-store",
     ],
   ],
+  [
+    "next-infra-live-smoke",
+    [
+      "next-infra-connector-api",
+      "next-infra-connector-contract-tests",
+      "next-infra-connector-dokploy",
+      "next-infra-connector-cloudflare",
+      "next-infra-connector-supabase-managed",
+      "next-infra-connector-supabase-self-hosted",
+      "next-infra-connector-aliyun",
+      "next-infra-connector-tencent",
+      "next-infra-core",
+      "next-infra-connector-fixture",
+    ],
+  ],
 ]);
 
 const allowedDev = new Map([
@@ -198,8 +213,8 @@ for (const item of packages) {
   }
 }
 
-if (packages.length !== 28) {
-  failures.push(`workspace package count ${packages.length} != 28`);
+if (packages.length !== 29) {
+  failures.push(`workspace package count ${packages.length} != 29`);
 }
 
 if (failures.length > 0) {
