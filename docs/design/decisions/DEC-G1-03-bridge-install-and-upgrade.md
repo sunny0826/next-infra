@@ -185,7 +185,7 @@ Bridge 的顺序固定为：
 ### 6.3 卸载
 
 - 先禁用集成并删除 Integration Record，再移除 stable Bridge link 和 release directories。
-- 是否删除 App、SQLite、logs 和 Keychain items 是独立用户选择；默认保留本地数据与 Secret。
+- 是否删除 App、SQLite、logs 和 `connection_secrets` 是独立用户选择；默认保留本地数据与 Secret。
 - 不静默编辑 Codex/Hermes 配置；显示精确移除指引并允许用户确认。
 
 ## 7. 失败恢复
@@ -230,7 +230,7 @@ rtk proxy codex mcp add --help
 
 ## 9. 非目标与变更触发条件
 
-非目标：不实现 installer/updater，不修改用户 Agent 配置，不读取 SQLite/Keychain，不启用在线 updater，不安装 LaunchDaemon/helper，不支持 system-wide、多用户、远程 MCP 或 App Store。
+非目标：不实现 installer/updater，不修改用户 Agent 配置，不读取 SQLite/`connection_secrets`，不启用在线 updater，不安装 LaunchDaemon/helper，不支持 system-wide、多用户、远程 MCP 或 App Store。
 
 以下变化必须重开本决策：
 
@@ -244,7 +244,7 @@ rtk proxy codex mcp add --help
 
 - MCP 自动拉起的产品默认值已经固定为关闭；未来用户只能从 Desktop UI 显式开启。
 - 本地 Goal 1 不需要选择 release bundle ID、Team 或公证凭据，使用 Mock/Fixture 且不安装集成。
-- Developer ID 发布与真实 Keychain/auto-launch acceptance 仍受 `DEC-G1-04` 的外部身份条件阻塞，不能用 ad-hoc 结果替代。
+- Developer ID 发布与真实 auto-launch acceptance 仍受 `DEC-G1-04` 的外部身份条件阻塞（Keychain 方向已取消），不能用 ad-hoc 结果替代。
 - Codex/Hermes 用户配置变更需在 Goal 4 单独授权；当前不得执行。
 
 ## 11. 官方依据

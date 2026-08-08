@@ -21,7 +21,7 @@
 | Desktop UI | React/TypeScript SPA，通过受限 Tauri Commands 调用 Query Service，Events 仅通知失效 |
 | Agent 接入 | 独立 `next-infra-mcp` 通过 STDIO 接入客户端，再通过 Unix Domain Socket 查询 Desktop Host |
 | 外部连接 | 连接器通过厂商 API 或系统 OpenSSH 读取资源 |
-| 凭据 | 数据库只保存 `SecretRef`，真实秘密进入 macOS Keychain |
+| 凭据 | Secret 存 SQLite `connection_secrets`（plaintext BLOB）；Keychain 方向已取消（2026-08-07） |
 | 扩展方式 | 首版为编译期 Rust connector；运行时插件延后 |
 | 写操作 | 不进入首版；以后使用独立的 Plan、Approval、Execute、Verify 契约 |
 
@@ -37,7 +37,7 @@
 7. [Agent 接口与安全](./agent-interface-and-security.md)：MCP 工具、响应边界、本地通信和凭据策略。
 8. [界面与可视化设计](./visualization-and-interaction.md)：信息架构、视觉语义、拓扑边界和桌面交互状态。
 9. [串行 Goal 与并行任务](./implementation-goals.md)：定义不可跨越的 Goal 验收顺序。
-10. [Goal 1 决策索引](./decisions/README.md)：工具链、生命周期、Bridge、Keychain/签名的冻结状态与当前阻塞。
+10. [Goal 1 决策索引](./decisions/README.md)：工具链、生命周期、Bridge、签名/发布边界的冻结状态与当前阻塞（Keychain 方向已取消）。
 11. [Goal 1 独立 Review](./decisions/REVIEW-G1-2026-08-02.md)：记录工程入口首轮 blocker、修复和 fresh re-review。
 12. [Goal 1 Gate 报告](../tasks/GATE-G1-2026-08-03.md)：记录冻结合同、真实 Desktop 截图与进入 Goal 2 的唯一结论。
 13. [文档 Review 报告](./REVIEW-2026-08-02.md)：记录 Tauri 架构调整后的审查发现、修复和保留风险。

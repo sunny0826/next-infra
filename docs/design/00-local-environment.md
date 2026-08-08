@@ -18,7 +18,7 @@
 | SQLite | sqlite3 3.50.6；JSON 函数可用；系统构建未启用 FTS5 | 首版搜索不依赖系统 FTS5；应用需自带能力明确的 SQLite 构建或使用普通索引 |
 | PostgreSQL | psql 18.3 客户端可用 | 不代表本地服务可用；单实例设计不采用 PostgreSQL |
 | SSH | OpenSSH 10.2p1 | SSH Connector 优先复用系统 OpenSSH 与用户现有 SSH 配置 |
-| 凭据存储 | macOS `security`/Keychain 可用；FileVault 已开启 | 秘密进入 Keychain，SQLite 只保留引用；本地数据受系统磁盘加密保护 |
+| 凭据存储 | macOS `security`/Keychain 可用；FileVault 已开启 | 秘密进入 SQLite `connection_secrets`（plaintext BLOB，0600 DB/0700 目录）；本地数据受系统磁盘加密保护 |
 | 进程托管 | launchd/launchctl 可用 | Tauri Autostart 可使用用户级 LaunchAgent；不需要独立 daemon 服务定义 |
 | 原生构建 | Xcode 与 Apple Clang 可用 | Tauri、Rust 原生依赖和 macOS App Bundle 的构建前置条件完整 |
 | Git/GitHub | Git 2.53.0、GitHub CLI 2.96.0 | 后续可执行版本控制和 GitHub Connector 本地验收 |
@@ -46,13 +46,13 @@
 
 生产形态是本机原生进程。Docker 只可用于可选的集成测试、模拟服务或发布验证，不能成为启动 Next Infra 的必要条件。
 
-### 2.3 使用 Tauri Desktop Host、LaunchAgent 和 Keychain
+### 2.3 使用 Tauri Desktop Host、LaunchAgent 和 SQLite Secrets
 
 - Tauri Desktop Host 以当前用户身份运行，不申请 root 权限。
 - 应用关闭主窗口后继续驻留托盘；只有显式退出才停止 Control Plane Runtime。
 - 自动登录启动由 Tauri Autostart 以用户级 LaunchAgent 实现，业务调度仍由 Control Plane Runtime 管理。
-- API Token、PAT、云 Access Key 等秘密通过受限 Tauri Command 或标准输入进入 Keychain。
-- 不允许在 CLI 参数、shell rc、SQLite、日志或导出文件中保存明文秘密。
+- API Token、PAT，云 Access Key 等秘密通过受限 Tauri Command 或标准输入存入 SQLite `connection_secrets` 表。
+- 不允许在 CLI 参数、shell rc、日志或导出文件中保存明文秘密。
 
 Tauri 只是桌面宿主：领域、同步、存储和 Query Service 必须保留为不依赖 Tauri 的 Rust crate，以便独立测试，并为未来可选 headless host 保留边界。
 
@@ -119,4 +119,4 @@ SQLite JSON 与 FTS5 分别使用最小内存数据库进行了能力探测：JS
 - Hermes 尚未安装，因此只能完成协议级设计，不能声明 Hermes 端到端验收通过。
 - 远程 Mac mini、云主机的 SSH 地址、Host Key 和网络路径尚未提供，不能验证 SSH Connector 可达性。
 - 各厂商只读凭据尚未配置，不能验证 API 权限覆盖与速率限制。
-- 正式 release bundle ID、Apple Team、Developer ID certificate/profile 与公证凭据尚未提供；本地 Mock/Fixture 开发不受阻，发布与真实 Keychain smoke 保持阻塞。
+- 正式 release bundle ID、Apple Team、Developer ID certificate/profile 与公证凭据尚未提供；本地 Mock/Fixture 开发不受阻，发布保持阻塞。

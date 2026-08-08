@@ -121,7 +121,7 @@ Connector 错误必须结构化分类：
 
 - 网络超时、429 和明确的 5xx 可以按 Provider 提示退避。
 - 认证、权限、Host Key、schema 错误不自动高频重试。
-- Keychain 暂时不可用或需要用户解锁时返回 `credential_unavailable`，不得循环弹窗或退化为错误的 Provider 密码。
+- SQLite `connection_secrets` 行缺失或读取失败时返回 `credential_unavailable`，不得循环弹窗或退化为错误的 Provider 密码。
 - 重试不能把一个 partial run 伪装成 authoritative full run。
 - UI 显示“资源状态未知/数据过期”和“Connector 失败”的区别。
 
@@ -136,7 +136,7 @@ Connector 错误必须结构化分类：
 - 探针 profile。
 - 允许读取的服务清单。
 
-认证由 SSH Agent、Keychain 或用户已有 IdentityFile 完成。Next Infra 不复制私钥，也不接受私钥内容作为 Connector 配置。
+认证由 SSH Agent 或用户已有 IdentityFile 完成。Next Infra 不复制私钥，也不接受私钥内容作为 Connector 配置。
 
 ### 6.2 固定探针
 
@@ -170,7 +170,7 @@ Connector 错误必须结构化分类：
 - Environment、Deployment 状态。
 - Repository 与 Workflow 的明确关系。
 
-默认不下载或持久化完整 Actions 日志和工件。认证优先采用 GitHub App 或细粒度 Token，秘密存入 Keychain。
+默认不下载或持久化完整 Actions 日志和工件。认证优先采用 GitHub App 或细粒度 Token，秘密存入 SQLite `connection_secrets`。
 
 ### 7.2 Dokploy
 

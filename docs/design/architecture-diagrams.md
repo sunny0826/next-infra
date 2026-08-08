@@ -48,7 +48,7 @@ flowchart LR
 
         Bridge["next-infra-mcp / STDIO MCP Bridge / 短生命周期"]
         SQLite[("SQLite Read Model + Limited History")]
-        Keychain["macOS Keychain / Secret Values"]
+        Secrets[("SQLite connection_secrets / Secret Values")]
     end
 
     User --> UI
@@ -64,7 +64,7 @@ flowchart LR
     Connectors --> ProviderAccess
     Connectors --> Normalizer
     Normalizer --> Writer
-    Connectors -->|"temporary Secret access"| Keychain
+    Connectors -->|"temporary Secret access"| Secrets
     Writer --> SQLite
     Query --> SQLite
 ```
@@ -74,7 +74,7 @@ flowchart LR
 1. 只有 Desktop Host 是 Next Infra 的长生命周期应用实例。
 2. Tauri 负责宿主与适配，不定义领域模型、同步或查询语义。
 3. React 与 Agent 最终进入同一个 Query Service。
-4. MCP Bridge 不读取 SQLite、Keychain，也不运行 Connector。
+4. MCP Bridge 不读取 `connection_secrets`，也不运行 Connector。
 5. 外部 Provider 只通过只读 Connector 进入首版系统。
 
 ## 2. 进程与所有权边界
@@ -100,7 +100,7 @@ flowchart TB
     end
 
     SQLite[("next-infra.db")]
-    Keychain["Keychain items"]
+    Secrets[("SQLite connection_secrets")]
 
     Codex --> BridgeA
     Hermes --> BridgeB
@@ -111,14 +111,14 @@ flowchart TB
     RustRuntime --> SocketOwner
     RustRuntime --> DBWriter
     DBWriter --> SQLite
-    RustRuntime --> Keychain
+    RustRuntime --> Secrets
 ```
 
 所有权规则：
 
 - 同一用户只有一个 Desktop Host、一个 Control Plane Runtime、一个 Socket owner 和一个 SQLite Writer。
 - 可以同时存在多个 MCP Bridge，但它们只是本地查询客户端。
-- 操作系统可能为 WebView 创建辅助进程；它们不算第二个 Desktop Host，也不能拥有 SQLite、Socket 或 Keychain 访问边界。
+- 操作系统可能为 WebView 创建辅助进程；它们不算第二个 Desktop Host，也不能拥有 SQLite、Socket 或 connection_secrets 访问边界。
 - 第二次启动 Desktop App 只激活现有实例，不能创建新的 Runtime。
 
 ## 3. Runtime 组件结构
@@ -149,7 +149,7 @@ flowchart LR
     subgraph Outbound["Outbound adapters"]
         Connectors["Compiled Read Connectors"]
         Store["SQLite Store"]
-        Secrets["macOS Keychain SecretProvider"]
+        Secrets["SQLite connection_secrets SecretProvider"]
         OpenSSH["System OpenSSH fixed probes"]
     end
 
@@ -183,7 +183,7 @@ flowchart LR
 
 - Inbound adapter 只做传输、参数校验、DTO 转换和错误清洗。
 - Application service 编排用例，但不把 Provider 特性塞进通用查询协议。
-- Domain core 不依赖 Tauri、MCP、SQLite、Keychain 或具体 Provider SDK。
+- Domain core 不依赖 Tauri、MCP、SQLite、`connection_secrets` 或具体 Provider SDK。
 - Outbound adapter 实现 Core 定义的端口；Connector 不能直接持有数据库写连接。
 - 本图是逻辑依赖约束，具体 crate 切分在 Goal 1 冻结。
 
@@ -344,8 +344,8 @@ flowchart TD
 
 ```text
 core/store/sync/query/runtime/local-rpc/mcp/connector-* -> Tauri
-React -> SQLite / Keychain / Provider SDK / system shell
-MCP Bridge -> SQLite / Keychain / Connector
+React -> SQLite / connection_secrets / Provider SDK / system shell
+MCP Bridge -> SQLite / connection_secrets / Connector
 Connector -> SQLite writer
 ```
 

@@ -94,7 +94,7 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 | --- | --- | --- | --- |
 | 1 | `DEC-G1-01/02/04` 并行 → `DEC-G1-03` → `DEC-G1-05` 合并 → `DEC-G1-06` 独立 Review → `RHM-G1-01` | Bootstrap 后 `UI-G1-01` 与 `UI-G1-02`；随后 `UI-G1-03`，再执行 `UI-G1-04` | `GATE-G1` |
 | 2 | `RHM-G2-01` Domain | `RHM-G2-02` Migration 与 `CON-G2-01` Connector API | Store、Sync、Normalizer、Fixture、Contract Tests 分支 | `GATE-G2` |
-| 3 | `RHM-G3-01` Query/QDTO | Runtime、Host、Keychain、Adapter、UI Foundation | 页面分支 → Shell 集成 → QA | `GATE-G3` |
+| 3 | `RHM-G3-01` Query/QDTO | Runtime、Host、Adapter、UI Foundation | 页面分支 → Shell 集成 → QA | `GATE-G3` |
 | 4 | `RHM-G4-01` RPC Contract | Unix Socket、STDIO MCP、Host Availability | Agent/security E2E | `GATE-G4` |
 | 5 | GitHub transport/descriptor | Repository 分支与 Actions 分支 | GitHub 纵切 | `GATE-G5` |
 | 6 | OpenSSH transport/probe registry | 通用、macOS、Linux probe | SSH security/partial 纵切 | `GATE-G6` |
@@ -205,13 +205,13 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 - **验收：** 任意可执行路径和 Agent 参数不能授予启动权限；版本不兼容时拒绝连接。
 - **验证：** 安装/升级/降级场景表和 threat review。
 
-### `DEC-G1-04` — Keychain、签名与发布边界冻结
+### `DEC-G1-04` — 签名与发布边界冻结
 
-- **状态：** `DONE`（技术边界；发布身份仍 `BLOCKED`）
-- **目标：** 固定 Keychain service/account 命名、签名 ACL、锁屏/后台不可用语义、首版签名/公证/更新边界。
+- **状态：** `SUPERSEDED`（Keychain 方向于 2026-08-07 用户决策取消）
+- **目标：** ~~Keychain service/account 命名~~；签名/发布边界仍为未来 gate。
 - **依赖：** 当前 macOS 环境报告。
 - **独占路径：** `docs/design/decisions/DEC-G1-04-keychain-signing.md`。
-- **非目标：** 不创建 Keychain item、不签名或公证 App、不处理真实 Secret。
+- **非目标：** ~~不创建 Keychain item~~；不签名或公证 App、不处理真实 Secret。
 - **验收：** SQLite 只保存 `SecretRef`；开发签名、Developer ID 和后台访问分别有真实验证路径。
 - **验证：** secret-flow diagram review、命名冲突检查和环境阻塞项扫描。
 
@@ -283,7 +283,7 @@ Gate Captain 必须：
 - **非目标：** 不创建数据库表、Provider、MCP tools 或业务页面。
 - **验收：** 真实 Tauri App 启动并退出；Core 独立测试；Mock/Empty Adapter 启动；Rust→TS binding drift guard；独立 Bridge target；无 Provider SDK/credential。
 - **验证：** 必须完整执行 [`DEC-G1-01`](../design/decisions/DEC-G1-01-toolchain-and-crates.md#8-goal-1-验证合同) 的冻结合同，并补充 `cargo fmt --all --check`、Desktop lint/test 和真实 App 启动/退出 smoke；不得以 `RHM-G1-01` 的阶段性子集替代。
-- **风险/停止：** toolchain、签名或 target ambiguity 失败时区分环境和实现根因；未通过不得进入 Goal 2。
+- **风险/停止：** toolchain、签名或 target ambiguity 失败时区分环境和实现根因；未通过不得进入 Goal 2。**注（2026-08-07）：** Keychain 方向已取消，Secret 存 SQLite `connection_secrets`。
 
 ### `GATE-G2` — Domain、Connector 与 SQLite 验收门
 

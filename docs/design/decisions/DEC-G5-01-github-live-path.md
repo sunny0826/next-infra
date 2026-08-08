@@ -3,13 +3,13 @@
 - **状态：** Accepted for local-file GitHub MVP
 - **日期：** 2026-08-07
 - **适用范围：** GitHub 连接创建、凭据本地保存、只读验证/同步与桌面展示
-- **不构成：** 外部写操作、Keychain、OAuth/GitHub App、MCP 实测、签名/公证或其他 Provider 的连接流程
+- **不构成：** 外部写操作、OAuth/GitHub App、MCP 实测、签名/公证或其他 Provider 的连接流程
 
 ## 1. 决策
 
 首个真实数据路径是 GitHub。用户在 Desktop 的 Connectors 页面输入 fine-grained PAT 后，Desktop Host 先以 `/user` 做只读验证，并以单页、最多 100 个结果的 `/user/repos` 列出可访问仓库。用户必须明确勾选至少一个仓库；验证通过后创建本地 connection，保存 token，并立即执行一次仅覆盖这些仓库的 `Full` 只读同步。后续从同页发起的 Manual Sync 保持相同范围，不会默认同步整个 GitHub 账户。
 
-MVP 不改变 Core 的 `SecretRef` 或 SQLite 合同：`Connection.secret_ref` 保持 `None`，token 只按 `ConnectionId` 保存在应用数据目录的私有文件中。Keychain 与 Apple identity 是低优先级的后续强化项，不阻塞本机单用户路径。
+MVP 不改变 Core 的 `SecretRef` 或 SQLite 合同：`Connection.secret_ref` 保持 `None`，token 按 `ConnectionId` 保存在 SQLite `connection_secrets` 表。**Keychain 方向已取消（2026-08-07 用户决策）**；Apple identity 是低优先级的后续强化项，不阻塞本机单用户路径。
 
 ## 2. 凭据边界
 
@@ -40,4 +40,4 @@ MVP 不改变 Core 的 `SecretRef` 或 SQLite 合同：`Connection.secret_ref` �
 
 真实响应不得写入 fixture、日志、错误、文档或验收记录。任何人工报告只可包含结构化错误码、health、coverage 和计数；不得包含 token、owner/repository 名、路径、URL、IP 或 payload。
 
-MCP、Codex/Hermes、SSH、其他 Provider、Keychain 与签名 smoke 继续保持低优先级和独立验收边界。
+MCP、Codex/Hermes、SSH、其他 Provider 与签名 smoke 继续保持低优先级和独立验收边界（Keychain 方向已取消）。

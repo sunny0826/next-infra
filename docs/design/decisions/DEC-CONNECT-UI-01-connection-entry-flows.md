@@ -3,7 +3,7 @@
 **状态:** Proposed
 **日期:** 2026-08-08
 **适用范围:** SSH / Dokploy / Cloudflare / Supabase managed / Supabase self-hosted / Aliyun / Tencent 共 6 类凭据模型的建连 UI 流程
-**不构成:** 通用 Secret 文本框；Keychain 迁移；多 Provider 混合表单；Provider 写操作
+**不构成:** 通用 Secret 文本框；Keychain 迁移（2026-08-07 用户决策取消）；多 Provider 混合表单；Provider 写操作
 
 ---
 
@@ -13,7 +13,7 @@
 
 不使用通用 Secret 文本框。不同 Provider 的字段形状、校验方式和范围选择逻辑不可对齐到同一组件。
 
-每类模型均复用现有的 `connector.validate` 接口作为后端校验入口。Secret 沿用 GitHub 的瞬时传递+本地受限文件模式（Keychain 迁移为后续独立决策）。
+每类模型均复用现有的 `connector.validate` 接口作为后端校验入口。Secret 存 SQLite `connection_secrets` 表（plaintext BLOB，0600 DB/0700 目录，FK 级联清理）；**Keychain 方向已取消（2026-08-07 用户决策）**，不再有 Keychain 迁移计划。
 
 ---
 
@@ -22,16 +22,16 @@
 | Provider | Connector Type | 凭据字段 | 敏感度 | 存储建议 | 校验入口 | 范围选择 | 同步触发 |
 |---|---|---|---|---|---|---|---|
 | SSH | `ssh` | `host_alias`（字符串别名，无 Secret）| 低 | `allowed_service_ids` 存入 SQLite config，其余仅内存 | `connector.validate`（SSH Agent 或 config 检查）| 无范围（probe 对固定 alias 执行）| 建连后触发首次 probe，扩展 scheduler 需要新增 `spawn_*_sync` |
-| Dokploy | `dokploy` | `url` + `token`（Bearer）| 高 | Token 文件 `0700/0600`，参照 `github_live.rs` | `connector.validate`（/v1/user）| 无范围（全量 Project/Application/Server/Domain）| 建连后后台首次同步，扩展 scheduler 同上 |
-| Cloudflare | `cloudflare` | `token`（API Token）| 高 | Token 文件 `0700/0600` | `connector.validate`（/user/tokens/verify）| 无范围（全量 Account/Zone）；用户录入时提示 token 权限范围 | 同上 |
-| Supabase managed | `supabase-managed` | `token`（Bearer access token）| 高 | Token 文件 `0700/0600` | `connector.validate`（/v1/projects）| 无范围（全量 Organization/Project）；用户只需提供 token | 同上 |
-| Supabase self-hosted | `supabase-self-hosted` | `url` + `token`（service key）| 高 | Token 文件 `0700/0600` | `connector.validate`（连接性检查）| 无范围（Service/DB/Runtime 三类 source）| 同上 |
-| Aliyun | `aliyun` | `access_key_id` + `secret_access_key`（HMAC-SHA1 签名）| 高 | 两字段存入同一 Token 文件 `0700/0600` | `connector.validate`（DescribeRegions 或类似）| 需要用户指定 `region`（云厂商必须指定同步区域）；默认空，验证时返回需要 region 的错误 | 同上 |
-| Tencent | `tencent` | `secret_id` + `secret_key`（TC3-HMAC-SHA256 签名）| 高 | 两字段存入同一 Token 文件 `0700/0600` | `connector.validate`（ DescribeInstances）| 需要用户指定 `region`；默认空，验证时返回需要 region 的错误 | 同上 |
+| Dokploy | `dokploy` | `url` + `token`（Bearer）| 高 | SQLite `connection_secrets`（BLOB，0600 DB/0700 目录，FK 级联清理）| `connector.validate`（/v1/user）| 无范围（全量 Project/Application/Server/Domain）| 建连后后台首次同步，扩展 scheduler 同上 |
+| Cloudflare | `cloudflare` | `token`（API Token）| 高 | SQLite `connection_secrets` | `connector.validate`（/user/tokens/verify）| 无范围（全量 Account/Zone）；用户录入时提示 token 权限范围 | 同上 |
+| Supabase managed | `supabase-managed` | `token`（Bearer access token）| 高 | SQLite `connection_secrets` | `connector.validate`（/v1/projects）| 无范围（全量 Organization/Project）；用户只需提供 token | 同上 |
+| Supabase self-hosted | `supabase-self-hosted` | `url` + `token`（service key）| 高 | SQLite `connection_secrets` | `connector.validate`（连接性检查）| 无范围（Service/DB/Runtime 三类 source）| 同上 |
+| Aliyun | `aliyun` | `access_key_id` + `secret_access_key`（HMAC-SHA1 签名）| 高 | SQLite `connection_secrets` | `connector.validate`（DescribeRegions 或类似）| 需要用户指定 `region`（云厂商必须指定同步区域）；默认空，验证时返回需要 region 的错误 | 同上 |
+| Tencent | `tencent` | `secret_id` + `secret_key`（TC3-HMAC-SHA256 签名）| 高 | SQLite `connection_secrets` | `connector.validate`（ DescribeInstances）| 需要用户指定 `region`；默认空，验证时返回需要 region 的错误 | 同上 |
 
 **关键约束：**
-- Token 文件命名：`{provider}-secrets-v1/{connection-id}.{ext}`，目录 `0700`，文件 `0600`。
-- SQLite 只存 `Connection.config`（非敏感字段如 `host_alias`、`url`、`region`）和 `Connection.secret_ref`（指向文件的路径或引用），不存明文 Secret。
+- Secret 统一存 SQLite `connection_secrets` 表（BLOB，0600 DB/0700 目录，FK 级联清理）。
+- SQLite 只存 `Connection.config`（非敏感字段如 `host_alias`、`url`、`region`）和 `Connection.secret_ref`（指向 SQLite `connection_secrets` 的引用），不存明文 Secret。
 - 所有 Provider 的 `connector.validate` 已在各 connector 实现中定义（详见各 `lib.rs` 的 `validate` 方法）。
 
 ---
@@ -83,7 +83,7 @@
 
 **后端命令（新增）：**
 - `dokploy_validate(request: DokployValidateRequest) -> DokployValidateResult`：调用 `/v1/user` 验证 token 可达性，返回已访问项目数/应用数摘要（不入 SQLite，不记录原始响应）。
-- `dokploy_connect(request: DokployConnectRequest) -> DokployConnectResult`：创建 Connection，config 含 `url`（非敏感），secret 存文件，建连后触发首次 Full 同步。
+- `dokploy_connect(request: DokployConnectRequest) -> DokployConnectResult`：创建 Connection，config 含 `url`（非敏感），secret 存 SQLite `connection_secrets`，建连后触发首次 Full 同步。
 
 **范围选择：** 无范围选择（Full sync 全量 Project/Application/Server/Domain）。验证通过后直接创建连接。
 
@@ -109,7 +109,7 @@
 
 **后端命令（新增）：**
 - `cloudflare_validate(request: CloudflareValidateRequest) -> CloudflareValidateResult`：调用 `/user/tokens/verify`，返回账户 email/id 摘要。
-- `cloudflare_connect(request: CloudflareConnectRequest) -> CloudflareConnectResult`：创建 Connection，secret 存文件，触发首次 Full 同步。
+- `cloudflare_connect(request: CloudflareConnectRequest) -> CloudflareConnectResult`：创建 Connection，secret 存 SQLite `connection_secrets`，触发首次 Full 同步。
 
 **范围选择：** 无范围选择（Full sync 全量 Account/Zone/DNS/Tunnel/Worker 元数据）。验证时展示 token 权限范围摘要（账户级别/Zone 级别）。
 
@@ -137,7 +137,7 @@
 
 **后端命令（新增）：**
 - `supabase_managed_validate(request: SupabaseManagedValidateRequest) -> SupabaseManagedValidateResult`：调用 `/v1/projects`，返回 Organization + Project 数量摘要。
-- `supabase_managed_connect(request: SupabaseManagedConnectRequest) -> SupabaseManagedConnectResult`：创建 Connection，secret 存文件，触发首次 Full 同步。
+- `supabase_managed_connect(request: SupabaseManagedConnectRequest) -> SupabaseManagedConnectResult`：创建 Connection，secret 存 SQLite `connection_secrets`，触发首次 Full 同步。
 
 **范围选择：** 无范围选择（Full sync 全量 Organization/Project）。
 
@@ -166,7 +166,7 @@
 
 **后端命令（新增）：**
 - `supabase_self_hosted_validate(request: SupabaseSelfHostedValidateRequest) -> SupabaseSelfHostedValidateResult`：尝试读取三类 source（ServiceApi / PostgresMetadata / FixedSshProbe），返回可用 source 列表摘要。
-- `supabase_self_hosted_connect(request: SupabaseSelfHostedConnectRequest) -> SupabaseSelfHostedConnectResult`：创建 Connection，config 含 `url`（非敏感），secret 存文件，触发首次 Full 同步。
+- `supabase_self_hosted_connect(request: SupabaseSelfHostedConnectRequest) -> SupabaseSelfHostedConnectResult`：创建 Connection，config 含 `url`（非敏感），secret 存 SQLite `connection_secrets`，触发首次 Full 同步。
 
 **范围选择：** 无范围选择。
 
@@ -196,7 +196,7 @@
 
 **后端命令（新增）：**
 - `aliyun_validate(request: AliyunValidateRequest) -> AliyunValidateResult`：用 `access_key_id` + `secret_access_key` 构造 HMAC-SHA1 签名调用 `DescribeRegions`，返回可用模块摘要。`region` 字段为空时返回 `invalid_region` 错误。
-- `aliyun_connect(request: AliyunConnectRequest) -> AliyunConnectResult`：创建 Connection，config 含 `access_key_id`（非敏感）和 `region`；`secret_access_key` 存文件；触发首次 Full 同步。
+- `aliyun_connect(request: AliyunConnectRequest) -> AliyunConnectResult`：创建 Connection，config 含 `access_key_id`（非敏感）和 `region`；`secret_access_key` 存 SQLite `connection_secrets`；触发首次 Full 同步。
 
 **范围选择：** `region` 是必填字段，不是范围选择。同步覆盖该 region 下的 ECS/VPC/SLB/DNS/EIP 模块。
 
@@ -226,7 +226,7 @@
 
 **后端命令（新增）：**
 - `tencent_validate(request: TencentValidateRequest) -> TencentValidateResult`：用 `secret_id` + `secret_key` 构造 TC3-HMAC-SHA256 签名调用 `DescribeInstances`，返回可用模块摘要。`region` 为空时返回 `invalid_region` 错误。
-- `tencent_connect(request: TencentConnectRequest) -> TencentConnectResult`：创建 Connection，config 含 `secret_id`（非敏感）和 `region`；`secret_key` 存文件；触发首次 Full 同步。
+- `tencent_connect(request: TencentConnectRequest) -> TencentConnectResult`：创建 Connection，config 含 `secret_id`（非敏感）和 `region`；`secret_key` 存 SQLite `connection_secrets`；触发首次 Full 同步。
 
 **范围选择：** `region` 是必填字段。
 
@@ -247,7 +247,7 @@
 | 验证通过 | `ok` | — |
 | Token/Secret 无效 | `authentication_failed` | false |
 | 权限不足 | `permission_denied` | false |
-| 凭据不可达（文件缺失/权限错误）| `credential_unavailable` | false |
+| 凭据不可达（SQLite `connection_secrets` 缺失或读取失败）| `credential_unavailable` | false |
 | 网络/Provider 不可达 | `unreachable` | true |
 | 限流 | `rate_limited` | true |
 | Region 缺失（Aliyun/Tencent）| `invalid_region` | false |
@@ -262,8 +262,8 @@
 
 ## 5. 非目标与开放决策
 
-### 5.1 Keychain 迁移
-当前所有 Secret 存本地受限文件（`0700/0600`），沿用 GitHub MVP 模式。Keychain 是后续独立决策（`DEC-G1-04` 已定义技术边界），不阻塞当前 6 类 Provider 的建连 UI。
+### 5.1 Keychain 迁移（已取消）
+**Keychain 方向已取消（2026-08-07 用户决策）**：所有 Secret 存 SQLite `connection_secrets`（plaintext BLOB），不追求 Keychain 迁移，`DEC-G1-04` 已修订。
 
 ### 5.2 SSH 探针预算与即同步
 SSH `probe_profile` 固定 `baseline-v1`（6 个 probe，硬预算）。验证阶段执行 probe；连接创建后触发首次 probe 同步。**开放决策：** 是否在建连后立即同步，还是等待首次 scheduler 周期（当前 scheduler 只支持 github，需要新增 `spawn_ssh_sync` 入口）。
@@ -296,7 +296,7 @@ Aliyun 和 Tencent 的 `region` 字段**无默认值**，验证时若 region 为
 | 验证通过但取消建连 | Connection 不创建，Secret 文件不写入 |
 | 验证失败（invalid token）| 展示 `authentication_failed` 消息，不闪退 |
 | 验证失败（permission_denied）| 展示具体缺少的权限，不闪退 |
-| Token 文件缺失导致同步失败 | `credential_unavailable`，scheduler skip 不 panic |
+| Secret 缺失（SQLite `connection_secrets` 行缺失）导致同步失败 | `credential_unavailable`，scheduler skip 不 panic |
 | Region 缺失（Aliyun/Tencent）| 验证返回 `invalid_region`，表单阻止提交 |
 | Secret 输入框提交后清空 | React state 为空字符串 |
 
@@ -330,7 +330,7 @@ Aliyun 和 Tencent 的 `region` 字段**无默认值**，验证时若 region 为
 **Tauri Host（Rust）：**
 - `apps/desktop/src-tauri/src/composition/mod.rs`：新增 6×4=24 个 Tauri 命令注册（validate/connect/preview_purge/purge × 6 providers）；扩展 `has_live_sync_path` 分支
 - `apps/desktop/src-tauri/src/scheduled_sync.rs`：新增 `spawn_{provider}_sync` 函数，扩展 scheduler tick 中的 provider 分支
-- 新增 `apps/desktop/src-tauri/src/{provider}_live.rs`（如 `ssh_live.rs`、`dokploy_live.rs` 等），参照 `github_live.rs` 实现 Secret 文件读写
+- Secret 统一通过 `Store::upsert_connection_secret` / `Store::connection_secret` 存入/读取 SQLite `connection_secrets` 表
 
 **Connector（无变更，仅引用）：**
 - 各 connector 的 `validate` 方法已在代码中实现，无需修改

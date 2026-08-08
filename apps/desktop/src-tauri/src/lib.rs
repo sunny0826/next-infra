@@ -11,7 +11,6 @@ use tauri::Manager;
 pub mod adapter;
 pub mod composition;
 pub mod host;
-pub mod keychain;
 pub mod scheduled_sync;
 
 pub fn run() -> Result<(), String> {

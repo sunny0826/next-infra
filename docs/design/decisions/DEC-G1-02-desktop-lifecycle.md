@@ -231,7 +231,7 @@ rtk test pnpm --dir apps/desktop test:desktop-smoke
 
 - 不实现 lifecycle、LaunchAgent、AppKit observer、Runtime、smoke harness，也不创建工程配置或 migration。
 - 不决定 MCP Bridge 安装路径、签名验证和原子升级；这些属于 `DEC-G1-03`。
-- 不决定 Keychain、Developer ID、公证和更新发布渠道；这些属于 `DEC-G1-04`。
+- 不决定 Developer ID、公证和更新发布渠道；这些属于 `DEC-G1-04`（Keychain 方向已取消）。
 - 不引入 daemon/helper/XPC/长期子进程，不允许 Agent、Provider 内容、deep link 或 argv 改变授权。
 - 不把 close-to-hide 改成销毁 WebView，也不把 WebView reload 当成 Runtime restart。
 
@@ -250,4 +250,4 @@ rtk test pnpm --dir apps/desktop test:desktop-smoke
 
 生命周期语义已唯一；仍需用户确认首次引导是否推荐 autostart（默认仍关闭）、由 `DEC-G1-03` 决定 MCP 自动拉起授权与可信 App Bundle 路径、由 `DEC-G1-04` 决定签名/公证/更新渠道。
 
-这些项目不改变 close、Quit、sleep/wake 和 `user_quit` 语义；`DEC-G1-03/04` 已完成并合并，本地 Goal 1 可以开始，发布与真实 Keychain 验收仍受外部身份条件约束。
+这些项目不改变 close、Quit、sleep/wake 和 `user_quit` 语义；`DEC-G1-03/04` 已完成并合并，本地 Goal 1 可以开始，发布仍受外部身份条件约束（Keychain 方向已取消）。

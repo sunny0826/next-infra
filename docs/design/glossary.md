@@ -34,7 +34,7 @@
 | Normalizer | 规范化器 | 对 ObservationBatch 做字段白名单、Schema 验证、Fingerprint 和敏感字段检查 | 不是通用原始 JSON 存储 |
 | Writer | 单写入者 | 唯一串行化 SQLite 业务写事务的 Runtime 组件 | 不是 Connector 内部数据库连接 |
 | Store | 存储适配器 | SQLite 投影、历史、migration、查询与受控维护的 Rust adapter | SQLite 是实现；Store 是端口实现 |
-| SecretProvider | 秘密提供器 | 通过 SecretRef 临时访问 Keychain item 的 Rust 端口与实现 | 不向 React、MCP 或日志返回 Secret 值 |
+| SecretProvider | 秘密提供器 | 通过 SecretRef 临时访问 SQLite connection_secrets 的 Rust 端口与实现 | 不向 React、MCP 或日志返回 Secret 值 |
 
 ## 3. Provider 接入术语
 
@@ -75,7 +75,7 @@
 | Fingerprint | 语义指纹 | 对排序稳定、已规范化且已清洗内容计算的摘要 | 用于判断是否创建新 Version |
 | Projection | 当前投影 | 从已提交观察和本地 Binding 计算出的最新 Resource/Relation 状态 | SQLite 是本地物化视图，不是外部事实源 |
 | Snapshot | 查询快照 | Query Service 返回的一次有版本、时间和边界的已提交结果 | 不等于实时 Provider 状态 |
-| SecretRef | 秘密引用 | SQLite 中指向 Keychain item 的非秘密内部引用 | 不是密文，也不能由 MCP 读取 Secret |
+| SecretRef | 秘密引用 | SQLite 中指向 connection_secrets 行的非秘密内部引用 | 不是密文，也不能由 MCP 读取 Secret |
 
 ## 5. 状态与时间术语
 
@@ -122,7 +122,7 @@ Connector Health: auth_failed
 | 错误 | 含义 | UI/MCP 行为 |
 | --- | --- | --- |
 | `host_unavailable` | Desktop Host 未运行、未授权自动拉起、启动失败、超时或被 `user_quit` 抑制 | 不伪装成空结果，返回无秘密处理指引 |
-| `credential_unavailable` | Keychain 暂不可用或需要用户处理 | 不循环弹窗，不退化为错误 Provider 密码 |
+| `credential_unavailable` | SQLite connection_secrets 行缺失或读取失败 | 不循环弹窗，不退化为错误 Provider 密码 |
 | `authentication_failed` | Provider 明确拒绝当前凭据 | 停止高频重试，提示最小权限检查 |
 | `permission_denied` | 已认证但权限范围不足 | 标记 Coverage 缺口，不误 tombstone |
 | `rate_limited` | Provider 限流 | 遵守 reset/backoff，不制造 API 风暴 |

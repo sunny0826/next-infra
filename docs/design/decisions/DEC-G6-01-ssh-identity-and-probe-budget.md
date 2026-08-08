@@ -198,7 +198,7 @@ transport 复用 Core 的 `ErrorCode` 和 Connector `ConnectorFailure`，不得�
 | remote command non-zero 且无法安全细分 | `ProviderUnavailable` | false | 仅保留固定分类 |
 | caller cancellation | `Cancelled` | false | 停止当前 child，不扩大 kill 范围 |
 
-分类器只能匹配有限、固定的 OpenSSH error signatures；无法安全细分的退出码不能被解释成认证成功或 Host Key 成功。`CredentialUnavailable` 等 Keychain/SecretProvider 语义不由本 transport 产生，不能新增另一套 SSH error code。
+分类器只能匹配有限、固定的 OpenSSH error signatures；无法安全细分的退出码不能被解释成认证成功或 Host Key 成功。`CredentialUnavailable` 等 SecretProvider 语义不由本 transport 产生，不能新增另一套 SSH error code。
 
 单 probe 的 timeout、output overflow、非零退出或 parser failure，不应丢弃同批已经成功的其他 observations；上层 connector 可将这种结果标为 `partial`。没有任何有效 observation 时，按 Connector contract 返回 fatal。Host Key mismatch 是例外：无论此前已有多少成功 probe，都使整个 sync fatal，不能提交部分观察。partial、网络失败和取消都不得增加缺失计数或触发 tombstone。
 
@@ -207,7 +207,7 @@ transport 复用 Core 的 `ErrorCode` 和 Connector `ConnectorFailure`，不得�
 `ssh` Connector descriptor 固定如下：
 
 - `connector_type = "ssh"`；`connector_version = "1.0.0"`；`config_schema_version = 1`。
-- `auth.kind = SshAgent`；minimum permission 只描述用户已有 SSH alias 与非 root 只读 probe 权限，不声明或保存 Keychain Secret。
+- `auth.kind = SshAgent`；minimum permission 只描述用户已有 SSH alias 与非 root 只读 probe 权限，不声明或保存 Secret。
 - 支持 `Full` 与 `Targeted`；Targeted 只定位 `ssh.host` 的稳定 external ID，不能携带 command、argv 或地址。
 - 默认 concurrency `1`，recommended interval `300 s`；调度不能突破本决策硬上限。
 - `ssh.host`、filesystem、process、launchd 和 systemd resource capabilities 在对应 mapper (`CON-G6-02/03/04`) 完成前保持 `Partial`，不能用空 batch 冒充已采集。
@@ -228,9 +228,9 @@ transport 复用 Core 的 `ErrorCode` 和 Connector `ConnectorFailure`，不得�
 7. Registry 无重复 ID；六个 entry 的平台、版本、timeout、stdout/stderr 上限固定；metadata 不暴露 remote command。
 8. `SshConnectionConfigV1` unknown-field/秘密字段拒绝，descriptor/conformance 通过，mapper pending module 不标记 `Supported`。
 9. Debug、Display、serde failure、request summary、ConnectorFailure 和测试快照不包含 alias、hostname、IP、用户名、路径、fingerprint 或远程 output sentinel。
-10. dependency closure 不引入 Store、Sync、Runtime、Query、Tauri、MCP、Keychain、GitHub 或第三方 SSH protocol implementation。
+10. dependency closure 不引入 Store、Sync、Runtime、Query、Tauri、MCP、`connection_secrets`、GitHub 或第三方 SSH protocol implementation。
 
-当前决策不要求或执行以下验收：真实 SSH alias/host connection、真实 known_hosts 或 Agent、Codex/Hermes MCP 配置、Apple Development/Developer ID identity、Keychain smoke、签名、公证和发布。它们不是 Goal 6 当前 transport/registry acceptance 的前置条件。
+当前决策不要求或执行以下验收：真实 SSH alias/host connection、真实 known_hosts 或 Agent、Codex/Hermes MCP 配置、Apple Development/Developer ID identity、签名、公证和发布。它们不是 Goal 6 当前 transport/registry acceptance 的前置条件。
 
 ## 11. 非目标与停止规则
 
@@ -247,6 +247,6 @@ transport 复用 Core 的 `ErrorCode` 和 Connector `ConnectorFailure`，不得�
 2. 接受动态 remote command、解析/写入 SSH config、放宽 Host Key 验证、绕过 alias 校验或提高任一预算。
 3. 新增未版本化 ProbeId、改变既有 probe 的 command/schema 语义，或把 pending module 标为 Supported。
 4. 让 Tauri/MCP/Agent 传入 command、argv、hostname/IP、Secret 或触发外部写操作。
-5. 以真实主机、MCP 用户配置或 Apple signing/Keychain identity 作为本地 transport 单元测试的隐含前置条件。
+5. 以真实主机、MCP 用户配置或 Apple signing identity 作为本地 transport 单元测试的隐含前置条件。
 
 本决策冻结的是可验证的设计边界，不授权任何外部状态写入。若上游共享契约无法满足上述边界，状态保持 `BLOCKED`，不能通过降低安全约束或扩大 scope 继续实现。

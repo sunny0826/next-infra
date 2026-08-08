@@ -25,7 +25,7 @@
 - `display_name`：用户可读名称。
 - `enabled`：是否参与调度。
 - `config`：非秘密配置，经过 schema 验证。
-- `secret_ref`：指向 Keychain item，不包含秘密本身。
+- `secret_ref`：指向 SQLite `connection_secrets` 表的行，不包含秘密本身。
 - `health`：Connector 自身状态。
 - `last_success_at`、`last_attempt_at`。
 - `config_schema_version`。

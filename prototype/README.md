@@ -37,5 +37,5 @@ python3 -m http.server 4173 --directory prototype
 
 - 不创建 React、TypeScript、Tauri 或 Rust 工程骨架。
 - 不确定组件库、前端状态库或最终打包方式。
-- 不连接真实 Provider、Keychain、MCP Bridge 或 Desktop Host。
+- 不连接真实 Provider、MCP Bridge 或 Desktop Host。
 - 不实现任何外部资源写操作。

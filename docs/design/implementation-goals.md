@@ -73,7 +73,6 @@ rtk proxy find . -maxdepth 3 -type f -print
 - MCP Bridge 自动拉起 Desktop Host 的授权、可信路径和显式退出抑制规则。
 - 自动登录启动的默认值。
 - 首版签名、公证和更新边界。
-- Keychain item 命名、签名访问控制和后台可用性策略。
 
 ### 范围
 
@@ -190,7 +189,7 @@ rtk test pnpm --dir apps/desktop test:desktop-smoke
 
 ### 验收标准
 
-- MCP Bridge 不直接读取 SQLite、Keychain 或 Connector。
+- MCP Bridge 不直接读取 SQLite、`connection_secrets` 或 Connector。
 - MCP 结果与 Desktop Query Service 语义一致。
 - 所有工具标记 read-only。
 - Topology、列表和 Change 返回有硬上限及截断信息。
@@ -217,7 +216,7 @@ Hermes 的实际命令必须在安装后根据当时版本重新确认，不提�
 
 ### 范围
 
-- 实现细粒度只读认证和 Keychain SecretRef。
+- 实现细粒度只读认证和 SQLite `connection_secrets` SecretRef。
 - 读取 Repository、Workflow、Run、Job、Environment、Deployment 摘要。
 - 实现分页、ETag、rate-limit 和字段清洗。
 - 不保存完整日志、工件或 Secret。

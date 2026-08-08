@@ -85,7 +85,7 @@ Draft -> Planned -> AwaitingApproval -> Approved -> Executing
 ## 5. 未决问题
 
 - 第一批允许的 Provider action 及其最小写权限分别是什么？
-- Action secret 是否使用独立 Keychain namespace、生命周期和用户确认流程？
+- Action secret 是否使用独立 `connection_secrets` namespace（而非 Keychain）、生命周期和用户确认流程？
 - 部分成功时是否提供 Provider-specific compensation，还是只标记待人工恢复？
 - 审计事件保留期限、加密方式和导出格式如何定义？
 

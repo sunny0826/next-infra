@@ -90,12 +90,12 @@ Settings 仅用于本地生命周期、保留策略、数据预算和能力开�
 
 ## 6. 凭据与连接安全
 
-不要手工编辑 SQLite 或 Application Support 目录。GitHub MVP 将 token 以明文 BLOB 存储于 SQLite `connection_secrets` 表，适合单实例本机使用，但不等同于 Keychain：
+不要手工编辑 SQLite 或 Application Support 目录。GitHub MVP 将 token 以明文 BLOB 存储于 SQLite `connection_secrets` 表，适合单实例本机使用：
 
 - Desktop Host 将 token 存储于 SQLite `connection_secrets` 表（`connection_id` → BLOB）；DB 文件必须为当前用户拥有的 `0600`，所在目录必须为当前用户的 `0700`；FK 级联清除（删除 connection 时自动清理 secret 行）。
 - token 不写入设置、日志、错误、fixture、URL 或命令行。React 在提交结束后清空密码输入；MCP Bridge、QueryService 与普通 CLI 不能通过投影读取 `connection_secrets` 表。
 - `credential_unavailable` 表示 secret 缺失或无法读取，不要通过手工写入 SQLite 来规避。
-- Keychain 是后续强化项；在迁移前，请确保本机账户和磁盘加密符合你的安全要求。
+- **Keychain 方向已取消（2026-08-07 用户决策）**；Secret 一律存 SQLite `connection_secrets`，不追求 Keychain 迁移。
 - SSH 使用现有 SSH config alias、SSH Agent 或 IdentityFile；Next Infra 不复制私钥，也没有任意命令入口。
 - MCP 工具只读，且不接受 Secret、SSH 命令或任意目标地址作为参数。
 
@@ -136,7 +136,7 @@ pnpm test
 pnpm run build
 ```
 
-构建失败时，先确认 Node 与 Rust 版本；再检查是否已有另一个 Tauri 开发实例占用同一单实例 Runtime。不要清空 SQLite、Keychain 或 Application Support 目录作为排障的第一步，因为这会移除本地观察历史或凭据。
+构建失败时，先确认 Node 与 Rust 版本；再检查是否已有另一个 Tauri 开发实例占用同一单实例 Runtime。不要清空 SQLite 或 Application Support 目录作为排障的第一步，因为这会移除本地观察历史或凭据。
 
 ## 10. 发布前与真实环境验收
 
@@ -145,6 +145,6 @@ pnpm run build
 1. 配置最小权限、只读的 Provider 身份，逐 connector 验证真实账户、区域、分页和限流。
 2. 用已有 SSH alias 对固定 probe 做一次真实 read-only 验收，确认 Host Key 不匹配会失败。
 3. 在 Codex 与 Hermes 各执行一次只读 MCP 查询，确认输出与 Desktop Query Service 一致。
-4. 提供 Apple Development 或 Developer ID identity 后，再验证 Keychain、可信 MCP 自动拉起、签名、公证和 macOS 交互生命周期。
+4. 提供 Apple Development 或 Developer ID identity 后，再验证可信 MCP 自动拉起、签名、公证和 macOS 交互生命周期。
 
 在以上步骤完成前，项目状态应保持“本地只读首版完成，外部验收待授权”。权威状态记录见 [完成性审计](./tasks/COMPLETION-AUDIT-2026-08-06.md)。

@@ -11,9 +11,10 @@ src/
 ├── composition/      # ★ 组合根：AppState、命令注册、sync_github、scheduler 接线、purge
 ├── scheduled_sync.rs # 定时同步驱动（std thread，10s tick，仅 github live 路径）
 ├── host/             # lifecycle（LaunchSource）、authorization、local_rpc（Unix socket）、effects（NSWorkspace 睡眠/唤醒）
-├── adapter/          # DesktopQueryAdapter + 命令 DTO + LocalSettings/RuntimeCapabilities
-└── keychain/         # Keychain 平台封装（未来目标；MVP token 存 SQLite connection_secrets）
+└── adapter/          # DesktopQueryAdapter + 命令 DTO + LocalSettings/RuntimeCapabilities
 ```
+
+> **注（2026-08-07）：** Keychain 方向已取消；Secret 存 SQLite `connection_secrets`（plaintext BLOB，0600 DB/0700 目录）。
 
 ## 生命周期关键语义
 - `LaunchSource`：UserInteractive / LoginAutostart / McpAuthorized（决定 runtime 模式与是否建窗）。

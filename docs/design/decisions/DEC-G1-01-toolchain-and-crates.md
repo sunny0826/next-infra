@@ -132,7 +132,7 @@ flowchart LR
 - `core/store/sync/query/runtime/local-rpc/mcp/connector-*` 均不得依赖 Tauri。
 - Query 和 Sync 依赖 Core port，不依赖具体 Store；Runtime 注入 `next-infra-store`。
 - Runtime 不依赖 Local RPC 或 MCP；Desktop composition root 启动 Runtime 与 Local RPC。
-- MCP Bridge 只依赖 `next-infra-mcp`，不得直接依赖 Store、Runtime、Keychain、Connector、Tauri 或 Provider SDK。
+- MCP Bridge 只依赖 `next-infra-mcp`，不得直接依赖 Store、Runtime、`connection_secrets`、Connector、Tauri 或 Provider SDK。
 - `connector-contract-tests` 不能被任何 production package 反向依赖。
 
 ## 6. Desktop 与 Bridge 的安装边界
@@ -198,4 +198,4 @@ rtk pnpm --dir apps/desktop test:bundle-boundary
 
 明确非目标：不初始化 workspace、不安装依赖、不实现 crate、UI、RPC、MCP 或 Provider；不定义 release cadence、自动 updater、签名/公证、用户支持周期、Windows/Linux 支持矩阵；不决定 Bridge 稳定安装路径。
 
-后续仍待定：最低支持 macOS 与 Intel Mac、用户可见 Node/Rust 支持承诺。Bridge 安装/发现/原子升级方案见 [`DEC-G1-03`](./DEC-G1-03-bridge-install-and-upgrade.md)，Tauri updater 与发布签名策略见 [`DEC-G1-04`](./DEC-G1-04-keychain-signing.md)；这些决策不得由 Goal 1 实施者自行改写。
+后续仍待定：最低支持 macOS 与 Intel Mac、用户可见 Node/Rust 支持承诺。Bridge 安装/发现/原子升级方案见 [`DEC-G1-03`](./DEC-G1-03-bridge-install-and-upgrade.md)，签名/发布策略见 [`DEC-G1-04`](./DEC-G1-04-keychain-signing.md)；这些决策不得由 Goal 1 实施者自行改写。

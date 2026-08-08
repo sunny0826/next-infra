@@ -21,7 +21,7 @@
 - 已控制 Desktop Host 二进制、App Bundle 或操作系统的攻击者。
 - Provider 自身返回的错误事实。
 
-即使同用户进程不在完整防御范围内，仍应通过最小权限、Keychain、文件权限、单实例和接口隔离减少误用与泄漏。
+即使同用户进程不在完整防御范围内，仍应通过最小权限、SQLite `connection_secrets`（plaintext BLOB）、文件权限、单实例和接口隔离减少误用与泄漏。
 
 ## 2. Tauri Desktop UI
 
@@ -50,7 +50,6 @@ React 只能调用显式注册的薄 Tauri Commands。每个 Command 必须：
 - 通用 Shell 执行。
 - 任意文件系统读写。
 - SQLite 直连。
-- Keychain 通用读取。
 - 任意 HTTP 请求代理。
 - 动态加载插件或脚本。
 
@@ -206,7 +205,7 @@ Resource 内容与工具查询使用同一个 Query Service 和响应限制。UR
 SQLite 只保存：
 
 - Secret 类型。
-- Keychain service/account 标识的内部引用。
+- Secret 存储位置引用（指向 `connection_secrets` 表的行）。
 - 创建和最后验证时间。
 - 权限范围摘要。
 
@@ -216,11 +215,11 @@ SQLite 只保存：
 
 允许：
 
-- React 密码输入组件通过专门 Tauri Command 一次性提交给 Rust，再写入 Keychain。
+- React 密码输入组件通过专门 Tauri Command 一次性提交给 Rust，再写入 SQLite `connection_secrets` 表。
 - MCP 之外的本地 CLI 通过交互式隐藏输入或标准输入接收。
 - Provider OAuth/Device Flow 在支持时直接完成授权。
 
-Secret Command 只能写入或替换指定 Connection 的 Keychain item，不能返回现有值。React 在 Command 完成后立即清空组件状态。
+Secret Command 只能写入或替换指定 Connection 的 SQLite `connection_secrets` 行，不能返回现有值。React 在 Command 完成后立即清空组件状态。
 
 禁止：
 
@@ -237,15 +236,15 @@ Secret Command 只能写入或替换指定 Connection 的 Keychain item，不能
 - 阿里云、腾讯云创建独立只读身份，不复用日常管理员凭据。
 - Dokploy 使用专用 API Token，并对返回对象执行字段白名单。
 
-### 9.4 Keychain 访问策略
+### 9.4 SQLite connection_secrets 访问策略
 
-- 使用 macOS Data Protection Keychain 的 generic password item，设置 `kSecUseDataProtectionKeychain=true`、`kSecAttrSynchronizable=false` 和 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`。
-- Keychain service/account 名称由 Rust 根据当前 bundle ID、Connection ID、Secret 类型和 generation 生成，React 不能传入原始 Keychain 定位符。
-- Item 绑定 provisioning profile 授权的显式私有 access group；开发与发布使用不同 bundle ID、service 和 access group，MCP Bridge 不共享该 entitlement。
-- 自动登录后台启动、屏幕锁定和 Keychain 暂不可用时采用无交互读取，不得循环弹出系统授权框；Connector 返回 `credential_unavailable` 并等待用户处理。
-- Secret 替换采用先写新 item、验证引用、再删除旧 item 的顺序，避免失败后失去可用凭据。
+- Secret 以 plaintext BLOB 存入 SQLite `connection_secrets` 表，`connection_id` 为外键。
+- DB 文件必须为当前用户拥有的 `0600`，所在目录必须为当前用户 `0700`；FK 级联清除（删除 connection 时自动清理 secret 行）。
+- Secret 替换通过 `Store::upsert_connection_secret` 原子写入；验证后切换引用，再删除旧行（若存在）。
+- `credential_unavailable` 表示 SQLite 行缺失或读取失败，不要通过手工写入 SQLite 来规避。
+- MCP Bridge 与普通 CLI 不能通过投影读取 `connection_secrets` 表。
 
-完整 item 命名、SecretRef、错误语义、签名和公证边界见 [`DEC-G1-04`](./decisions/DEC-G1-04-keychain-signing.md)。Ad-hoc 构建只能验证 Mock/Fixture；真实 Keychain smoke 需要 Apple Development 签名，外部分发需要 Developer ID、Hardened Runtime、公证与 staple。
+签名和公证边界见 [`DEC-G1-04`](./decisions/DEC-G1-04-keychain-signing.md)。
 
 ## 10. SSH 安全
 
@@ -314,7 +313,7 @@ Secret Command 只能写入或替换指定 Connection 的 Keychain item，不能
 ## 15. 验收条件
 
 - React 只使用本地 App Bundle 资源和受限 Tauri Commands。
-- 前端没有通用 Shell、文件、SQLite、Keychain read 或 HTTP proxy 能力。
+- 前端没有通用 Shell、文件、SQLite 直连或 HTTP proxy 能力。
 - Event 仅通知失效，不能作为审批或权威状态输入。
 - MCP 默认只通过 STDIO + Unix Socket，不开放 HTTP 端口。
 - MCP 工具全部只读、有界、可分页并返回 `observed_at`。
