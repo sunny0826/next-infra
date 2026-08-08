@@ -3337,7 +3337,8 @@ pub fn setup(
 fn build_main_window(app: &AppHandle) -> tauri::Result<tauri::WebviewWindow> {
     WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Next Infra")
-        .inner_size(900.0, 600.0)
+        .inner_size(1440.0, 900.0)
+        .min_inner_size(800.0, 600.0)
         .build()
 }
 

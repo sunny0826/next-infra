@@ -15,6 +15,8 @@ import { createQueryEvidenceLifecycleSnapshotFixture } from "./test/fixtures/que
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.localStorage.clear();
+  document.documentElement.removeAttribute("data-theme");
 });
 
 class TrackingAdapter extends MockDesktopAdapter {
@@ -105,6 +107,22 @@ describe("React app shell", () => {
       await screen.findByRole("heading", { level: 1, name: "时间线" }),
     ).toBeInTheDocument();
     expect(screen.getByText("没有已持久化的变更。")).toBeInTheDocument();
+  });
+
+  it("switches the color theme from the Settings page and persists the preference", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "设置" }));
+    await screen.findByRole("heading", { level: 1, name: "设置" });
+
+    await user.click(await screen.findByRole("button", { name: "暗色" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    expect(window.localStorage.getItem("theme")).toBe("light");
+
+    await user.click(screen.getByRole("button", { name: "亮色" }));
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+    expect(window.localStorage.getItem("theme")).toBe("dark");
   });
 
   it("closes and reopens the Inspector while releasing its desktop column", async () => {
