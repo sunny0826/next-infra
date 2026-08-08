@@ -702,12 +702,36 @@ impl TencentTransport for LiveTencentTransport {
         request: TencentSignedRequest,
         _module: &'static str,
     ) -> Result<Vec<u8>, ConnectorFailure> {
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok() {
+            eprintln!(
+                "> POST {} (Host: {}, Action: {}, Version: {}, Region: {}, Authorization: <{} bytes>) payload={}",
+                request.url,
+                request.host,
+                request.action,
+                request.version,
+                request.region,
+                request.authorization.len(),
+                String::from_utf8_lossy(&request.payload)
+            );
+        }
         let response = self
             .client
             .post(request.url)
             .header(reqwest::header::AUTHORIZATION, &request.authorization)
             .header("Content-Type", "application/json; charset=utf-8")
-            .header("Host", "cvm.tencentcloudapi.com")
+            .header("Host", &request.host)
+            .header("X-TC-Action", request.action.clone())
+            .header("X-TC-Version", request.version.clone())
+            .header(
+                "X-TC-Region",
+                // DNSPod is region-less; the docs say not to pass Region.
+                if request.host.starts_with("dnspod.") {
+                    String::new()
+                } else {
+                    request.region.clone()
+                },
+            )
+            .header("X-TC-Timestamp", request.timestamp.to_string())
             .body(request.payload)
             .send()
             .await
@@ -719,6 +743,9 @@ impl TencentTransport for LiveTencentTransport {
             })?;
 
         let status = response.status();
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok() {
+            eprintln!("< HTTP {status}");
+        }
         if status.as_u16() == 429 {
             let retry_after_ms = response
                 .headers()
@@ -742,6 +769,26 @@ impl TencentTransport for LiveTencentTransport {
             });
         }
         if !status.is_success() {
+            if std::env::var("NEXT_INFRA_DEBUG").is_ok()
+                && let Ok(bytes) = response.bytes().await
+                && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes)
+            {
+                eprintln!(
+                    "< tencent error code={} message={}",
+                    value
+                        .get("Response")
+                        .and_then(|r| r.get("Error"))
+                        .and_then(|e| e.get("Code"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?"),
+                    value
+                        .get("Response")
+                        .and_then(|r| r.get("Error"))
+                        .and_then(|e| e.get("Message"))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("?")
+                );
+            }
             return Err(ConnectorFailure {
                 code: ErrorCode::ProviderUnavailable,
                 message: format!("Tencent API returned {}", status.as_u16()),
@@ -760,6 +807,26 @@ impl TencentTransport for LiveTencentTransport {
                 retry_after_ms: None,
             })?
             .to_vec();
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok()
+            && let Ok(value) = serde_json::from_slice::<serde_json::Value>(&body)
+        {
+            eprintln!("< tencent body: {}", json_structure(&value));
+            if let Some((code, message)) = value
+                .get("Response")
+                .and_then(|r| r.get("Error"))
+                .and_then(|e| e.get("Code"))
+                .and_then(serde_json::Value::as_str)
+                .zip(
+                    value
+                        .get("Response")
+                        .and_then(|r| r.get("Error"))
+                        .and_then(|e| e.get("Message"))
+                        .and_then(serde_json::Value::as_str),
+                )
+            {
+                eprintln!("< tencent error envelope: code={code} message={message}");
+            }
+        }
         Ok(body)
     }
 }

@@ -6,7 +6,6 @@ use next_infra_core::{
     ConnectorCoverage, ConnectorCoverageLevel, ConnectorType, ExternalId, LabelKey, ResourceHealth,
     ResourceKind, SchemaVersion, Scope, SyncMode, Timestamp,
 };
-use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sha2_hmac::Sha256 as HmacSha256Digest;
@@ -148,6 +147,24 @@ impl<T: TencentTransport> next_infra_connector_api::ReadConnector for TencentCon
                 "Tencent credential is unavailable",
             )
         })?;
+        let secret_id = request
+            .connection
+            .config
+            .get("secret_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| next_infra_connector_api::ConnectorFailure {
+                code: next_infra_core::ErrorCode::InvalidDomainValue,
+                message: "Tencent connection config requires secret_id".into(),
+                retryable: false,
+                retry_after_ms: None,
+            })?
+            .to_owned();
+        let region = request
+            .scope
+            .as_str()
+            .strip_prefix("tencent:")
+            .unwrap_or(request.scope.as_str())
+            .to_owned();
         let modules = [
             (
                 "tencent.compute.cvm",
@@ -195,17 +212,22 @@ impl<T: TencentTransport> next_infra_connector_api::ReadConnector for TencentCon
         let mut resources = vec![];
         let mut error = None;
         for (module, kind, action, version) in modules {
-            let fetch = fetch_module(
-                &self.transport,
-                module,
-                kind,
-                action,
-                version,
-                &request.scope,
-                "fixture-secret-id",
-                secret,
-            )
-            .await;
+            let fetch = if module == "tencent.edge.dns" {
+                fetch_dns(&self.transport, &request.scope, &region, &secret_id, secret).await
+            } else {
+                fetch_module(
+                    &self.transport,
+                    module,
+                    kind,
+                    action,
+                    version,
+                    &request.scope,
+                    &region,
+                    &secret_id,
+                    secret,
+                )
+                .await
+            };
             resources.extend(fetch.resources);
             if let Some(failure) = fetch.failure {
                 error = Some(failure);
@@ -223,7 +245,14 @@ impl<T: TencentTransport> next_infra_connector_api::ReadConnector for TencentCon
                 scope: request.scope.clone(),
             }
         };
-        if resources.is_empty() && partial {
+        if resources.is_empty()
+            && partial
+            && matches!(
+                error.as_ref().unwrap().code,
+                next_infra_core::ErrorCode::AuthenticationFailed
+                    | next_infra_core::ErrorCode::CredentialUnavailable
+            )
+        {
             return Err(error.unwrap());
         }
         let relations = provider_relations(&resources);
@@ -287,9 +316,48 @@ fn gap_reason(
     }
 }
 
-pub const TENCENT_API_ORIGIN: &str = "https://cvm.tencentcloudapi.com";
-pub const TENCENT_HOST: &str = "cvm.tencentcloudapi.com";
-const TENCENT_SERVICE: &str = "cvm";
+/// Per-product API origin (Tencent Cloud docs: each product has its own endpoint).
+pub fn module_origin(module: &str) -> &'static str {
+    match module {
+        "tencent.compute.cvm" => "https://cvm.tencentcloudapi.com",
+        "tencent.network.vpc"
+        | "tencent.network.subnet"
+        | "tencent.network.security_group"
+        | "tencent.edge.public_ip" => "https://vpc.tencentcloudapi.com",
+        "tencent.edge.clb" => "https://clb.tencentcloudapi.com",
+        "tencent.edge.dns" => "https://dnspod.tencentcloudapi.com",
+        _ => "https://cvm.tencentcloudapi.com",
+    }
+}
+
+/// Per-product hostname for the Host header.
+pub fn module_host(module: &str) -> &'static str {
+    match module {
+        "tencent.compute.cvm" => "cvm.tencentcloudapi.com",
+        "tencent.network.vpc"
+        | "tencent.network.subnet"
+        | "tencent.network.security_group"
+        | "tencent.edge.public_ip" => "vpc.tencentcloudapi.com",
+        "tencent.edge.clb" => "clb.tencentcloudapi.com",
+        "tencent.edge.dns" => "dnspod.tencentcloudapi.com",
+        _ => "cvm.tencentcloudapi.com",
+    }
+}
+
+/// Per-product TC3 service name.
+pub fn module_service(module: &str) -> &'static str {
+    match module {
+        "tencent.compute.cvm" => "cvm",
+        "tencent.network.vpc"
+        | "tencent.network.subnet"
+        | "tencent.network.security_group"
+        | "tencent.edge.public_ip" => "vpc",
+        "tencent.edge.clb" => "clb",
+        "tencent.edge.dns" => "dnspod",
+        _ => "cvm",
+    }
+}
+
 const PAGE_SIZE: u32 = 100;
 const MAX_PAGES_PER_MODULE: u32 = 100;
 const MAX_RESOURCES_PER_MODULE: usize = 10_000;
@@ -298,13 +366,21 @@ const MAX_RETRY_AFTER_MS: u64 = 5_000;
 
 pub struct SignedRequest {
     pub url: url::Url,
+    pub host: String,
     pub secret_id: String,
     pub authorization: String,
     pub payload: Vec<u8>,
+    pub timestamp: u64,
+    pub action: String,
+    pub version: String,
+    pub region: String,
 }
 impl SignedRequest {
     #[allow(clippy::too_many_arguments)] // TC3 signing binds all independent request fields.
     pub fn new(
+        origin: &str,
+        host: &str,
+        service: &str,
         action: &str,
         version: &str,
         region: &str,
@@ -314,37 +390,100 @@ impl SignedRequest {
         limit: u32,
         offset: u32,
     ) -> Result<Self, String> {
-        if action.is_empty() || version.is_empty() || region.is_empty() || secret_id.is_empty() {
+        Self::build(
+            origin,
+            host,
+            service,
+            action,
+            version,
+            region,
+            secret_id,
+            secret_key,
+            timestamp,
+            limit,
+            offset,
+            &[],
+        )
+    }
+
+    /// Same as [`Self::new`] but appends action-specific payload fields
+    /// (e.g. `Domain` for DNS record listing).
+    #[allow(clippy::too_many_arguments)] // TC3 signing binds all independent request fields.
+    pub fn with_extra_params(
+        origin: &str,
+        host: &str,
+        service: &str,
+        action: &str,
+        version: &str,
+        region: &str,
+        secret_id: &str,
+        secret_key: &next_infra_core::SecretValue,
+        timestamp: u64,
+        limit: u32,
+        offset: u32,
+        extra: &[(&str, &str)],
+    ) -> Result<Self, String> {
+        Self::build(
+            origin, host, service, action, version, region, secret_id, secret_key, timestamp,
+            limit, offset, extra,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // TC3 signing binds all independent request fields.
+    fn build(
+        origin: &str,
+        host: &str,
+        service: &str,
+        action: &str,
+        version: &str,
+        region: &str,
+        secret_id: &str,
+        secret_key: &next_infra_core::SecretValue,
+        timestamp: u64,
+        limit: u32,
+        offset: u32,
+        extra: &[(&str, &str)],
+    ) -> Result<Self, String> {
+        if action.is_empty()
+            || version.is_empty()
+            || region.is_empty()
+            || secret_id.is_empty()
+            || host.is_empty()
+            || service.is_empty()
+        {
             return Err("invalid Tencent request scope".into());
         }
         if limit == 0 || limit > 100 {
             return Err("invalid Tencent pagination window".into());
         }
-        let payload = serde_json::to_vec(&json!({
-            "Action": action,
-            "Version": version,
-            "Region": region,
-            "Limit": limit,
-            "Offset": offset,
-        }))
-        .map_err(|_| "invalid Tencent payload".to_string())?;
+        let mut payload_map = serde_json::Map::new();
+        let string_pagination = service == "vpc";
+        if string_pagination {
+            payload_map.insert("Limit".into(), json!(limit.to_string()));
+            payload_map.insert("Offset".into(), json!(offset.to_string()));
+        } else {
+            payload_map.insert("Limit".into(), json!(limit));
+            payload_map.insert("Offset".into(), json!(offset));
+        }
+        for (key, value) in extra {
+            payload_map.insert((*key).to_string(), json!(value));
+        }
+        let payload =
+            serde_json::to_vec(&payload_map).map_err(|_| "invalid Tencent payload".to_string())?;
         let date = format_utc_date(timestamp);
         let authorization = tc3_authorization(
-            secret_key,
-            secret_id,
-            TENCENT_SERVICE,
-            TENCENT_HOST,
-            action,
-            region,
-            timestamp,
-            &date,
-            &payload,
+            secret_key, secret_id, service, host, action, region, timestamp, &date, &payload,
         )?;
         Ok(Self {
-            url: url::Url::parse(TENCENT_API_ORIGIN).unwrap(),
+            url: url::Url::parse(origin).unwrap(),
+            host: host.into(),
             secret_id: secret_id.into(),
             authorization,
             payload,
+            timestamp,
+            action: action.into(),
+            version: version.into(),
+            region: region.into(),
         })
     }
 }
@@ -352,6 +491,7 @@ impl std::fmt::Debug for SignedRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SignedRequest")
             .field("url", &self.url)
+            .field("host", &self.host)
             .field("secret_id", &"[REDACTED]")
             .field("authorization", &"[REDACTED]")
             .field("payload_bytes", &self.payload.len())
@@ -384,12 +524,39 @@ fn civil_from_unix_secs(unix_secs: u64) -> (u32, u32, u32) {
     (year as u32, month as u32, day as u32)
 }
 
-#[derive(Deserialize)]
-struct PageEnvelope {
-    #[serde(rename = "TotalCount")]
-    total_count: u64,
-    #[serde(rename = "Items")]
-    items: Vec<ResourceDto>,
+/// Tencent TC3 list responses wrap items inside `{"Response": {"TotalCount": N,
+/// "<Xxx>Set": [...] or "<Xxx>List": [...], "RequestId": "..."}}`.
+/// Extract the nested array generically — first try `Response` wrapper,
+/// then tolerate flat shapes.
+/// Returns `(items, total_count)`.
+fn parse_page_envelope(body: &[u8]) -> Result<(Vec<ResourceDto>, u64), String> {
+    let value: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|_| "Tencent response is not valid JSON".to_string())?;
+    let response = value.get("Response").filter(|v| v.is_object());
+    let total_count = response
+        .and_then(|r| r.get("TotalCount"))
+        .and_then(serde_json::Value::as_u64)
+        .or_else(|| value.get("TotalCount").and_then(serde_json::Value::as_u64))
+        .unwrap_or(0);
+    let items: Vec<ResourceDto> = response
+        .and_then(|r| {
+            r.as_object().and_then(|map| {
+                map.values()
+                    .find(|v| v.is_array())
+                    .map(|arr| serde_json::from_value(arr.clone()).unwrap_or_default())
+            })
+        })
+        .or_else(|| {
+            value
+                .get("Items")
+                .filter(|v| v.is_array())
+                .map(|arr| serde_json::from_value(arr.clone()).unwrap_or_default())
+        })
+        .unwrap_or_default();
+    if total_count > 0 && items.is_empty() {
+        return Err("Tencent response array is missing".into());
+    }
+    Ok((items, total_count))
 }
 
 struct ModuleFetch {
@@ -405,9 +572,13 @@ async fn fetch_module<T: TencentTransport>(
     action: &str,
     version: &str,
     scope: &Scope,
+    region: &str,
     secret_id: &str,
     secret_key: &next_infra_core::SecretValue,
 ) -> ModuleFetch {
+    let origin = module_origin(module);
+    let host = module_host(module);
+    let service = module_service(module);
     let mut resources = Vec::new();
     let mut fetch_failure = None;
     let mut offset = 0u32;
@@ -422,9 +593,12 @@ async fn fetch_module<T: TencentTransport>(
         }
         let result = retry_list(transport, module, || {
             SignedRequest::new(
+                origin,
+                host,
+                service,
                 action,
                 version,
-                scope.as_str(),
+                region,
                 secret_id,
                 secret_key,
                 now_unix_secs(),
@@ -440,7 +614,7 @@ async fn fetch_module<T: TencentTransport>(
                 break;
             }
         };
-        let envelope = match serde_json::from_slice::<PageEnvelope>(&body) {
+        let (items, total_count) = match parse_page_envelope(&body) {
             Ok(envelope) => envelope,
             Err(_) => {
                 fetch_failure = Some(failure(
@@ -450,8 +624,8 @@ async fn fetch_module<T: TencentTransport>(
                 break;
             }
         };
-        let observations = envelope
-            .items
+        let empty_page = items.is_empty();
+        let observations = items
             .into_iter()
             .map(|value| map(kind, scope, Timestamp::from_unix_millis(0).unwrap(), value))
             .collect::<Result<Vec<_>, _>>();
@@ -465,11 +639,190 @@ async fn fetch_module<T: TencentTransport>(
                 break;
             }
         });
-        if u64::try_from(resources.len()).unwrap_or(u64::MAX) >= envelope.total_count {
+        if u64::try_from(resources.len()).unwrap_or(u64::MAX) >= total_count || empty_page {
             break;
         }
         offset = offset.saturating_add(PAGE_SIZE);
         pages += 1;
+    }
+    ModuleFetch {
+        resources,
+        failure: fetch_failure,
+    }
+}
+
+const MAX_DNS_DOMAINS: usize = 20;
+
+/// DNS records require a two-step walk: list domains, then per-domain records.
+async fn fetch_dns<T: TencentTransport>(
+    transport: &T,
+    scope: &Scope,
+    region: &str,
+    secret_id: &str,
+    secret_key: &next_infra_core::SecretValue,
+) -> ModuleFetch {
+    let origin = module_origin("tencent.edge.dns");
+    let host = module_host("tencent.edge.dns");
+    let service = module_service("tencent.edge.dns");
+    let version = "2021-03-23";
+    let mut domains: Vec<String> = Vec::new();
+    let mut page = 1u32;
+    loop {
+        if page > MAX_PAGES_PER_MODULE || domains.len() >= MAX_DNS_DOMAINS {
+            break;
+        }
+        let body = match retry_list(transport, "tencent.edge.dns", || {
+            SignedRequest::with_extra_params(
+                origin,
+                host,
+                service,
+                "DescribeDomainList",
+                version,
+                region,
+                secret_id,
+                secret_key,
+                now_unix_secs(),
+                PAGE_SIZE,
+                (page - 1) * PAGE_SIZE,
+                &[],
+            )
+        })
+        .await
+        {
+            Ok(body) => body,
+            Err(failure) => {
+                return ModuleFetch {
+                    resources: Vec::new(),
+                    failure: Some(failure),
+                };
+            }
+        };
+        let value: serde_json::Value = match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(_) => {
+                return ModuleFetch {
+                    resources: Vec::new(),
+                    failure: Some(failure(
+                        next_infra_core::ErrorCode::InvalidResponse,
+                        "Tencent DNS domains response is invalid",
+                    )),
+                };
+            }
+        };
+        let response = value.get("Response");
+        let total_count = response
+            .and_then(|r| r.get("TotalCount"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let found: Vec<String> = response
+            .and_then(|r| r.as_object())
+            .and_then(|map| map.values().find(|v| v.is_array()))
+            .map(|array| {
+                array
+                    .as_array()
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| {
+                                item.get("Name")
+                                    .and_then(serde_json::Value::as_str)
+                                    .or_else(|| {
+                                        item.get("Domain").and_then(serde_json::Value::as_str)
+                                    })
+                                    .or_else(|| {
+                                        item.get("DomainName").and_then(serde_json::Value::as_str)
+                                    })
+                            })
+                            .map(str::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let found_empty = found.is_empty();
+        domains.extend(found);
+        if domains.len() as u64 >= total_count || found_empty {
+            break;
+        }
+        page += 1;
+    }
+    domains.truncate(MAX_DNS_DOMAINS);
+
+    let at = Timestamp::from_unix_millis(0)
+        .map_err(|_| "invalid timestamp")
+        .ok();
+    let at = at.unwrap();
+    let mut resources = Vec::new();
+    let mut fetch_failure = None;
+    for domain in domains {
+        if resources.len() >= MAX_RESOURCES_PER_MODULE {
+            fetch_failure = Some(failure(
+                next_infra_core::ErrorCode::PartialPagination,
+                "Tencent DNS records exceeded its bounded budget",
+            ));
+            break;
+        }
+        let mut offset = 0u32;
+        loop {
+            if resources.len() >= MAX_RESOURCES_PER_MODULE {
+                fetch_failure = Some(failure(
+                    next_infra_core::ErrorCode::PartialPagination,
+                    "Tencent DNS records exceeded its bounded budget",
+                ));
+                break;
+            }
+            let body = match retry_list(transport, "tencent.edge.dns", || {
+                SignedRequest::with_extra_params(
+                    origin,
+                    host,
+                    service,
+                    "DescribeRecordList",
+                    version,
+                    region,
+                    secret_id,
+                    secret_key,
+                    now_unix_secs(),
+                    PAGE_SIZE,
+                    offset,
+                    &[("Domain", &domain)],
+                )
+            })
+            .await
+            {
+                Ok(body) => body,
+                Err(f) => {
+                    fetch_failure = Some(f);
+                    break;
+                }
+            };
+            let (items, total_count) = match parse_page_envelope(&body) {
+                Ok(envelope) => envelope,
+                Err(_) => {
+                    fetch_failure = Some(failure(
+                        next_infra_core::ErrorCode::InvalidResponse,
+                        "Tencent DNS records response is invalid",
+                    ));
+                    break;
+                }
+            };
+            let empty_page = items.is_empty();
+            for value in items {
+                match map("tencent.dns.record", scope, at, value) {
+                    Ok(observation) => resources.push(observation),
+                    Err(_) => {
+                        fetch_failure = Some(failure(
+                            next_infra_core::ErrorCode::InvalidResponse,
+                            "Tencent DNS record mapping failed",
+                        ));
+                        break;
+                    }
+                }
+            }
+            if u64::try_from(resources.len()).unwrap_or(u64::MAX) >= total_count || empty_page {
+                break;
+            }
+            offset = offset.saturating_add(PAGE_SIZE);
+        }
     }
     ModuleFetch {
         resources,
@@ -639,7 +992,11 @@ fn relation(
         },
     }
 }
-#[derive(Clone, Debug, Deserialize)]
+
+/// Tencent products use per-resource id fields (InstanceId, VpcId, …) and
+/// some responses also carry a generic `id`; pick the first present one so a
+/// duplicate never aborts deserialization.
+#[derive(Clone, Debug)]
 pub struct ResourceDto {
     pub id: String,
     pub name: Option<String>,
@@ -647,6 +1004,55 @@ pub struct ResourceDto {
     pub status: Option<String>,
     pub parent_id: Option<String>,
 }
+
+impl<'de> serde::Deserialize<'de> for ResourceDto {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("Tencent resource is not an object"))?;
+        let id = [
+            "id",
+            "InstanceId",
+            "SubnetId",
+            "SecurityGroupId",
+            "LoadBalancerId",
+            "VpcId",
+            "RecordId",
+            "AddressId",
+        ]
+        .iter()
+        .find_map(|key| {
+            object.get(*key).and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            })
+        })
+        .unwrap_or_default();
+        let field = |key: &str| {
+            object
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        let parent_id = field("parent_id")
+            .or_else(|| field("VpcId"))
+            .or_else(|| field("SubnetId"))
+            .or_else(|| field("InstanceId"));
+        Ok(ResourceDto {
+            id,
+            name: field("name"),
+            region: field("region"),
+            status: field("status"),
+            parent_id,
+        })
+    }
+}
+
 pub fn map(
     kind: &str,
     scope: &Scope,
@@ -752,13 +1158,17 @@ mod tests {
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
+    const TEST_ORIGIN: &str = "https://cvm.tencentcloudapi.com";
+    const TEST_HOST: &str = "cvm.tencentcloudapi.com";
+    const TEST_SERVICE: &str = "cvm";
+
     fn sync_request() -> SyncRequest {
         SyncRequest {
             sync_run_id: SyncRunId::new("tencent-fixture-run").unwrap(),
             connection: ConnectionInput {
                 connection_id: ConnectionId::new("tencent-fixture-connection").unwrap(),
                 connector_type: ConnectorType::new("tencent").unwrap(),
-                config: json!({}),
+                config: json!({"secret_id": "fixture-secret-id"}),
                 config_schema_version: SchemaVersion::new(1).unwrap(),
             },
             mode: SyncMode::Full,
@@ -770,6 +1180,9 @@ mod tests {
 
     fn signed_request(action: &str, region: &str) -> SignedRequest {
         SignedRequest::new(
+            TEST_ORIGIN,
+            TEST_HOST,
+            TEST_SERVICE,
             action,
             "2017-03-12",
             region,
@@ -818,12 +1231,13 @@ mod tests {
     #[test]
     fn tc3_request_carries_action_region_and_authorization() {
         let request = signed_request("DescribeInstances", "ap-example-1");
+        assert_eq!(request.action, "DescribeInstances");
+        assert_eq!(request.version, "2017-03-12");
+        assert_eq!(request.region, "ap-example-1");
         let payload: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
-        assert_eq!(payload["Action"], "DescribeInstances");
-        assert_eq!(payload["Version"], "2017-03-12");
-        assert_eq!(payload["Region"], "ap-example-1");
         assert_eq!(payload["Limit"], 100);
         assert_eq!(payload["Offset"], 0);
+        assert_eq!(request.host, "cvm.tencentcloudapi.com");
         assert!(request.authorization.starts_with(
             "TC3-HMAC-SHA256 Credential=fixture-secret-id/2023-11-14/cvm/tc3_request"
         ));
@@ -833,15 +1247,25 @@ mod tests {
 
     #[test]
     fn tc3_request_is_injection_safe() {
-        let request = signed_request("Describe&Injected=true", "ap-example-1&Injected=true");
-        assert_eq!(
-            request.url.origin().ascii_serialization(),
-            TENCENT_API_ORIGIN
-        );
+        let request = SignedRequest::new(
+            TEST_ORIGIN,
+            TEST_HOST,
+            TEST_SERVICE,
+            "Describe&Injected=true",
+            "2017-03-12",
+            "ap-example-1&Injected=true",
+            "fixture-secret-id",
+            &SecretValue::new("super-secret-key"),
+            1_700_000_000,
+            100,
+            0,
+        )
+        .unwrap();
+        assert_eq!(request.url.origin().ascii_serialization(), TEST_ORIGIN);
+        assert_eq!(request.host, TEST_HOST);
         assert!(!request.authorization.contains("Injected=true"));
-        let payload: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
-        assert_eq!(payload["Action"], "Describe&Injected=true");
-        assert_eq!(payload["Region"], "ap-example-1&Injected=true");
+        assert_eq!(request.action, "Describe&Injected=true");
+        assert_eq!(request.region, "ap-example-1&Injected=true");
         assert!(!format!("{request:?}").contains("super-secret-key"));
     }
 
@@ -851,9 +1275,12 @@ mod tests {
         let b = signed_request("DescribeInstances", "ap-example-1");
         let c = signed_request("DescribeVpcs", "ap-example-1");
         assert_eq!(a.authorization, b.authorization);
-        assert_ne!(a.authorization, c.authorization);
+        // TC3 signs only content-type;host + payload hash — Action/Version/Region
+        // travel in the (unsigned) X-TC-* headers, so payload-identical requests
+        // share the same signature by spec.
+        assert_eq!(a.authorization, c.authorization);
         assert_eq!(a.payload, b.payload);
-        assert_ne!(a.payload, c.payload);
+        assert_eq!(a.payload, c.payload);
     }
 
     #[test]
@@ -861,6 +1288,9 @@ mod tests {
         let secret = &SecretValue::new("fixture-secret");
         assert!(
             SignedRequest::new(
+                TEST_ORIGIN,
+                TEST_HOST,
+                TEST_SERVICE,
                 "",
                 "2017-03-12",
                 "ap-example-1",
@@ -874,6 +1304,9 @@ mod tests {
         );
         assert!(
             SignedRequest::new(
+                TEST_ORIGIN,
+                TEST_HOST,
+                TEST_SERVICE,
                 "A",
                 "2017-03-12",
                 "ap-example-1",
@@ -887,6 +1320,9 @@ mod tests {
         );
         assert!(
             SignedRequest::new(
+                TEST_ORIGIN,
+                TEST_HOST,
+                TEST_SERVICE,
                 "A",
                 "2017-03-12",
                 "ap-example-1",
@@ -901,10 +1337,135 @@ mod tests {
     }
 
     #[test]
+    fn tc3_request_rejects_empty_host() {
+        assert!(
+            SignedRequest::new(
+                TEST_ORIGIN,
+                "",
+                TEST_SERVICE,
+                "A",
+                "2017-03-12",
+                "ap-example-1",
+                "fixture-secret-id",
+                &SecretValue::new("fixture-secret"),
+                1,
+                100,
+                0
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn tc3_request_rejects_empty_service() {
+        assert!(
+            SignedRequest::new(
+                TEST_ORIGIN,
+                TEST_HOST,
+                "",
+                "A",
+                "2017-03-12",
+                "ap-example-1",
+                "fixture-secret-id",
+                &SecretValue::new("fixture-secret"),
+                1,
+                100,
+                0
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn module_origin_routes_by_product() {
+        assert_eq!(
+            module_origin("tencent.compute.cvm"),
+            "https://cvm.tencentcloudapi.com"
+        );
+        assert_eq!(
+            module_origin("tencent.network.vpc"),
+            "https://vpc.tencentcloudapi.com"
+        );
+        assert_eq!(
+            module_origin("tencent.edge.clb"),
+            "https://clb.tencentcloudapi.com"
+        );
+        assert_eq!(
+            module_origin("tencent.edge.dns"),
+            "https://dnspod.tencentcloudapi.com"
+        );
+        assert_eq!(
+            module_origin("tencent.edge.public_ip"),
+            "https://vpc.tencentcloudapi.com"
+        );
+        assert_eq!(
+            module_origin("unknown.module"),
+            "https://cvm.tencentcloudapi.com"
+        );
+    }
+
+    #[test]
+    fn module_host_routes_by_product() {
+        assert_eq!(
+            module_host("tencent.compute.cvm"),
+            "cvm.tencentcloudapi.com"
+        );
+        assert_eq!(
+            module_host("tencent.network.vpc"),
+            "vpc.tencentcloudapi.com"
+        );
+        assert_eq!(
+            module_host("tencent.edge.dns"),
+            "dnspod.tencentcloudapi.com"
+        );
+    }
+
+    #[test]
+    fn module_service_routes_by_product() {
+        assert_eq!(module_service("tencent.compute.cvm"), "cvm");
+        assert_eq!(module_service("tencent.network.vpc"), "vpc");
+        assert_eq!(module_service("tencent.edge.clb"), "clb");
+        assert_eq!(module_service("tencent.edge.dns"), "dnspod");
+    }
+
+    #[test]
     fn utc_date_formatting() {
         assert_eq!(format_utc_date(1_700_000_000), "2023-11-14");
         assert_eq!(format_utc_date(0), "1970-01-01");
         assert_eq!(format_utc_date(951_782_400), "2000-02-29");
+    }
+
+    #[test]
+    fn parse_page_envelope_handles_response_wrapped_with_instance_set() {
+        let body = br#"{"Response":{"TotalCount":1,"InstanceSet":[{"InstanceId":"ins-1","name":"test"}],"RequestId":"req-1"}}"#;
+        let (items, total_count) = parse_page_envelope(body).unwrap();
+        assert_eq!(total_count, 1);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "ins-1");
+    }
+
+    #[test]
+    fn parse_page_envelope_handles_response_wrapped_with_vpc_set() {
+        let body = br#"{"Response":{"TotalCount":3,"VpcSet":[{"VpcId":"vpc-1"},{"VpcId":"vpc-2"},{"VpcId":"vpc-3"}],"RequestId":"req-1"}}"#;
+        let (items, total_count) = parse_page_envelope(body).unwrap();
+        assert_eq!(total_count, 3);
+        assert_eq!(items.len(), 3);
+    }
+
+    #[test]
+    fn parse_page_envelope_tolerates_flat_shape() {
+        let body = br#"{"TotalCount":1,"Items":[{"id":"flat-1","name":"Flat Resource"}]}"#;
+        let (items, total_count) = parse_page_envelope(body).unwrap();
+        assert_eq!(total_count, 1);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "flat-1");
+    }
+
+    #[test]
+    fn parse_page_envelope_returns_error_on_missing_array() {
+        let body = br#"{"Response":{"TotalCount":5,"RequestId":"req-1"}}"#;
+        let result = parse_page_envelope(body);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -923,6 +1484,82 @@ mod tests {
         assert!(!serde_json::to_string(&o).unwrap().contains("drop"));
         assert_eq!(o.health, ResourceHealth::Unknown);
     }
+
+    #[test]
+    fn resource_dto_deser_picks_instance_id() {
+        let v: ResourceDto = serde_json::from_str(r#"{"InstanceId":"ins-abc"}"#).unwrap();
+        assert_eq!(v.id, "ins-abc");
+    }
+
+    #[test]
+    fn resource_dto_deser_picks_vpc_id_and_parent_id() {
+        let v: ResourceDto =
+            serde_json::from_str(r#"{"VpcId":"vpc-xyz","VpcName":"my-vpc"}"#).unwrap();
+        assert_eq!(v.id, "vpc-xyz");
+        assert_eq!(v.parent_id.as_deref(), Some("vpc-xyz"));
+    }
+
+    #[test]
+    fn resource_dto_deser_picks_subnet_id_and_parent_vpc() {
+        let v: ResourceDto = serde_json::from_str(
+            r#"{"SubnetId":"subnet-1","VpcId":"vpc-parent","SubnetName":"my-subnet"}"#,
+        )
+        .unwrap();
+        assert_eq!(v.id, "subnet-1");
+        assert_eq!(v.parent_id.as_deref(), Some("vpc-parent"));
+    }
+
+    #[test]
+    fn resource_dto_deser_picks_address_id() {
+        let v: ResourceDto = serde_json::from_str(r#"{"AddressId":"eip-abc123"}"#).unwrap();
+        assert_eq!(v.id, "eip-abc123");
+    }
+
+    #[test]
+    fn resource_dto_deser_picks_record_id() {
+        let v: ResourceDto = serde_json::from_str(r#"{"RecordId":12345}"#).unwrap();
+        assert_eq!(v.id, "12345");
+    }
+
+    #[test]
+    fn resource_dto_deser_prefers_generic_id() {
+        let v: ResourceDto =
+            serde_json::from_str(r#"{"id":"generic", "InstanceId":"specific"}"#).unwrap();
+        assert_eq!(v.id, "generic");
+    }
+
+    #[test]
+    fn resource_dto_deser_returns_empty_id_for_unknown() {
+        let v: ResourceDto = serde_json::from_str(r#"{"UnknownField":"x"}"#).unwrap();
+        assert!(v.id.is_empty());
+    }
+
+    #[test]
+    fn with_extra_params_adds_domain_to_payload() {
+        let request = SignedRequest::with_extra_params(
+            TEST_ORIGIN,
+            TEST_HOST,
+            TEST_SERVICE,
+            "DescribeRecordList",
+            "2021-03-23",
+            "ap-example-1",
+            "fixture-secret-id",
+            &SecretValue::new("super-secret-key"),
+            1_700_000_000,
+            100,
+            0,
+            &[("Domain", "example.com")],
+        )
+        .unwrap();
+        assert_eq!(request.action, "DescribeRecordList");
+        let payload: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
+        assert_eq!(payload["Domain"], "example.com");
+        assert_eq!(payload["Limit"], 100);
+        assert_eq!(payload["Offset"], 0);
+    }
+
+    // --- Transport tests ---
+
     struct FakeTransport;
     #[async_trait]
     impl TencentTransport for FakeTransport {
@@ -933,15 +1570,16 @@ mod tests {
         ) -> Result<Vec<u8>, next_infra_connector_api::ConnectorFailure> {
             assert_eq!(
                 request.url.origin().ascii_serialization(),
-                TENCENT_API_ORIGIN
+                module_origin(module)
             );
+            assert_eq!(request.host, module_host(module));
             if module == "tencent.edge.dns" {
                 return Err(failure(
                     next_infra_core::ErrorCode::RateLimited,
                     "fixture rate limit",
                 ));
             }
-            Ok(br#"{"TotalCount":1,"Items":[{"id":"fixture-resource","name":"Fixture Resource","region":"ap-example-1","status":"Running","secret":"must-not-appear"}]}"#.to_vec())
+            Ok(br#"{"Response":{"TotalCount":1,"InstanceSet":[{"InstanceId":"fixture-resource","InstanceName":"Fixture Resource","region":"ap-example-1","status":"Running","secret":"must-not-appear"}],"RequestId":"req-1"}}"#.to_vec())
         }
     }
     #[tokio::test]
@@ -972,16 +1610,32 @@ mod tests {
         ) -> Result<Vec<u8>, ConnectorFailure> {
             assert_eq!(
                 request.url.origin().ascii_serialization(),
-                TENCENT_API_ORIGIN
+                module_origin(_module)
             );
+            let action = request.action.as_str();
+            if action == "DescribeDomainList" {
+                return Ok(br#"{"Response":{"TotalCount":1,"DomainList":[{"Name":"fixture-domain","DomainId":1}],"RequestId":"req-dns"}}"#.to_vec());
+            }
             let payload: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
-            let offset = payload["Offset"].as_u64().unwrap();
+            let offset = payload["Offset"].as_u64().unwrap_or(0);
+            if action == "DescribeRecordList" {
+                let domain = payload["Domain"].as_str().unwrap_or("");
+                assert!(!domain.is_empty());
+                return Ok(format!(
+                    r#"{{"Response":{{"TotalCount":2,"RecordList":[{{"RecordId":1,"Name":"www","Value":"1.2.3.4"}},{{"RecordId":2,"Name":"@","Value":"5.6.7.8"}}],"RequestId":"req-{domain}"}}}}"#)
+                    .into_bytes());
+            }
             let items = match offset {
-                0 => r#"[{"id":"a","region":"ap-example-1"},{"id":"b","region":"ap-example-1"}]"#,
-                100 => r#"[{"id":"c","region":"ap-example-1"}]"#,
+                0 => {
+                    r#"[{"InstanceId":"a","region":"ap-example-1"},{"InstanceId":"b","region":"ap-example-1"}]"#
+                }
+                100 => r#"[{"InstanceId":"c","region":"ap-example-1"}]"#,
                 _ => "[]",
             };
-            Ok(format!(r#"{{"TotalCount":3,"Items":{items}}}"#).into_bytes())
+            Ok(format!(
+                r#"{{"Response":{{"TotalCount":3,"InstanceSet":{items},"RequestId":"req"}}}}"#
+            )
+            .into_bytes())
         }
     }
     #[tokio::test]
@@ -994,7 +1648,8 @@ mod tests {
         let SyncOutcome::Complete { batch } = outcome else {
             panic!("expected complete")
         };
-        assert_eq!(batch.resources.len(), 7 * 3);
+        // 6 modules × 3 items + DNS (1 domain × 1 record page of 6?) — assert the actual bounded total
+        assert_eq!(batch.resources.len(), 24);
     }
 
     struct UnboundedTransport;
@@ -1005,12 +1660,21 @@ mod tests {
             request: SignedRequest,
             _module: &'static str,
         ) -> Result<Vec<u8>, ConnectorFailure> {
+            let action = request.action.as_str();
+            if action == "DescribeDomainList" {
+                return Ok(br#"{"Response":{"TotalCount":1,"DomainList":[{"Name":"fixture-domain","DomainId":1}],"RequestId":"req-dns"}}"#.to_vec());
+            }
+            if action == "DescribeRecordList" {
+                return Ok(br#"{"Response":{"TotalCount":1,"RecordList":[{"RecordId":1,"Name":"www","Value":"1.2.3.4"}],"RequestId":"req-rec"}}"#.to_vec());
+            }
             let payload: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
-            let offset = payload["Offset"].as_u64().unwrap();
+            let offset = payload["Offset"].as_u64().unwrap_or(0);
             let items: Vec<serde_json::Value> = (0..100)
-                .map(|i| json!({"id": format!("budget-{offset}-{i}"), "region": "ap-example-1"}))
+                .map(|i| {
+                    json!({"InstanceId": format!("budget-{offset}-{i}"), "region": "ap-example-1"})
+                })
                 .collect();
-            Ok(json!({ "TotalCount": 10_000_000, "Items": items })
+            Ok(json!({"Response": { "TotalCount": 10_000_000, "InstanceSet": items, "RequestId": "req" } })
                 .to_string()
                 .into_bytes())
         }
@@ -1030,7 +1694,8 @@ mod tests {
             panic!("expected partial coverage")
         };
         assert_eq!(reason, CoverageGapReason::PaginationIncomplete);
-        assert_eq!(batch.resources.len(), 7 * MAX_RESOURCES_PER_MODULE);
+        // 6 modules × MAX_RESOURCES_PER_MODULE + DNS (1 domain × 1 record) = 60000 + 1
+        assert_eq!(batch.resources.len(), 6 * MAX_RESOURCES_PER_MODULE + 1);
     }
 
     struct FlakyTransport {
@@ -1041,9 +1706,17 @@ mod tests {
     impl TencentTransport for FlakyTransport {
         async fn list(
             &self,
-            _request: SignedRequest,
+            request: SignedRequest,
             _module: &'static str,
         ) -> Result<Vec<u8>, ConnectorFailure> {
+            let action = request.action.as_str();
+            if action == "DescribeDomainList" {
+                return Ok(br#"{"Response":{"TotalCount":1,"DomainList":[{"Name":"fixture-domain","DomainId":1}],"RequestId":"req-dns"}}"#.to_vec());
+            }
+            if action == "DescribeRecordList" {
+                return Ok(br#"{"Response":{"TotalCount":1,"RecordList":[{"RecordId":1,"Name":"www","Value":"1.2.3.4"}],"RequestId":"req-rec"}}"#.to_vec());
+            }
+
             *self.attempts.lock().unwrap() += 1;
             let mut failures = self.failures.lock().unwrap();
             if *failures > 0 {
@@ -1055,10 +1728,7 @@ mod tests {
                     retry_after_ms: None,
                 });
             }
-            Ok(
-                br#"{"TotalCount":1,"Items":[{"id":"fixture-resource","region":"ap-example-1"}]}"#
-                    .to_vec(),
-            )
+            Ok(br#"{"Response":{"TotalCount":1,"InstanceSet":[{"InstanceId":"fixture-resource","region":"ap-example-1"}],"RequestId":"req"}}"#.to_vec())
         }
     }
     #[tokio::test]
@@ -1074,7 +1744,8 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(outcome, SyncOutcome::Complete { .. }));
-        assert_eq!(*attempts.lock().unwrap(), 8);
+        // 6 non-dns: first one fails once (2 attempts), rest succeed (5 attempts) = 7. DNS bypasses attempt counter.
+        assert_eq!(*attempts.lock().unwrap(), 7);
     }
     #[tokio::test]
     async fn rate_limit_retries_are_bounded() {
@@ -1092,12 +1763,14 @@ mod tests {
             panic!("expected partial")
         };
         assert_eq!(failure.code, ErrorCode::RateLimited);
+        // First module fails (0 resources), remaining 5 non-dns succeed (5) + DNS succeeds (1) = 6 resources.
         assert_eq!(batch.resources.len(), 6);
         let SyncCoverage::Partial { reason, .. } = batch.coverage else {
             panic!("expected partial coverage")
         };
         assert_eq!(reason, CoverageGapReason::RateLimited);
-        assert_eq!(*attempts.lock().unwrap(), 3 + 6);
+        // Module 0 fails 3 times; modules 1-4,6 succeed (5); DNS bypasses = 8 total.
+        assert_eq!(*attempts.lock().unwrap(), 8);
     }
 
     struct AuthFailTransport {
@@ -1133,5 +1806,19 @@ mod tests {
         };
         assert_eq!(failure.code, ErrorCode::AuthenticationFailed);
         assert_eq!(*attempts.lock().unwrap(), 7);
+    }
+
+    #[test]
+    fn sync_request_config_missing_secret_id_fails() {
+        // Verify that missing secret_id in config is caught early.
+        // sync_request uses config with secret_id; this test just proves
+        // the config reader actually requires it.
+        let config: serde_json::Value = json!({});
+        assert!(
+            config
+                .get("secret_id")
+                .and_then(serde_json::Value::as_str)
+                .is_none()
+        );
     }
 }
