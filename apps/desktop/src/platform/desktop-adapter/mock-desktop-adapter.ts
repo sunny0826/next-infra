@@ -20,6 +20,10 @@ import type {
   TimelineInput,
   CreateBindingInput,
   CreateGitHubConnectionInput,
+  SshConnectInput,
+  SshConnectResult,
+  SshValidateInput,
+  SshValidateResult,
   DisableBindingInput,
   UpdateBindingInput,
   Unsubscribe,
@@ -208,6 +212,17 @@ export class MockDesktopAdapter implements DesktopAdapter {
     return {
       connection_id: `fixture-github-${input.display_name || "connection"}`,
       sync_run_id: "fixture-github-sync",
+    };
+  }
+
+  async validateSshConnection(_input: SshValidateInput): Promise<SshValidateResult> {
+    return { discovered_services: [] };
+  }
+
+  async createSshConnection(input: SshConnectInput): Promise<SshConnectResult> {
+    return {
+      connection_id: `fixture-ssh-${input.display_name || "connection"}`,
+      sync_run_id: "fixture-ssh-sync",
     };
   }
 

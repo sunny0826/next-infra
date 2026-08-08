@@ -91,6 +91,32 @@ export interface CreateGitHubConnectionResult {
   readonly sync_run_id: string;
 }
 
+export interface SshValidateInput {
+  readonly host_alias: string;
+  readonly connect_timeout_secs?: number;
+}
+
+export interface SshServiceOption {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface SshValidateResult {
+  readonly discovered_services: readonly SshServiceOption[];
+}
+
+export interface SshConnectInput {
+  readonly display_name: string;
+  readonly host_alias: string;
+  readonly connect_timeout_secs?: number;
+  readonly allowed_service_ids: readonly string[];
+}
+
+export interface SshConnectResult {
+  readonly connection_id: string;
+  readonly sync_run_id: string;
+}
+
 export interface ConnectionPurgeSummary {
   readonly resources: number;
   readonly relations: number;
@@ -163,6 +189,8 @@ export interface DesktopAdapter {
   getGitHubActionsSummary(): Promise<GitHubActionsSummarySnapshot>;
   discoverGitHubRepositories(token: string): Promise<readonly GitHubRepositoryOption[]>;
   createGitHubConnection(input: CreateGitHubConnectionInput): Promise<CreateGitHubConnectionResult>;
+  validateSshConnection(input: SshValidateInput): Promise<SshValidateResult>;
+  createSshConnection(input: SshConnectInput): Promise<SshConnectResult>;
   previewGitHubConnectionPurge(connectionId: string): Promise<ConnectionPurgeSummary>;
   purgeGitHubConnection(connectionId: string): Promise<ConnectionPurgeSummary>;
   manualSync(connectionId: string): Promise<ManualSyncResult>;

@@ -13,6 +13,8 @@ import type {
   TimelineInput,
   CreateBindingInput,
   CreateGitHubConnectionInput,
+  SshConnectInput,
+  SshValidateInput,
   DisableBindingInput,
   UpdateBindingInput,
   Unsubscribe,
@@ -77,6 +79,14 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
 
   async createGitHubConnection(_input: CreateGitHubConnectionInput): Promise<never> {
     throw new Error("GitHub connection creation is unavailable.");
+  }
+
+  async validateSshConnection(_input: SshValidateInput): Promise<never> {
+    throw new Error("SSH connection validation is unavailable.");
+  }
+
+  async createSshConnection(_input: SshConnectInput): Promise<never> {
+    throw new Error("SSH connection creation is unavailable.");
   }
 
   async previewGitHubConnectionPurge(_connectionId: string): Promise<never> {

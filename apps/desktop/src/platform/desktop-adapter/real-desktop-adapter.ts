@@ -27,6 +27,8 @@ import type {
   TimelineInput,
   CreateBindingInput,
   CreateGitHubConnectionInput,
+  SshConnectInput,
+  SshValidateInput,
   UpdateBindingInput,
   DisableBindingInput,
   Unsubscribe,
@@ -162,6 +164,20 @@ export class RealDesktopAdapter implements DesktopAdapter {
   async createGitHubConnection(input: CreateGitHubConnectionInput) {
     return this.#invoke<Awaited<ReturnType<DesktopAdapter["createGitHubConnection"]>>>(
       "github_connect",
+      { request: input },
+    );
+  }
+
+  async validateSshConnection(input: SshValidateInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["validateSshConnection"]>>>(
+      "ssh_validate",
+      { request: input },
+    );
+  }
+
+  async createSshConnection(input: SshConnectInput) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["createSshConnection"]>>>(
+      "ssh_connect",
       { request: input },
     );
   }

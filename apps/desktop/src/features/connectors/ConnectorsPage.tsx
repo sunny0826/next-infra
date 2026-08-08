@@ -37,6 +37,15 @@ export function ConnectorsPage() {
   const [selectedRepositoryIds, setSelectedRepositoryIds] = useState<readonly string[]>([]);
   const [discovering, setDiscovering] = useState(false);
   const [connecting, setConnecting] = useState(false);
+  const [sshDisplayName, setSshDisplayName] = useState("");
+  const [sshHostAlias, setSshHostAlias] = useState("");
+  const [sshConnectTimeout, setSshConnectTimeout] = useState("10");
+  const [sshDiscoveredServices, setSshDiscoveredServices] = useState<
+    readonly { id: string; name: string }[] | null
+  >(null);
+  const [sshSelectedServiceIds, setSshSelectedServiceIds] = useState<readonly string[]>([]);
+  const [sshValidating, setSshValidating] = useState(false);
+  const [sshConnecting, setSshConnecting] = useState(false);
   const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
   const [purging, setPurging] = useState(false);
 
@@ -135,6 +144,69 @@ export function ConnectorsPage() {
     );
   }
 
+  async function discoverSshServices() {
+    if (sshValidating || sshConnecting) return;
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(sshHostAlias.trim())) {
+      setError("SSH 别名格式无效：以字母或数字开头，仅含字母/数字/._-，最长 128 字符。");
+      return;
+    }
+    setNotice(null);
+    setError(null);
+    setSshValidating(true);
+    try {
+      const result = await adapter.validateSshConnection({
+        host_alias: sshHostAlias.trim(),
+        connect_timeout_secs: Number(sshConnectTimeout) || undefined,
+      });
+      setSshDiscoveredServices(result.discovered_services);
+      setSshSelectedServiceIds([]);
+      setNotice(
+        result.discovered_services.length === 0
+          ? "没有发现可用的服务，仍可创建空范围连接。"
+          : `已发现 ${result.discovered_services.length} 个服务；请选择本次同步范围。`,
+      );
+    } catch (error) {
+      setError(`无法验证 SSH 主机或发现服务（${desktopErrorCode(error)}）。请检查别名与连接配置后重试。`);
+    } finally {
+      setSshValidating(false);
+    }
+  }
+
+  async function createSshConnection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (sshValidating || sshConnecting) return;
+    setNotice(null);
+    setError(null);
+    setSshConnecting(true);
+    try {
+      const result = await adapter.createSshConnection({
+        display_name: sshDisplayName,
+        host_alias: sshHostAlias.trim(),
+        connect_timeout_secs: Number(sshConnectTimeout) || undefined,
+        allowed_service_ids: sshSelectedServiceIds,
+      });
+      setNotice(`SSH 连接已创建，将在后台同步 ${sshSelectedServiceIds.length} 个服务：${result.sync_run_id}。`);
+      setSshDisplayName("");
+      setSshHostAlias("");
+      setSshConnectTimeout("10");
+      setSshDiscoveredServices(null);
+      setSshSelectedServiceIds([]);
+      await refresh();
+    } catch (error) {
+      setError(`无法创建 SSH 连接（${desktopErrorCode(error)}）。请检查别名与连接配置后重试。`);
+    } finally {
+      setSshConnecting(false);
+    }
+  }
+
+  function toggleSshService(serviceId: string) {
+    setSshSelectedServiceIds((current) =>
+      current.includes(serviceId)
+        ? current.filter((id) => id !== serviceId)
+        : [...current, serviceId],
+    );
+  }
+
   async function startManualSync(connection: ConnectionDto) {
     setNotice(null);
     try {
@@ -215,6 +287,25 @@ export function ConnectorsPage() {
               </label>)}
             </div>}
             <button disabled={connecting || selectedRepositoryIds.length === 0} type="submit">{connecting ? "连接中…" : `创建连接并同步 ${selectedRepositoryIds.length} 个仓库`}</button>
+          </fieldset> : null}
+        </form>
+      </section>
+      <section className="connectors-section" aria-labelledby="ssh-connection">
+        <div><h2 id="ssh-connection">添加 SSH 连接</h2><span>基于 SSH config 别名的只读探针</span></div>
+        <form className="connectors-form" onSubmit={createSshConnection}>
+          <label>SSH 连接名称<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={120} onChange={(event) => setSshDisplayName(event.target.value)} required value={sshDisplayName} /></label>
+          <label>主机别名<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={128} onChange={(event) => setSshHostAlias(event.target.value)} placeholder="例如 mac-mini" required value={sshHostAlias} /><span className="connectors-field-hint">SSH config 中的别名：字母/数字开头，仅含字母、数字、_ . -</span></label>
+          <label>连接超时（秒）<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={4} onChange={(event) => setSshConnectTimeout(event.target.value)} type="number" value={sshConnectTimeout} /></label>
+          <button disabled={sshValidating || sshConnecting} onClick={discoverSshServices} type="button">{sshValidating ? "正在验证…" : "验证并发现服务"}</button>
+          {sshDiscoveredServices !== null ? <fieldset className="connectors-repository-picker">
+            <legend>同步范围：已选择 {sshSelectedServiceIds.length} / {sshDiscoveredServices.length} 个服务</legend>
+            {sshDiscoveredServices.length === 0 ? <p>没有可用的服务，仍可创建空范围连接。</p> : <div className="connectors-repository-list">
+              {sshDiscoveredServices.map((service) => <label key={service.id}>
+                <input checked={sshSelectedServiceIds.includes(service.id)} disabled={sshConnecting} onChange={() => toggleSshService(service.id)} type="checkbox" />
+                <span>{service.name}</span>
+              </label>)}
+            </div>}
+            <button disabled={sshConnecting} type="submit">{sshConnecting ? "连接中…" : `创建连接并同步 ${sshSelectedServiceIds.length} 个服务`}</button>
           </fieldset> : null}
         </form>
       </section>
