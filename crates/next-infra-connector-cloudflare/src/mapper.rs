@@ -16,13 +16,14 @@ pub struct AccountDto {
 pub struct ZoneDto {
     pub id: String,
     pub name: String,
-    pub account_id: String,
+    pub account: AccountDto,
     pub status: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct DnsRecordDto {
     pub id: String,
     pub zone_id: String,
+    #[serde(rename = "type")]
     pub record_type: String,
     pub name: String,
     pub content: String,
@@ -31,15 +32,28 @@ pub struct DnsRecordDto {
 #[derive(Clone, Debug, Deserialize)]
 pub struct TunnelDto {
     pub id: String,
-    pub account_id: String,
     pub name: String,
     pub status: Option<String>,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub struct WorkerDto {
     pub id: String,
-    pub account_id: String,
     pub modified_on: Option<String>,
+}
+
+/// Wraps a tunnel with the account id it belongs to (account_id is not present in
+/// the real GET /accounts/{account_id}/cfd_tunnel response body).
+#[derive(Clone, Debug)]
+pub struct TunnelWithAccount {
+    pub tunnel: TunnelDto,
+    pub account_id: String,
+}
+/// Wraps a worker with the account id it belongs to (account_id is not present in
+/// the real GET /accounts/{account_id}/workers/scripts response body).
+#[derive(Clone, Debug)]
+pub struct WorkerWithAccount {
+    pub worker: WorkerDto,
+    pub account_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,8 +68,8 @@ pub fn map_resources(
     accounts: impl IntoIterator<Item = AccountDto>,
     zones: impl IntoIterator<Item = ZoneDto>,
     records: impl IntoIterator<Item = DnsRecordDto>,
-    tunnels: impl IntoIterator<Item = TunnelDto>,
-    workers: impl IntoIterator<Item = WorkerDto>,
+    tunnels: impl IntoIterator<Item = TunnelWithAccount>,
+    workers: impl IntoIterator<Item = WorkerWithAccount>,
 ) -> Result<CloudflareMapperOutput, String> {
     let mut output = CloudflareMapperOutput {
         resources: Vec::new(),
@@ -78,7 +92,7 @@ pub fn map_resources(
             &value.name,
             scope,
             observed_at,
-            json!({"account_id": value.account_id, "status": value.status}),
+            json!({"account_id": value.account.id, "status": value.status}),
         )?);
     }
     for value in records {
@@ -93,21 +107,21 @@ pub fn map_resources(
     for value in tunnels {
         output.resources.push(resource(
             "cloudflare.tunnel",
-            &value.id,
-            &value.name,
+            &value.tunnel.id,
+            &value.tunnel.name,
             scope,
             observed_at,
-            json!({"account_id": value.account_id, "status": value.status}),
+            json!({"account_id": value.account_id, "status": value.tunnel.status}),
         )?);
     }
     for value in workers {
         output.resources.push(resource(
             "cloudflare.worker",
-            &value.id,
-            &value.id,
+            &value.worker.id,
+            &value.worker.id,
             scope,
             observed_at,
-            json!({"account_id": value.account_id, "modified_on": value.modified_on}),
+            json!({"account_id": value.account_id, "modified_on": value.worker.modified_on}),
         )?);
     }
     let by_id = output
@@ -210,10 +224,8 @@ mod tests {
     fn mapper_preserves_relationships_without_worker_code() {
         let account: AccountDto =
             serde_json::from_str(r#"{"id":"a","name":"Fixture","unknown":"drop"}"#).unwrap();
-        let worker: WorkerDto = serde_json::from_str(
-            r#"{"id":"w","account_id":"a","modified_on":"now","script":"must-drop"}"#,
-        )
-        .unwrap();
+        let worker: WorkerDto =
+            serde_json::from_str(r#"{"id":"w","modified_on":"now","script":"must-drop"}"#).unwrap();
         let output = map_resources(
             &Scope::new("fixture-scope").unwrap(),
             Timestamp::from_unix_millis(1).unwrap(),
@@ -221,7 +233,10 @@ mod tests {
             [],
             [],
             [],
-            [worker],
+            [WorkerWithAccount {
+                worker,
+                account_id: "a".into(),
+            }],
         )
         .unwrap();
         assert_eq!(output.relations.len(), 1);
@@ -230,5 +245,39 @@ mod tests {
                 .unwrap()
                 .contains("must-drop")
         );
+    }
+
+    #[test]
+    fn zone_deserializes_nested_account_shape() {
+        // Real Cloudflare GET /zones returns account as a nested {id, name} object,
+        // not a flat account_id string.
+        let zone: ZoneDto = serde_json::from_str(
+            r#"{"id":"z","name":"example.com","account":{"id":"a","name":"My Account"},"status":"active"}"#,
+        )
+        .unwrap();
+        assert_eq!(zone.account.id, "a");
+        assert_eq!(zone.account.name, "My Account");
+    }
+
+    #[test]
+    fn dns_record_deserializes_type_field() {
+        // Real Cloudflare DNS records use "type" not "record_type".
+        let record: DnsRecordDto = serde_json::from_str(
+            r#"{"id":"r","zone_id":"z","type":"A","name":"test.example.com","content":"192.0.2.1","proxied":true}"#,
+        )
+        .unwrap();
+        assert_eq!(record.record_type, "A");
+    }
+
+    #[test]
+    fn tunnel_and_worker_have_no_account_id_in_payload() {
+        // Real Cloudflare tunnel/worker responses do not include account_id;
+        // the account context is derived from the request path.
+        let tunnel: TunnelDto =
+            serde_json::from_str(r#"{"id":"t","name":"My Tunnel","status":"active"}"#).unwrap();
+        assert_eq!(tunnel.id, "t");
+        let worker: WorkerDto =
+            serde_json::from_str(r#"{"id":"w","modified_on":"2024-01-01T00:00:00Z"}"#).unwrap();
+        assert_eq!(worker.id, "w");
     }
 }
