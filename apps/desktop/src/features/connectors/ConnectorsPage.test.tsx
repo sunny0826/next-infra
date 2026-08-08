@@ -7,7 +7,10 @@ import type { SshValidateResult, DokployValidateResult } from "../../platform/de
 import { createConnectorCoverageFixtures, createGitHubGoal5SnapshotFixture, createGoal9ConnectorCoverageFixtures, createQueryEvidenceLifecycleSnapshotFixture } from "../../test/fixtures/query-fixtures";
 import { ConnectorsPage } from "./ConnectorsPage";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+});
 
 async function openProviderForm(providerName: string) {
   fireEvent.click(await screen.findByRole("button", { name: "添加连接" }));
@@ -219,6 +222,51 @@ describe("ConnectorsPage", () => {
     expect(await screen.findByText(/已验证阿里云凭据，发现 12 个资源/)).toBeInTheDocument();
     fireEvent.submit(screen.getByRole("button", { name: "创建阿里云连接并同步" }).closest("form")!);
     expect(await screen.findByText(/阿里云连接已创建，将在后台同步：fixture-ali-sync/)).toBeInTheDocument();
+  });
+
+  it("keeps the GitHub draft across dialog close and reopen", async () => {
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("GitHub");
+    fireEvent.change(await screen.findByLabelText("连接名称"), { target: { value: "Draft GitHub" } });
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await openProviderForm("GitHub");
+    expect(screen.getByLabelText("连接名称")).toHaveValue("Draft GitHub");
+  });
+
+  it("restores non-secret drafts after remount while keeping secrets out of storage", async () => {
+    const { unmount } = render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("Dokploy");
+    fireEvent.change(await screen.findByLabelText("Dokploy 连接名称"), { target: { value: "Draft Dokploy" } });
+    fireEvent.change(screen.getByLabelText(/实例 URL/), { target: { value: "https://fixture.example.test" } });
+    fireEvent.change(screen.getByLabelText("API Token"), { target: { value: "fixture-draft-token" } });
+
+    unmount();
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("Dokploy");
+
+    expect(screen.getByLabelText("Dokploy 连接名称")).toHaveValue("Draft Dokploy");
+    expect(screen.getByLabelText(/实例 URL/)).toHaveValue("https://fixture.example.test");
+    expect(screen.getByLabelText("API Token")).toHaveValue("");
+  });
+
+  it("shows an in-flight progress indicator on the validate button", async () => {
+    class SlowValidateAdapter extends ConnectorAdapter {
+      override async validateDokployConnection() {
+        await new Promise(() => undefined);
+        return { project_count: 3 };
+      }
+    }
+    render(<DesktopAdapterProvider adapter={new SlowValidateAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("Dokploy");
+    fireEvent.change(await screen.findByLabelText("Dokploy 连接名称"), { target: { value: "Prod" } });
+    fireEvent.change(screen.getByLabelText(/实例 URL/), { target: { value: "https://fixture.example.test" } });
+    fireEvent.change(screen.getByLabelText("API Token"), { target: { value: "fixture-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计项目" }));
+
+    expect(await screen.findByText("正在验证…")).toBeInTheDocument();
+    expect(document.querySelector(".connectors-button-progress")).not.toBeNull();
   });
 
   it("validates and creates a Tencent connection with a region", async () => {
