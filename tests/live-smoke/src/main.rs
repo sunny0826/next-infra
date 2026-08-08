@@ -498,10 +498,12 @@ impl SelfHostedTransport for LiveSelfHostedTransport {
             retry_after_ms: None,
         })?;
 
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok() {
+            eprintln!("> GET {url} (apikey: <{} bytes>)", self.service_key.len());
+        }
         let response = self
             .client
             .get(url)
-            .header(reqwest::header::AUTHORIZATION, self.service_key.clone())
             .header("apikey", self.service_key.clone())
             .header("Content-Type", "application/json")
             .send()
@@ -514,6 +516,9 @@ impl SelfHostedTransport for LiveSelfHostedTransport {
             })?;
 
         let status = response.status();
+        if std::env::var("NEXT_INFRA_DEBUG").is_ok() {
+            eprintln!("< HTTP {status}");
+        }
         if status.as_u16() == 401 {
             return Err(ConnectorFailure {
                 code: ErrorCode::AuthenticationFailed,
