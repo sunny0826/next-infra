@@ -45,6 +45,26 @@ interface ProviderFormDescriptor {
   readonly onCreate: (values: Record<string, string>) => Promise<string>;
 }
 
+const PROVIDERS = [
+  { id: "github", name: "GitHub", subtitle: "只读仓库、Actions 和部署数据" },
+  { id: "ssh", name: "SSH", subtitle: "基于 SSH config 别名的只读探针" },
+  { id: "dokploy", name: "Dokploy", subtitle: "只读项目、应用、部署、服务器与域名" },
+  { id: "cloudflare", name: "Cloudflare", subtitle: "只读账户、区域、DNS 记录、隧道与 Worker" },
+  { id: "supabase", name: "Supabase", subtitle: "只读组织与项目摘要（Management API）" },
+  { id: "aliyun", name: "阿里云", subtitle: "只读 ECS、VPC、SLB、DNS 与公网 IP" },
+  { id: "tencent", name: "腾讯云", subtitle: "只读 CVM、VPC、CLB、DNS 与公网 IP" },
+];
+
+const PROVIDER_TITLES: Record<string, string> = {
+  github: "添加 GitHub 连接",
+  ssh: "添加 SSH 连接",
+  dokploy: "添加 Dokploy 连接",
+  cloudflare: "添加 Cloudflare 连接",
+  supabase: "添加 Supabase 连接",
+  aliyun: "添加阿里云连接",
+  tencent: "添加腾讯云连接",
+};
+
 function ProviderConnectionForm({
   descriptor,
   onNotice,
@@ -125,7 +145,6 @@ function ProviderConnectionForm({
 
   return (
     <section className="connectors-section" aria-labelledby={`provider-${descriptor.title}`}>
-      <div><h2 id={`provider-${descriptor.title}`}>{descriptor.title}</h2><span>{descriptor.subtitle}</span></div>
       <form className="connectors-form" onSubmit={createProvider}>
         <label>{descriptor.nameLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} /></label>
         {descriptor.secretFields.map((field) => (
@@ -166,6 +185,8 @@ export function ConnectorsPage() {
   const [dokployValidated, setDokployValidated] = useState(false);
   const [dokployValidating, setDokployValidating] = useState(false);
   const [dokployConnecting, setDokployConnecting] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogProvider, setDialogProvider] = useState<string | null>(null);
   const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
   const [purging, setPurging] = useState(false);
 
@@ -219,6 +240,7 @@ export function ConnectorsPage() {
         selected_repository_ids: selectedRepositoryIds,
       });
       setNotice(`GitHub 连接已创建，将在后台同步 ${selectedRepositoryIds.length} 个选定仓库：${result.sync_run_id}。`);
+      setDialogOpen(false);
       setDisplayName("");
       setRepositories(null);
       setSelectedRepositoryIds([]);
@@ -306,6 +328,7 @@ export function ConnectorsPage() {
         allowed_service_ids: sshSelectedServiceIds,
       });
       setNotice(`SSH 连接已创建，将在后台同步 ${sshSelectedServiceIds.length} 个服务：${result.sync_run_id}。`);
+      setDialogOpen(false);
       setSshDisplayName("");
       setSshHostAlias("");
       setSshConnectTimeout("10");
@@ -378,6 +401,7 @@ export function ConnectorsPage() {
         token: dokployToken,
       });
       setNotice(`Dokploy 连接已创建，将在后台同步：${result.sync_run_id}。`);
+      setDialogOpen(false);
       setDokployDisplayName("");
       setDokployUrl("");
       setDokployToken("");
@@ -455,8 +479,37 @@ export function ConnectorsPage() {
         {purgeConfirmation.summary.bindings > 0 ? <p>包含关联到该连接资源的手工绑定；这些绑定也会被删除。</p> : null}
         <div className="connectors-purge-actions"><button disabled={purging} onClick={() => setPurgeConfirmation(null)} type="button">取消</button><button disabled={purging} onClick={purgeGitHubConnection} type="button">{purging ? "正在删除…" : "确认删除本地快照"}</button></div>
       </section> : null}
-      <section className="connectors-section" aria-labelledby="github-connection">
-        <div><h2 id="github-connection">添加 GitHub 连接</h2><span>只读仓库、Actions 和部署数据</span></div>
+            <section className="connectors-section" aria-labelledby="add-connection">
+        <div className="overview-section-heading">
+          <div>
+            <p className="connectors-eyebrow">连接器配置</p>
+            <h2 id="add-connection">添加连接</h2>
+            <p>按凭据模型逐项录入，验证通过后建立只读连接。</p>
+          </div>
+          <button type="button" onClick={() => { setDialogOpen(true); setDialogProvider(null); }}>添加连接</button>
+        </div>
+      </section>
+      {dialogOpen ? (
+        <div className="connectors-dialog-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setDialogOpen(false); } }}>
+          <div className="connectors-dialog" role="dialog" aria-modal="true" aria-label="添加连接">
+            <div className="connectors-dialog-header">
+              <h2>{dialogProvider === null ? "选择连接器" : PROVIDER_TITLES[dialogProvider]}</h2>
+              <div className="connectors-dialog-actions">
+                {dialogProvider !== null ? <button onClick={() => setDialogProvider(null)} type="button">返回</button> : null}
+                <button onClick={() => setDialogOpen(false)} type="button">关闭</button>
+              </div>
+            </div>
+            {dialogProvider === null ? (
+              <div className="connectors-provider-grid">
+                {PROVIDERS.map((provider) => (
+                  <button key={provider.id} className="connectors-provider-option" onClick={() => setDialogProvider(provider.id)} type="button">
+                    <strong>{provider.name}</strong><span>{provider.subtitle}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+{dialogProvider === "github" ? (<section className="connectors-section" aria-labelledby="github-connection">
         <form className="connectors-form" onSubmit={createGitHubConnection}>
           <label>连接名称<input autoComplete="off" disabled={connecting || discovering} maxLength={120} onChange={(event) => setDisplayName(event.target.value)} required value={displayName} /></label>
           <label>细粒度 Token<input autoComplete="off" disabled={connecting || discovering} maxLength={16384} onChange={(event) => setToken(event.target.value)} required type="password" value={token} /></label>
@@ -473,8 +526,7 @@ export function ConnectorsPage() {
           </fieldset> : null}
         </form>
       </section>
-      <section className="connectors-section" aria-labelledby="ssh-connection">
-        <div><h2 id="ssh-connection">添加 SSH 连接</h2><span>基于 SSH config 别名的只读探针</span></div>
+      ) : null}{dialogProvider === "ssh" ? (<section className="connectors-section" aria-labelledby="ssh-connection">
         <form className="connectors-form" onSubmit={createSshConnection}>
           <label>SSH 连接名称<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={120} onChange={(event) => setSshDisplayName(event.target.value)} required value={sshDisplayName} /></label>
           <label>主机别名<input autoComplete="off" disabled={sshValidating || sshConnecting} maxLength={128} onChange={(event) => setSshHostAlias(event.target.value)} placeholder="例如 mac-mini" required value={sshHostAlias} /><span className="connectors-field-hint">SSH config 中的别名：字母/数字开头，仅含字母、数字、_ . -</span></label>
@@ -492,8 +544,7 @@ export function ConnectorsPage() {
           </fieldset> : null}
         </form>
       </section>
-      <section className="connectors-section" aria-labelledby="dokploy-connection">
-        <div><h2 id="dokploy-connection">添加 Dokploy 连接</h2><span>只读项目、应用、部署、服务器与域名</span></div>
+      ) : null}{dialogProvider === "dokploy" ? (<section className="connectors-section" aria-labelledby="dokploy-connection">
         <form className="connectors-form" onSubmit={createDokployConnection}>
           <label>Dokploy 连接名称<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={120} onChange={(event) => setDokployDisplayName(event.target.value)} required value={dokployDisplayName} /></label>
           <label>实例 URL<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={512} onChange={(event) => setDokployUrl(event.target.value)} placeholder="https://dokploy.example.com" required value={dokployUrl} /><span className="connectors-field-hint">实例基础地址（不带 /api 后缀）</span></label>
@@ -502,6 +553,7 @@ export function ConnectorsPage() {
           <button disabled={dokployConnecting || !dokployValidated} type="submit">{dokployConnecting ? "连接中…" : "创建连接并同步"}</button>
         </form>
       </section>
+      ) : null}      {dialogProvider === "cloudflare" ? (
       <ProviderConnectionForm
         descriptor={{
           title: "添加 Cloudflare 连接",
@@ -517,8 +569,10 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
-        onCreated={refresh}
+        onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
+      ) : null}
+      {dialogProvider === "supabase" ? (
       <ProviderConnectionForm
         descriptor={{
           title: "添加 Supabase 连接",
@@ -534,8 +588,10 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
-        onCreated={refresh}
+        onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
+      ) : null}
+      {dialogProvider === "aliyun" ? (
       <ProviderConnectionForm
         descriptor={{
           title: "添加阿里云连接",
@@ -556,8 +612,10 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
-        onCreated={refresh}
+        onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
+      ) : null}
+      {dialogProvider === "tencent" ? (
       <ProviderConnectionForm
         descriptor={{
           title: "添加腾讯云连接",
@@ -578,9 +636,15 @@ export function ConnectorsPage() {
         }}
         onNotice={setNotice}
         onError={setError}
-        onCreated={refresh}
+        onCreated={async () => { setDialogOpen(false); await refresh(); }}
       />
-      <section className="connectors-section" aria-labelledby="connection-state"><div><h2 id="connection-state">连接状态</h2><span>手动同步与页面刷新相互独立</span></div>
+      ) : null}
+              </>
+            )}
+          </div>
+        </div>
+      ) : null}
+<section className="connectors-section" aria-labelledby="connection-state"><div><h2 id="connection-state">连接状态</h2><span>手动同步与页面刷新相互独立</span></div>
         <div className="connectors-frame"><table><thead><tr><th>连接</th><th>健康度</th><th>最近成功</th><th>最近尝试</th><th>最近运行</th><th>最近错误</th><th>最近警告</th><th>下次计划</th><th>操作</th></tr></thead><tbody>
           {rows.map(({ connection, nextScheduledAt, recentStatus, recentError, recentWarning }) => <tr key={connection.connection_id}>
             <td><strong>{connection.display_name}</strong><code>{connection.connector_type}</code></td>
