@@ -162,6 +162,11 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 56. [P0 规划：旧快照清理与受限范围验收、Scheduler 接入](./P0-PLAN-2026-08-07.md)
 57. [CON-G5-06 GitHub 受限范围真实验收记录（P0-1）](./CON-G5-06-2026-08-07.md)
 58. [CON-G5-07 GitHub 连接器裁剪为 actions 维度验收记录](./CON-G5-07-2026-08-07.md)
+59. [LIVE-SMOKE-PLAN 真实 Provider/SSH 只读 smoke 任务拆解](./LIVE-SMOKE-PLAN-2026-08-07.md)
+60. [CON-G6-06 SSH alias 只读 smoke（runbook）](./CON-G6-06-2026-08-07.md)
+61. [CON-G8-02 Dokploy live smoke 验收记录](./CON-G8-02-2026-08-07.md)
+62. [CON-G8-04 Cloudflare live smoke 验收记录](./CON-G8-04-2026-08-07.md)
+63. [CON-G9-S4 Supabase managed live smoke 验收记录](./CON-G9-S4-2026-08-07.md)
 
 ## 6. 设计决策包
 

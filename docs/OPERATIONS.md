@@ -90,14 +90,14 @@ Settings 仅用于本地生命周期、保留策略、数据预算和能力开�
 
 ## 6. 凭据与连接安全
 
-不要手动编辑 SQLite 或 Application Support 目录。GitHub MVP 将 token 作为本地明文文件保存，适合单实例本机使用，但不等同于 Keychain：
+不要手工编辑 SQLite 或 Application Support 目录。GitHub MVP 将 token 以明文 BLOB 存储于 SQLite `connection_secrets` 表，适合单实例本机使用，但不等同于 Keychain：
 
-- Desktop Host 将 token 存放于应用数据目录的 `github-secrets-v1`，目录权限为 `0700`，每个 token 文件为当前用户拥有的 `0600` 常规文件；符号链接和宽松权限会被拒绝。
-- token 不写入 SQLite、设置、日志、错误、fixture、URL 或命令行。React 在提交结束后清空密码输入；MCP Bridge 和普通 CLI 不能读取 token。
-- Keychain 是低优先级的后续强化项；在迁移前，请确保本机账户和磁盘加密符合你的安全要求。
+- Desktop Host 将 token 存储于 SQLite `connection_secrets` 表（`connection_id` → BLOB）；DB 文件必须为当前用户拥有的 `0600`，所在目录必须为当前用户的 `0700`；FK 级联清除（删除 connection 时自动清理 secret 行）。
+- token 不写入设置、日志、错误、fixture、URL 或命令行。React 在提交结束后清空密码输入；MCP Bridge、QueryService 与普通 CLI 不能通过投影读取 `connection_secrets` 表。
+- `credential_unavailable` 表示 secret 缺失或无法读取，不要通过手工写入 SQLite 来规避。
+- Keychain 是后续强化项；在迁移前，请确保本机账户和磁盘加密符合你的安全要求。
 - SSH 使用现有 SSH config alias、SSH Agent 或 IdentityFile；Next Infra 不复制私钥，也没有任意命令入口。
 - MCP 工具只读，且不接受 Secret、SSH 命令或任意目标地址作为参数。
-- 如果 token 文件丢失或权限不正确，连接器会报告 `credential_unavailable`；不要通过放宽文件权限来规避该状态。
 
 ## 7. MCP 状态
 

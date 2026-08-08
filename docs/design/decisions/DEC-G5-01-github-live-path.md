@@ -18,12 +18,11 @@ MVP 不改变 Core 的 `SecretRef` 或 SQLite 合同：`Connection.secret_ref` �
 | 输入 | React 密码输入框仅在提交期间保留 token，通过一次 React → Tauri IPC 调用交给 Desktop Host，随后在 `finally` 清空 |
 | Token 形状 | Fine-grained PAT；仅选择需要展示的仓库；最小权限为 `Metadata: read`、`Actions: read`、`Deployments: read` |
 | 禁止权限 | 不请求 `Contents`、`Administration`、`Secrets`、`Variables` 或任意 write 权限 |
-| 保存 | `<Application Support>/github-secrets-v1/<connection-id>.token`；目录必须为当前用户的 `0700`，文件必须为当前用户拥有的 `0600` 常规文件 |
-| 文件安全 | 拒绝符号链接和宽松权限；写入使用临时文件、同步并原子替换；读取与创建使用 `O_NOFOLLOW` |
-| 禁止持久化 | token 不进入 SQLite、设置、日志、错误、fixture、URL、环境变量、命令行或文档 |
-| 可读取方 | 仅 Desktop Host 在验证/同步时将文件读取为临时 `SecretValue`；MCP Bridge 与普通 CLI 不读取 token |
+| 保存 | `<Application Support>/next-infra.db`（SQLite）`connection_secrets` 表（plaintext BLOB）；DB 文件必须为当前用户拥有的 `0600`，目录必须为当前用户的 `0700`；FK 级联清除（`connections` 删除时自动清理 `connection_secrets` 行） |
+| 禁止持久化 | token 不进入设置、日志、错误、fixture、URL、环境变量、命令行或文档；不进入 QueryService/MCP/投影查询；永不使用 projection 层读取 |
+| 可读取方 | 仅 Desktop Host 在验证/同步时通过 `Store` 方法将 BLOB 读取为临时 `SecretValue`（zeroizing Drop）；MCP Bridge 与普通 CLI 不读取 |
 
-本地明文文件是受单实例、本机 macOS 用户边界约束的明确 MVP 取舍，不等同于 Keychain。正式分发前必须重新评估并迁移凭据保存策略。
+> **修订记录（2026-08-07）：** 原 §2 禁止持久化 SQLite 的决策已被用户明确接受的风险决策取代。Token 现以明文 BLOB 存储于 SQLite `connection_secrets` 表（0600 DB / 0700 目录、FK 级联清理、无投影读取）。`github-secrets-v1` 本地文件方案已废弃。Token 仍永不进入 Git/Fixture/日志/错误/文档/URL/命令行/DTO。
 
 ## 3. 同步与失败语义
 
