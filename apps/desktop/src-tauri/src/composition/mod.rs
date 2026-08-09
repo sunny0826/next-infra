@@ -1124,8 +1124,12 @@ impl AppState {
                 .write(|s| s.upsert_connection_secret(&connection_id, &token))
                 .is_err()
             {
+                let _ = self
+                    .store
+                    .write(|s| s.remove_connection_secret(&connection_id));
+                let _ = self.store.write(|s| s.purge_connection(&connection_id));
                 return Err(safe_error(
-                    "connection_unavailable",
+                    "secret_storage_unavailable",
                     "Dokploy credential could not be saved.",
                 ));
             }
@@ -1209,8 +1213,12 @@ impl AppState {
                 .write(|s| s.upsert_connection_secret(&connection_id, &token))
                 .is_err()
             {
+                let _ = self
+                    .store
+                    .write(|s| s.remove_connection_secret(&connection_id));
+                let _ = self.store.write(|s| s.purge_connection(&connection_id));
                 return Err(safe_error(
-                    "connection_unavailable",
+                    "secret_storage_unavailable",
                     "Cloudflare credential could not be saved.",
                 ));
             }
@@ -1297,8 +1305,12 @@ impl AppState {
                 .write(|s| s.upsert_connection_secret(&connection_id, &token))
                 .is_err()
             {
+                let _ = self
+                    .store
+                    .write(|s| s.remove_connection_secret(&connection_id));
+                let _ = self.store.write(|s| s.purge_connection(&connection_id));
                 return Err(safe_error(
-                    "connection_unavailable",
+                    "secret_storage_unavailable",
                     "Supabase managed credential could not be saved.",
                 ));
             }
@@ -1401,8 +1413,12 @@ impl AppState {
                 .write(|s| s.upsert_connection_secret(&connection_id, &secret))
                 .is_err()
             {
+                let _ = self
+                    .store
+                    .write(|s| s.remove_connection_secret(&connection_id));
+                let _ = self.store.write(|s| s.purge_connection(&connection_id));
                 return Err(safe_error(
-                    "connection_unavailable",
+                    "secret_storage_unavailable",
                     "Aliyun credential could not be saved.",
                 ));
             }
@@ -1502,8 +1518,12 @@ impl AppState {
                 .write(|s| s.upsert_connection_secret(&connection_id, &secret))
                 .is_err()
             {
+                let _ = self
+                    .store
+                    .write(|s| s.remove_connection_secret(&connection_id));
+                let _ = self.store.write(|s| s.purge_connection(&connection_id));
                 return Err(safe_error(
-                    "connection_unavailable",
+                    "secret_storage_unavailable",
                     "Tencent credential could not be saved.",
                 ));
             }
@@ -2257,7 +2277,6 @@ pub(crate) async fn sync_ssh(
     };
     // SSH probes the local machine via the SSH config alias; no per-connection
     // credential is stored or required by the connector.
-    let secret: Option<SecretValue> = None;
     let mut engine = SyncEngine::new(store.clone());
     let handle = engine
         .start(
@@ -2272,7 +2291,7 @@ pub(crate) async fn sync_ssh(
             },
         )
         .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?;
-    let outcome = connector.sync(request.clone(), secret.as_ref()).await;
+    let outcome = connector.sync(request.clone(), None).await;
     let finished_at = now()
         .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not finish."))?;
 
@@ -3549,7 +3568,6 @@ struct SshConnectResult {
 #[derive(Deserialize)]
 struct DokployValidateCommand {
     url: String,
-    #[allow(unused)]
     token: String,
 }
 
@@ -3562,7 +3580,6 @@ struct DokployValidateResult {
 struct DokployConnectCommand {
     display_name: String,
     url: String,
-    #[allow(unused)]
     token: String,
 }
 
@@ -3575,7 +3592,6 @@ struct DokployConnectResult {
 // ── Cloudflare DTOs ──────────────────────────────────────────────────────────
 #[derive(Deserialize)]
 struct CloudflareValidateCommand {
-    #[allow(unused)]
     token: String,
 }
 
@@ -3587,7 +3603,6 @@ struct CloudflareValidateResult {
 #[derive(Deserialize)]
 struct CloudflareConnectCommand {
     display_name: String,
-    #[allow(unused)]
     token: String,
 }
 
@@ -3600,7 +3615,6 @@ struct CloudflareConnectResult {
 // ── Supabase Managed DTOs ────────────────────────────────────────────────────
 #[derive(Deserialize)]
 struct SupabaseManagedValidateCommand {
-    #[allow(unused)]
     token: String,
 }
 
@@ -3612,7 +3626,6 @@ struct SupabaseManagedValidateResult {
 #[derive(Deserialize)]
 struct SupabaseManagedConnectCommand {
     display_name: String,
-    #[allow(unused)]
     token: String,
 }
 
@@ -3626,7 +3639,6 @@ struct SupabaseManagedConnectResult {
 #[derive(Deserialize)]
 struct AliyunValidateCommand {
     access_key_id: String,
-    #[allow(unused)]
     access_key_secret: String,
     region: String,
 }
@@ -3640,7 +3652,6 @@ struct AliyunValidateResult {
 struct AliyunConnectCommand {
     display_name: String,
     access_key_id: String,
-    #[allow(unused)]
     access_key_secret: String,
     region: String,
 }
@@ -3655,7 +3666,6 @@ struct AliyunConnectResult {
 #[derive(Deserialize)]
 struct TencentValidateCommand {
     secret_id: String,
-    #[allow(unused)]
     secret_key: String,
     region: String,
 }
@@ -3669,7 +3679,6 @@ struct TencentValidateResult {
 struct TencentConnectCommand {
     display_name: String,
     secret_id: String,
-    #[allow(unused)]
     secret_key: String,
     region: String,
 }
@@ -5233,6 +5242,56 @@ mod tests {
                 .is_none()
         );
         assert!(state.query.list_connections().unwrap().items.is_empty());
+    }
+
+    #[test]
+    fn create_dokploy_connection_rejects_empty_token() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let error = match tauri::async_runtime::block_on(state.create_dokploy_connection(
+            DokployConnectCommand {
+                display_name: "Empty token".into(),
+                url: "https://dokploy.example.com".into(),
+                token: String::new(),
+            },
+        )) {
+            Ok(_) => panic!("empty token must be rejected"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "invalid_credential");
+        assert!(
+            state.query.list_connections().unwrap().items.is_empty(),
+            "no connection row should be created when the credential guard rejects the input"
+        );
+    }
+
+    #[test]
+    fn create_dokploy_connection_persists_secret_readable_by_sync() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let result = tauri::async_runtime::block_on(state.create_dokploy_connection(
+            DokployConnectCommand {
+                display_name: "Persisted Dokploy".into(),
+                url: "https://dokploy.example.com".into(),
+                token: "fixture-token".into(),
+            },
+        ))
+        .unwrap();
+        let connection_id = ConnectionId::new(&result.connection_id).unwrap();
+        let secret = state
+            .store
+            .read(|s| s.connection_secret(&connection_id))
+            .unwrap()
+            .expect("create must persist the credential so the background sync can read it");
+        assert_eq!(secret.expose(), b"fixture-token");
+        assert!(
+            result.sync_run_id.starts_with("dokploy-sync-"),
+            "a background sync should be enqueued after persistence"
+        );
     }
 
     #[test]
