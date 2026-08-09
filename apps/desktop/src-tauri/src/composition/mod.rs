@@ -1073,6 +1073,12 @@ impl AppState {
                 "Connection name must contain between 1 and 120 characters.",
             ));
         }
+        if request.token.trim().is_empty() || request.token.len() > 16 * 1024 {
+            return Err(safe_error(
+                "invalid_credential",
+                "Dokploy token is required.",
+            ));
+        }
         let _endpoint = DokployEndpoint::new(&request.url)
             .map_err(|_| safe_error("invalid_dokploy_url", "Dokploy URL format is invalid."))?;
         self.begin_dokploy_sync()?;
@@ -1112,6 +1118,17 @@ impl AppState {
                     "Dokploy connection could not be saved.",
                 ));
             }
+            let token = SecretValue::new(request.token.into_bytes());
+            if self
+                .store
+                .write(|s| s.upsert_connection_secret(&connection_id, &token))
+                .is_err()
+            {
+                return Err(safe_error(
+                    "connection_unavailable",
+                    "Dokploy credential could not be saved.",
+                ));
+            }
             self.refresh_query_context(now().map_err(|_| {
                 safe_error(
                     "query_context_unavailable",
@@ -1146,6 +1163,12 @@ impl AppState {
             return Err(safe_error(
                 "invalid_connection",
                 "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        if request.token.trim().is_empty() || request.token.len() > 16 * 1024 {
+            return Err(safe_error(
+                "invalid_credential",
+                "Cloudflare token is required.",
             ));
         }
         self.begin_cloudflare_sync()?;
@@ -1225,6 +1248,12 @@ impl AppState {
             return Err(safe_error(
                 "invalid_connection",
                 "Connection name must contain between 1 and 120 characters.",
+            ));
+        }
+        if request.token.trim().is_empty() || request.token.len() > 16 * 1024 {
+            return Err(safe_error(
+                "invalid_credential",
+                "Supabase access token is required.",
             ));
         }
         self.begin_supabase_managed_sync()?;
@@ -1315,6 +1344,14 @@ impl AppState {
             return Err(safe_error(
                 "invalid_connection",
                 "Aliyun region must not be empty.",
+            ));
+        }
+        if request.access_key_secret.trim().is_empty()
+            || request.access_key_secret.len() > 16 * 1024
+        {
+            return Err(safe_error(
+                "invalid_credential",
+                "Aliyun access key secret is required.",
             ));
         }
         self.begin_aliyun_sync()?;
@@ -1410,6 +1447,12 @@ impl AppState {
             return Err(safe_error(
                 "invalid_connection",
                 "Tencent region must not be empty.",
+            ));
+        }
+        if request.secret_key.trim().is_empty() || request.secret_key.len() > 16 * 1024 {
+            return Err(safe_error(
+                "invalid_credential",
+                "Tencent secret key is required.",
             ));
         }
         self.begin_tencent_sync()?;
