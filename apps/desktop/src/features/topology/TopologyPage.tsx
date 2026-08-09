@@ -5,6 +5,13 @@ import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { TopologyDto } from "../../generated/query/TopologyDto";
 import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
+import {
+  layoutTopology,
+  parallelOffset,
+  relationCurve,
+  relationLabelPoint,
+  TOPOLOGY_CANVAS_WIDTH,
+} from "./topology-layout";
 
 import "./topology.css";
 
@@ -12,11 +19,19 @@ interface TopologyPageProps {
   readonly focusResourceId: string;
   readonly onInspectResource?: (resource: ResourceDto) => void;
   readonly onInspectRelation?: (relation: RelationDto) => void;
+  readonly onCreateRelation?: (source: ResourceDto) => void;
+  readonly onEditRelation?: (relation: RelationDto) => void;
   readonly onFocusResource?: (resourceId: string) => void;
   readonly queryVersion?: number;
 }
 
-interface Point { readonly x: number; readonly y: number; }
+type TopologyRenderNode =
+  | { readonly type: "resource"; readonly resource: ResourceDto }
+  | { readonly type: "placeholder"; readonly resource_id: string };
+
+type TopologySelection =
+  | { readonly type: "resource"; readonly id: string }
+  | { readonly type: "relation"; readonly id: string };
 
 function activate(event: KeyboardEvent, action: () => void) {
   if (event.key !== "Enter" && event.key !== " ") return;
@@ -24,16 +39,33 @@ function activate(event: KeyboardEvent, action: () => void) {
   action();
 }
 
-function edgeClass(relation: RelationDto): string {
-  return `topology-edge topology-edge--${relation.evidence_type}`;
+function edgeLabel(relation: RelationDto): string {
+  const evidence = relation.evidence_type === "configured"
+    ? "人工声明"
+    : displayEnum(relation.evidence_type);
+  const unresolved = relation.lifecycle === "orphaned" ? " · 未解析" : "";
+  return `${relation.kind} · ${evidence}${unresolved}`;
 }
 
-function adjacentResourceId(topology: TopologyDto, resourceId: string, key: string): string | null {
-  const outgoing = topology.edges
+function renderNodes(topology: TopologyDto, relations: readonly RelationDto[]): TopologyRenderNode[] {
+  const resourceIds = new Set(topology.nodes.map((node) => node.resource_id));
+  const placeholderIds = new Set<string>();
+  relations.forEach((edge) => {
+    if (!resourceIds.has(edge.source_resource_id)) placeholderIds.add(edge.source_resource_id);
+    if (!resourceIds.has(edge.target_resource_id)) placeholderIds.add(edge.target_resource_id);
+  });
+  return [
+    ...topology.nodes.map((resource) => ({ type: "resource" as const, resource })),
+    ...[...placeholderIds].sort().map((resource_id) => ({ type: "placeholder" as const, resource_id })),
+  ];
+}
+
+function adjacentResourceId(relations: readonly RelationDto[], resourceId: string, key: string): string | null {
+  const outgoing = relations
     .filter((edge) => edge.source_resource_id === resourceId)
     .map((edge) => edge.target_resource_id)
     .sort();
-  const incoming = topology.edges
+  const incoming = relations
     .filter((edge) => edge.target_resource_id === resourceId)
     .map((edge) => edge.source_resource_id)
     .sort();
@@ -42,24 +74,41 @@ function adjacentResourceId(topology: TopologyDto, resourceId: string, key: stri
   return null;
 }
 
+function relationOffsets(relations: readonly RelationDto[]): ReadonlyMap<string, number> {
+  const grouped = new Map<string, RelationDto[]>();
+  relations.forEach((relation) => {
+    const key = [relation.source_resource_id, relation.target_resource_id].sort().join("\u0000");
+    grouped.set(key, [...(grouped.get(key) ?? []), relation]);
+  });
+  const offsets = new Map<string, number>();
+  grouped.forEach((group) => {
+    group.sort((left, right) => left.relation_id.localeCompare(right.relation_id));
+    group.forEach((relation, index) => {
+      offsets.set(relation.relation_id, parallelOffset(index, group.length));
+    });
+  });
+  return offsets;
+}
+
 export function TopologyPage({
   focusResourceId,
   onInspectResource,
   onInspectRelation,
+  onCreateRelation,
+  onEditRelation,
   onFocusResource,
   queryVersion = 0,
 }: TopologyPageProps) {
   const adapter = useDesktopAdapter();
   const [topology, setTopology] = useState<TopologyDto | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [bindingTarget, setBindingTarget] = useState("");
-  const [bindingPending, setBindingPending] = useState(false);
-  const [editingBinding, setEditingBinding] = useState<RelationDto | null>(null);
+  const [selection, setSelection] = useState<TopologySelection | null>(null);
 
   useEffect(() => {
     let active = true;
     setTopology(null);
     setError(null);
+    setSelection(null);
     adapter
       .getTopology({
         focus_resource_id: focusResourceId,
@@ -72,170 +121,268 @@ export function TopologyPage({
     return () => { active = false; };
   }, [adapter, focusResourceId, queryVersion]);
 
-  const positions = useMemo(() => {
-    const points = new Map<string, Point>();
-    topology?.nodes.forEach((node, index) => {
-      points.set(node.resource_id, {
-        x: 44 + (index % 4) * 180,
-        y: 56 + Math.floor(index / 4) * 116,
-      });
-    });
-    return points;
-  }, [topology]);
+  const visibleEdges = useMemo(
+    () => topology?.edges.filter((relation) => !(
+      relation.evidence_type === "configured" && relation.lifecycle === "tombstoned"
+    )) ?? [],
+    [topology],
+  );
+  const nodes = useMemo(
+    () => (topology === null ? [] : renderNodes(topology, visibleEdges)),
+    [topology, visibleEdges],
+  );
+  const layout = useMemo(() => {
+    const resourceIds = nodes.map((node) => node.type === "resource"
+      ? node.resource.resource_id
+      : node.resource_id);
+    return layoutTopology(
+      resourceIds,
+      topology?.focus_resource_id ?? focusResourceId,
+      visibleEdges,
+    );
+  }, [focusResourceId, nodes, topology, visibleEdges]);
+  const offsets = useMemo(
+    () => relationOffsets(visibleEdges),
+    [visibleEdges],
+  );
 
-  const refreshTopology = () => adapter.getTopology({
-    focus_resource_id: focusResourceId,
-    depth: 1,
-    max_nodes: 100,
-    max_edges: 200,
-  });
+  const focusResource = topology?.nodes.find(
+    (resource) => resource.resource_id === topology.focus_resource_id,
+  );
+  const selectedRelation = selection?.type === "relation"
+    ? visibleEdges.find((relation) => relation.relation_id === selection.id)
+    : undefined;
+  const selectedResource = selection?.type === "resource"
+    ? topology?.nodes.find((resource) => resource.resource_id === selection.id)
+    : undefined;
 
-  const saveBinding = () => {
-    if (bindingTarget.length === 0) return;
-    setBindingPending(true);
-    const input = {
-        source_resource_id: focusResourceId,
-        target_resource_id: bindingTarget,
-        kind: "infra.depends_on",
-      };
-    const command = editingBinding?.evidence.type === "configured"
-      ? adapter.updateBinding({ binding_id: editingBinding.evidence.binding_id, ...input })
-      : adapter.createBinding(input);
-    command
-      .then(() => refreshTopology())
-      .then(setTopology)
-      .then(() => setEditingBinding(null))
-      .catch(() => setError("无法保存本地绑定。"))
-      .finally(() => setBindingPending(false));
-  };
-
-  const disableBinding = () => {
-    if (editingBinding?.evidence.type !== "configured") return;
-    setBindingPending(true);
-    adapter
-      .disableBinding({ binding_id: editingBinding.evidence.binding_id })
-      .then(() => refreshTopology())
-      .then(setTopology)
-      .then(() => setEditingBinding(null))
-      .catch(() => setError("无法禁用本地绑定。"))
-      .finally(() => setBindingPending(false));
+  const focusAdjacentNode = (resourceId: string, event: KeyboardEvent) => {
+    const next = topology === null ? null : adjacentResourceId(visibleEdges, resourceId, event.key);
+    if (next === null) return;
+    event.preventDefault();
+    document.getElementById(`topology-node-${next}`)?.focus();
   };
 
   if (error !== null) return <section className="topology-state topology-state--error" role="alert">{error}</section>;
   if (topology === null) return <section className="topology-state" aria-busy="true">正在读取焦点拓扑…</section>;
 
-  const canvasHeight = Math.max(320, 100 + Math.ceil(topology.nodes.length / 4) * 116);
+  const canvasHeight = layout.height + Math.max(0, topology.frontier.length - 1) * 32;
+  const laneCounts = [...layout.nodes.values()].reduce(
+    (counts, node) => ({ ...counts, [node.lane]: counts[node.lane] + 1 }),
+    { incoming: 0, focus: 0, outgoing: 0, context: 0 },
+  );
+  const contextLabelY = Math.min(
+    ...[...layout.nodes.values()]
+      .filter((node) => node.lane === "context")
+      .map((node) => node.y - 22),
+  );
+  const isRelationSelected = (relation: RelationDto) =>
+    selection?.type === "relation" && selection.id === relation.relation_id;
+  const isRelationDimmed = (relation: RelationDto) => {
+    if (selection === null) return false;
+    if (selection.type === "relation") return selection.id !== relation.relation_id;
+    return relation.source_resource_id !== selection.id && relation.target_resource_id !== selection.id;
+  };
+  const isNodeSelected = (resourceId: string) => {
+    if (selection?.type === "resource") return selection.id === resourceId;
+    if (selectedRelation === undefined) return false;
+    return selectedRelation.source_resource_id === resourceId
+      || selectedRelation.target_resource_id === resourceId;
+  };
+  const isNodeDimmed = (resourceId: string) => {
+    if (selection === null) return false;
+    if (selection.type === "resource") return selection.id !== resourceId;
+    return !isNodeSelected(resourceId);
+  };
+
   return (
     <div className="topology-page">
       <header className="topology-header">
-        <div><p className="topology-eyebrow">证据约束图</p><h1>拓扑</h1><p>检查一个本地资源及其直接、有来源的关系。</p></div>
+        <div>
+          <p className="topology-eyebrow">证据约束图</p>
+          <h1>拓扑</h1>
+          <p>沿上游、焦点与下游核实直接关系及其证据来源。</p>
+        </div>
         <code>{topology.metadata.generated_at}</code>
       </header>
 
       <div className="topology-toolbar" aria-label="拓扑查询限制">
-        <span><small>焦点</small><code>{topology.focus_resource_id}</code></span>
+        <span className="topology-toolbar-focus"><small>焦点</small><code>{topology.focus_resource_id}</code></span>
         <span><small>深度</small><strong>{topology.depth}</strong></span>
         <span><small>节点</small><strong>{topology.nodes.length} / 100</strong></span>
-        <span><small>边</small><strong>{topology.edges.length} / 200</strong></span>
+        <span><small>边</small><strong>{visibleEdges.length} / 200</strong></span>
         <span><small>硬性上限</small><strong>200 / 400</strong></span>
         <span className={topology.truncated ? "topology-truncated" : ""}><small>结果</small><strong>{topology.truncated ? "已截断" : "受限"}</strong></span>
+        <button
+          className="topology-create-relation"
+          disabled={focusResource === undefined || onCreateRelation === undefined}
+          onClick={() => {
+            if (focusResource !== undefined) onCreateRelation?.(focusResource);
+          }}
+          type="button"
+        >
+          新增关联
+        </button>
       </div>
-
-      <form className="topology-binding" onSubmit={(event) => { event.preventDefault(); saveBinding(); }}>
-        {editingBinding !== null ? <p>正在编辑已配置绑定 <code>{editingBinding.evidence.type === "configured" ? editingBinding.evidence.binding_id : ""}</code></p> : null}
-        <label>目标
-          <select value={bindingTarget} onChange={(event) => setBindingTarget(event.target.value)}>
-            <option value="">选择受限资源</option>
-            {topology.nodes.filter((node) => node.resource_id !== focusResourceId).map((node) => <option key={node.resource_id} value={node.resource_id}>{node.display_name}</option>)}
-          </select>
-        </label>
-        <label>关系
-          <select disabled><option>infra.depends_on</option></select>
-        </label>
-        <button disabled={bindingPending || bindingTarget.length === 0} type="submit">{editingBinding === null ? "创建绑定" : "更新绑定"}</button>
-        {editingBinding !== null ? <button disabled={bindingPending} onClick={disableBinding} type="button">禁用绑定</button> : null}
-        {editingBinding !== null ? <button disabled={bindingPending} onClick={() => setEditingBinding(null)} type="button">取消编辑</button> : null}
-      </form>
 
       <div className="topology-canvas-scroll">
         <div className="topology-canvas" style={{ height: canvasHeight }}>
-          <svg aria-label="受限关系边" height={canvasHeight} width="760">
-            <defs><marker id="topology-arrow" markerHeight="6" markerWidth="7" orient="auto" refX="6" refY="3"><path d="M0,0 L7,3 L0,6 Z" /></marker></defs>
-            {topology.edges.map((relation) => {
-              const source = positions.get(relation.source_resource_id);
-              const target = positions.get(relation.target_resource_id);
-              if (!source || !target) return null;
-              const x1 = source.x + 136; const y1 = source.y + 32;
-              const x2 = target.x; const y2 = target.y + 32;
-              const mainOffset = relation.evidence_type === "configured" ? -2 : 0;
+          <div className="topology-lane topology-lane--incoming" aria-hidden="true" />
+          <div className="topology-lane topology-lane--focus" aria-hidden="true" />
+          <div className="topology-lane topology-lane--outgoing" aria-hidden="true" />
+          <div className="topology-lane-label topology-lane-label--incoming">上游来源 <code>{laneCounts.incoming}</code></div>
+          <div className="topology-lane-label topology-lane-label--focus">当前焦点 <code>{laneCounts.focus}</code></div>
+          <div className="topology-lane-label topology-lane-label--outgoing">下游目标 <code>{laneCounts.outgoing}</code></div>
+
+          <div className="topology-selection-bar" aria-live="polite">
+            {selectedRelation !== undefined ? (
+              <>
+                <span>已选择关系</span>
+                <strong>{edgeLabel(selectedRelation)}</strong>
+                {selectedRelation.evidence_type === "configured" && onEditRelation !== undefined ? (
+                  <button
+                    aria-label={`编辑关联 ${selectedRelation.kind}`}
+                    onClick={() => onEditRelation(selectedRelation)}
+                    type="button"
+                  >
+                    编辑关联
+                  </button>
+                ) : <code>只读证据</code>}
+              </>
+            ) : selectedResource !== undefined ? (
+              <><span>已选择资源</span><strong>{selectedResource.display_name}</strong><code>{selectedResource.kind}</code></>
+            ) : (
+              <><span>浏览提示</span><strong>选择节点或关系查看证据</strong><code>方向键可沿关系移动</code></>
+            )}
+          </div>
+
+          <svg
+            aria-label="受限关系边"
+            height={canvasHeight}
+            viewBox={`0 0 ${TOPOLOGY_CANVAS_WIDTH} ${canvasHeight}`}
+            width={TOPOLOGY_CANVAS_WIDTH}
+          >
+            <defs>
+              <marker id="topology-arrow" markerHeight="6" markerWidth="7" orient="auto" refX="6" refY="3">
+                <path d="M0,0 L7,3 L0,6 Z" />
+              </marker>
+            </defs>
+            {visibleEdges.map((relation) => {
+              const source = layout.nodes.get(relation.source_resource_id);
+              const target = layout.nodes.get(relation.target_resource_id);
+              if (source === undefined || target === undefined) return null;
+              const offset = offsets.get(relation.relation_id) ?? 0;
+              const label = relationLabelPoint(source, target, offset);
+              const selected = isRelationSelected(relation);
+              const dimmed = isRelationDimmed(relation);
+              const edgeStateClass = `${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`;
               return (
-                <g key={relation.relation_id}>
-                  {relation.evidence_type === "configured" ? <path className="topology-edge topology-edge--configured topology-edge--parallel" d={`M${x1},${y1 + 2} L${x2},${y2 + 2}`} /> : null}
-                  <path className={edgeClass(relation)} d={`M${x1},${y1 + mainOffset} L${x2},${y2 + mainOffset}`} markerEnd="url(#topology-arrow)" />
+                <g className="topology-edge-group" key={relation.relation_id}>
+                  {relation.evidence_type === "configured" ? (
+                    <path
+                      className={`topology-edge topology-edge--configured topology-edge--parallel${edgeStateClass}`}
+                      d={relationCurve(source, target, offset + 4)}
+                    />
+                  ) : null}
+                  <path
+                    className={`topology-edge topology-edge--${relation.evidence_type}${edgeStateClass}`}
+                    d={relationCurve(source, target, offset)}
+                    markerEnd="url(#topology-arrow)"
+                  />
                   <path
                     aria-label={`${displayEnum(relation.evidence_type)}关系 ${relation.kind}`}
                     className="topology-edge-hit"
-                    d={`M${x1},${y1} L${x2},${y2}`}
+                    d={relationCurve(source, target, offset)}
                     onClick={() => {
+                      setSelection({ type: "relation", id: relation.relation_id });
                       onInspectRelation?.(relation);
-                      if (relation.evidence.type === "configured") {
-                        setEditingBinding(relation);
-                        setBindingTarget(relation.target_resource_id);
-                      }
                     }}
                     onKeyDown={(event) => activate(event, () => {
+                      setSelection({ type: "relation", id: relation.relation_id });
                       onInspectRelation?.(relation);
-                      if (relation.evidence.type === "configured") {
-                        setEditingBinding(relation);
-                        setBindingTarget(relation.target_resource_id);
-                      }
                     })}
                     role="button"
                     tabIndex={0}
                   />
-                  <text className="topology-edge-label" x={(x1 + x2) / 2} y={(y1 + y2) / 2 - 6}>{relation.evidence_type === "configured" && relation.lifecycle === "orphaned" ? "已配置 · 未解析" : displayEnum(relation.evidence_type)}</text>
+                  <text
+                    className={`topology-edge-label${selected ? " is-selected" : ""}${dimmed ? " is-dimmed" : ""}`}
+                    x={label.x}
+                    y={label.y}
+                  >
+                    {edgeLabel(relation)}
+                  </text>
                 </g>
               );
             })}
           </svg>
-          {topology.nodes.map((node) => {
-            const point = positions.get(node.resource_id)!;
+
+          {nodes.map((node) => {
+            const resourceId = node.type === "resource" ? node.resource.resource_id : node.resource_id;
+            const point = layout.nodes.get(resourceId);
+            if (point === undefined) return null;
+            if (node.type === "placeholder") {
+              return (
+                <div
+                  aria-label={`未解析资源 ${resourceId}`}
+                  className={`topology-node topology-node--placeholder${isNodeSelected(resourceId) ? " is-selected" : ""}${isNodeDimmed(resourceId) ? " is-dimmed" : ""}`}
+                  data-resource-id={resourceId}
+                  id={`topology-node-${resourceId}`}
+                  key={resourceId}
+                  onKeyDown={(event) => focusAdjacentNode(resourceId, event)}
+                  style={{ left: point.x, top: point.y }}
+                  tabIndex={-1}
+                >
+                  <span>未解析资源</span>
+                  <strong>{resourceId}</strong>
+                  <code>端点缺失 · 证据保留</code>
+                </div>
+              );
+            }
+            const resource = node.resource;
             return (
               <button
-                className={`topology-node${node.resource_id === topology.focus_resource_id ? " is-focus" : ""}`}
-                id={`topology-node-${node.resource_id}`}
-                key={node.resource_id}
-                onClick={() => onInspectResource?.(node)}
-                onKeyDown={(event) => {
-                  const next = adjacentResourceId(topology, node.resource_id, event.key);
-                  if (next === null) return;
-                  event.preventDefault();
-                  document.getElementById(`topology-node-${next}`)?.focus();
+                className={`topology-node topology-node--health-${resource.health}${resource.resource_id === topology.focus_resource_id ? " is-focus" : ""}${isNodeSelected(resourceId) ? " is-selected" : ""}${isNodeDimmed(resourceId) ? " is-dimmed" : ""}`}
+                id={`topology-node-${resource.resource_id}`}
+                key={resource.resource_id}
+                onClick={() => {
+                  setSelection({ type: "resource", id: resource.resource_id });
+                  onInspectResource?.(resource);
                 }}
+                onKeyDown={(event) => focusAdjacentNode(resource.resource_id, event)}
                 style={{ left: point.x, top: point.y }}
                 type="button"
               >
-                <span>{node.kind}</span><strong>{node.display_name}</strong><code>{displayEnum(node.health)} · {displayEnum(node.freshness)}</code>
+                <span>{resource.kind}</span>
+                <strong>{resource.display_name}</strong>
+                <code>{displayEnum(resource.health)} · {displayEnum(resource.freshness)}</code>
               </button>
             );
           })}
-        </div>
-      </div>
 
-      <div className="topology-footer">
-        <div className="topology-legend" aria-label="关系证据图例">
-          <span className="legend-provider">提供方 · 实线</span>
-          <span className="legend-configured">已配置 · 双线</span>
-          <span className="legend-inferred">推断 · 虚线</span>
+          {laneCounts.context > 0 ? (
+            <div className="topology-context-label" style={{ top: contextLabelY }}>
+              相关上下文 <code>{laneCounts.context}</code>
+            </div>
+          ) : null}
+
+          <div className="topology-legend" aria-label="关系证据图例">
+            <span className="legend-provider">提供方 · 实线</span>
+            <span className="legend-configured">已配置 · 双线</span>
+            <span className="legend-inferred">推断 · 虚线</span>
+          </div>
+          <section className="topology-frontier" aria-labelledby="topology-frontier">
+            <div>
+              <h2 id="topology-frontier">边界</h2>
+              <span>{topology.frontier.length} 个续查点</span>
+            </div>
+            {topology.frontier.length === 0 ? <p>当前深度没有额外续查点。</p> : topology.frontier.map((frontier) => (
+              <button key={`${frontier.resource_id}-${frontier.direction}`} onClick={() => onFocusResource?.(frontier.resource_id)} type="button">
+                <code>{frontier.resource_id}</code>
+                <span>{frontier.direction} · 继续受限查询</span>
+              </button>
+            ))}
+          </section>
         </div>
-        <section className="topology-frontier" aria-labelledby="topology-frontier">
-          <div><h2 id="topology-frontier">边界</h2><span>{topology.frontier.length} 个续查点</span></div>
-          {topology.frontier.length === 0 ? <p>未返回额外的受限边界。</p> : topology.frontier.map((frontier) => (
-            <button key={`${frontier.resource_id}-${frontier.direction}`} onClick={() => onFocusResource?.(frontier.resource_id)} type="button">
-              <code>{frontier.resource_id}</code><span>{frontier.direction} · 继续受限查询</span>
-            </button>
-          ))}
-        </section>
       </div>
     </div>
   );

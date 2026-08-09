@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { RelationDto } from "../generated/query/RelationDto";
 import type { ResourceDto } from "../generated/query/ResourceDto";
+import { RelationDialog } from "../features/topology/manual-relations/RelationDialog";
+import type { RelationMutationResult } from "../features/topology/manual-relations/RelationBuilder";
 import { useDesktopAdapter } from "../platform/desktop-adapter/DesktopAdapterContext";
 import type { Unsubscribe } from "../platform/desktop-adapter/desktop-adapter";
 
@@ -18,6 +20,16 @@ interface RouteShellState {
 }
 
 type RouteShellStateMap = Record<RouteId, RouteShellState>;
+
+interface RelationDialogState {
+  readonly relation: RelationDto | null;
+  readonly source: ResourceDto | null;
+}
+
+interface RelationNoticeState {
+  readonly message: string;
+  readonly sourceResourceId: string;
+}
 
 function createRouteShellState(): RouteShellStateMap {
   const empty = (): RouteShellState => ({
@@ -47,6 +59,8 @@ export function AppShell() {
   const [searchValue, setSearchValue] = useState("");
   const [searchResults, setSearchResults] = useState<readonly ResourceDto[]>([]);
   const [routeState, setRouteState] = useState<RouteShellStateMap>(createRouteShellState);
+  const [relationDialog, setRelationDialog] = useState<RelationDialogState | null>(null);
+  const [relationNotice, setRelationNotice] = useState<RelationNoticeState | null>(null);
   const [queryVersion, setQueryVersion] = useState(0);
   const route = getRoute(activeRoute);
   const currentRouteState = routeState[activeRoute];
@@ -98,6 +112,7 @@ export function AppShell() {
   }
 
   function navigate(routeId: RouteId) {
+    setRelationDialog(null);
     setActiveRoute(routeId);
     updateRouteState(routeId, { selection: null, detailResourceId: null });
     if (routeId === "settings") {
@@ -113,6 +128,44 @@ export function AppShell() {
   function inspectRelation(relation: RelationDto, routeId = activeRoute) {
     updateRouteState(routeId, { selection: { type: "relation", relation } });
     setInspectorOpen(true);
+  }
+
+  function openRelationBuilderCreate(source: ResourceDto | null) {
+    setRelationNotice(null);
+    setRelationDialog({ relation: null, source });
+  }
+
+  function openRelationBuilderEdit(relation: RelationDto) {
+    setRelationNotice(null);
+    setRelationDialog({ relation, source: null });
+  }
+
+  function saveRelationBuilder(result: RelationMutationResult) {
+    setRelationDialog(null);
+    updateRouteState("topology", {
+      selection: null,
+      ...(activeRoute === "topology" ? { topologyFocusId: result.sourceResourceId } : {}),
+    });
+    setRelationNotice({
+      message: result.action === "created"
+        ? "关联已保存，拓扑已刷新"
+        : result.action === "updated"
+          ? "关联修改已保存，拓扑已刷新"
+          : result.action === "disabled"
+            ? "关联已禁用，拓扑已刷新"
+            : "关联已存在，已显示现有拓扑",
+      sourceResourceId: result.sourceResourceId,
+    });
+    setQueryVersion((version) => version + 1);
+  }
+
+  function showSavedTopology() {
+    if (relationNotice === null) return;
+    setActiveRoute("topology");
+    updateRouteState("topology", {
+      selection: null,
+      topologyFocusId: relationNotice.sourceResourceId,
+    });
   }
 
   function rememberTopologyFocus(resourceId: string) {
@@ -164,6 +217,8 @@ export function AppShell() {
         inspectorOpen={inspectorOpen}
         onInspectRelation={inspectRelation}
         onInspectResource={inspectResource}
+        onCreateRelation={openRelationBuilderCreate}
+        onEditRelation={openRelationBuilderEdit}
         onNavigate={navigate}
         onOpenInspector={() => setInspectorOpen(true)}
         onSelectResource={selectInventoryResource}
@@ -174,10 +229,35 @@ export function AppShell() {
       />
       <InspectorHost
         onClose={() => setInspectorOpen(false)}
+        onCreateRelation={openRelationBuilderCreate}
+        onEditRelation={openRelationBuilderEdit}
         open={inspectorOpen}
         routeLabel={route.label}
         selection={currentRouteState.selection}
       />
+      {relationDialog !== null ? (
+        <RelationDialog
+          onClose={() => setRelationDialog(null)}
+          onSaved={saveRelationBuilder}
+          relation={relationDialog.relation}
+          source={relationDialog.source}
+        />
+      ) : null}
+      {relationNotice !== null ? (
+        <div className="relation-save-notice" role="status">
+          <span>{relationNotice.message}</span>
+          {activeRoute !== "topology" ? (
+            <button onClick={showSavedTopology} type="button">查看拓扑</button>
+          ) : null}
+          <button
+            aria-label="关闭关联保存提示"
+            onClick={() => setRelationNotice(null)}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       <RuntimeBar />
     </div>
   );

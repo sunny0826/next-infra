@@ -2,19 +2,24 @@
 //!
 //! Data surface: PostgREST OpenAPI document at GET /rest/v1/ — standard self-hosted
 //! Supabase exposes PostgREST at /rest/v1/. The OpenAPI spec lists every exposed
-//! table/schema. We collect one `supabase.self_hosted.table` resource per exposed table.
+//! table/schema. We collect one local `supabase.self_hosted.instance` resource
+//! and one `supabase.self_hosted.table` resource per exposed table.
 
 use async_trait::async_trait;
-use next_infra_connector_api::{ResourceObservation, SyncOutcome};
+use next_infra_connector_api::{
+    RelationObservation, ResourceLocator, ResourceObservation, SyncOutcome,
+};
 use next_infra_core::{
-    ConnectorCoverage, ConnectorCoverageLevel, ConnectorType, CoverageGapReason, ExternalId,
-    LabelKey, ResourceHealth, ResourceKind, SchemaVersion, Scope, SyncMode, Timestamp,
+    ConnectorCoverage, ConnectorCoverageLevel, ConnectorType, CoverageGapReason, EvidenceKey,
+    ExternalId, FieldPath, LabelKey, RelationKind, ResourceHealth, ResourceKind, SchemaVersion,
+    Scope, SyncMode, Timestamp,
 };
 use serde::Deserialize;
 use serde_json::json;
 use std::collections::BTreeMap;
 
 const MAX_TABLES: usize = 500;
+const DEFAULT_INSTANCE_DISPLAY_NAME: &str = "Supabase Self-hosted";
 
 /// Auth role extracted from OpenAPI security scheme (if present).
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -131,10 +136,18 @@ impl<T: SelfHostedTransport> next_infra_connector_api::ReadConnector
             })
             .collect::<Result<_, _>>()
             .map_err(|_| invalid_response())?;
+        let display_name = configured_display_name(&request.connection.config)
+            .unwrap_or(DEFAULT_INSTANCE_DISPLAY_NAME);
+        let instance =
+            map_instance(&request.scope, display_name, at).map_err(|_| invalid_response())?;
+        let relations = map_table_relations(&instance, &table_resources);
+        let mut resources = Vec::with_capacity(table_resources.len() + 1);
+        resources.push(instance);
+        resources.extend(table_resources);
 
         let (coverage, outcome) = if truncated {
             let reason = CoverageGapReason::PaginationIncomplete;
-            let count = table_resources.len();
+            let count = resources.len() - 1;
             (
                 next_infra_core::SyncCoverage::Partial {
                     scope: Some(request.scope.clone()),
@@ -142,8 +155,8 @@ impl<T: SelfHostedTransport> next_infra_connector_api::ReadConnector
                 },
                 SyncOutcome::Partial {
                     batch: next_infra_connector_api::ObservationBatch {
-                        resources: table_resources,
-                        relations: vec![],
+                        resources,
+                        relations,
                         coverage: next_infra_core::SyncCoverage::Partial {
                             scope: Some(request.scope.clone()),
                             reason,
@@ -174,8 +187,8 @@ impl<T: SelfHostedTransport> next_infra_connector_api::ReadConnector
                 },
                 SyncOutcome::Complete {
                     batch: next_infra_connector_api::ObservationBatch {
-                        resources: table_resources,
-                        relations: vec![],
+                        resources,
+                        relations,
                         coverage: next_infra_core::SyncCoverage::AuthoritativeFull {
                             scope: request.scope.clone(),
                         },
@@ -280,6 +293,7 @@ fn invalid_response() -> next_infra_connector_api::ConnectorFailure {
 }
 
 pub fn descriptor() -> next_infra_connector_api::ConnectorDescriptor {
+    let instance_kind = ResourceKind::new("supabase.self_hosted.instance").unwrap();
     let table_kind = ResourceKind::new("supabase.self_hosted.table").unwrap();
     next_infra_connector_api::ConnectorDescriptor {
         connector_type: ConnectorType::new("supabase-self-hosted").unwrap(),
@@ -290,13 +304,33 @@ pub fn descriptor() -> next_infra_connector_api::ConnectorDescriptor {
             minimum_permissions: vec!["PostgREST /rest/v1/ read (apikey)".into()],
         },
         sync_modes: vec![SyncMode::Full, SyncMode::Targeted],
-        resources: vec![cap(
-            table_kind,
-            "supabase.self_hosted.tables",
-            ConnectorCoverageLevel::Partial,
-            "PostgREST-exposed table inventory; user-defined schema varies by instance",
-        )],
-        relations: vec![],
+        resources: vec![
+            cap(
+                instance_kind.clone(),
+                "supabase.self_hosted.instance",
+                ConnectorCoverageLevel::Supported,
+                None,
+            ),
+            cap(
+                table_kind.clone(),
+                "supabase.self_hosted.tables",
+                ConnectorCoverageLevel::Partial,
+                Some("PostgREST-exposed table inventory; user-defined schema varies by instance"),
+            ),
+        ],
+        relations: vec![next_infra_connector_api::RelationCapability {
+            kind: RelationKind::new("supabase.contains").unwrap(),
+            source_kind: instance_kind,
+            target_kind: table_kind,
+            coverage: ConnectorCoverage {
+                module: "supabase.self_hosted.instance_tables".into(),
+                level: ConnectorCoverageLevel::Partial,
+                reason: Some(
+                    "Relations cover the bounded PostgREST table inventory discovered in this sync"
+                        .into(),
+                ),
+            },
+        }],
         sensitive_field_policy: vec![
             "No credentials, connection strings, or data rows are emitted. Only table names from the OpenAPI spec are included.".into()
         ],
@@ -318,7 +352,7 @@ fn cap(
     kind: ResourceKind,
     module: &str,
     level: ConnectorCoverageLevel,
-    reason: &str,
+    reason: Option<&str>,
 ) -> next_infra_connector_api::ResourceCapability {
     next_infra_connector_api::ResourceCapability {
         kind,
@@ -326,9 +360,97 @@ fn cap(
         coverage: ConnectorCoverage {
             module: module.into(),
             level,
-            reason: Some(reason.into()),
+            reason: reason.map(str::to_owned),
         },
     }
+}
+
+/// Map the configured local scope to the single self-hosted instance resource.
+///
+/// The scope is the connector's local, non-sensitive display identity. No
+/// provider URL, host, address, credential, or response content is copied.
+pub fn map_instance(
+    scope: &Scope,
+    connection_display_name: &str,
+    at: Timestamp,
+) -> Result<ResourceObservation, String> {
+    let connection_display_name = connection_display_name.trim();
+    if connection_display_name.is_empty() || connection_display_name.len() > 120 {
+        return Err("invalid display name".into());
+    }
+    let kind = ResourceKind::new("supabase.self_hosted.instance").map_err(|_| "invalid kind")?;
+    let external_id = ExternalId::new(format!(
+        "supabase.self_hosted.instance:{}",
+        stable_scope_digest(scope)
+    ))
+    .map_err(|_| "invalid id")?;
+
+    Ok(ResourceObservation {
+        kind,
+        external_id,
+        name: connection_display_name.into(),
+        display_name: connection_display_name.into(),
+        scope: scope.clone(),
+        labels: BTreeMap::from([
+            (
+                LabelKey::new("supabase.control_plane").unwrap(),
+                "self_hosted".into(),
+            ),
+            (LabelKey::new("supabase.source").unwrap(), "openapi".into()),
+        ]),
+        health: ResourceHealth::Unknown,
+        attributes: json!({}),
+        attribute_schema_version: SchemaVersion::new(1).unwrap(),
+        observed_at: at,
+    })
+}
+
+fn configured_display_name(config: &serde_json::Value) -> Option<&str> {
+    config
+        .get("display_name")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && value.len() <= 120)
+}
+
+/// Return a stable, opaque identifier for the configured local scope.
+///
+/// `Scope` is intentionally permissive because it is a shared sync contract;
+/// do not copy it into an external ID where a URL, host, or other sensitive
+/// value could become part of the persisted resource identity.
+fn stable_scope_digest(scope: &Scope) -> String {
+    // FNV-1a is sufficient here: this is an opaque identity component, not a
+    // security boundary, and keeping it local avoids adding a dependency.
+    let mut digest = 0xcbf29ce484222325_u64;
+    for byte in scope.as_str().as_bytes() {
+        digest ^= u64::from(*byte);
+        digest = digest.wrapping_mul(0x100000001b3_u64);
+    }
+    format!("{digest:016x}")
+}
+
+fn map_table_relations(
+    instance: &ResourceObservation,
+    tables: &[ResourceObservation],
+) -> Vec<RelationObservation> {
+    tables
+        .iter()
+        .map(|table| RelationObservation {
+            source: ResourceLocator {
+                kind: instance.kind.clone(),
+                external_id: instance.external_id.clone(),
+            },
+            target: ResourceLocator {
+                kind: table.kind.clone(),
+                external_id: table.external_id.clone(),
+            },
+            kind: RelationKind::new("supabase.contains").expect("static relation kind"),
+            evidence_key: EvidenceKey::new(format!("supabase:contains:{}", table.external_id))
+                .expect("stable table evidence key"),
+            field_path: FieldPath::new("paths").expect("static OpenAPI field path"),
+            observed_at: table.observed_at,
+        })
+        .collect()
 }
 
 /// Map an OpenAPI path to a `supabase.self_hosted.table` resource.
@@ -381,17 +503,33 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
-    fn descriptor_declares_single_table_resource() {
+    fn descriptor_declares_instance_table_and_contains_relation() {
         let d = descriptor();
         assert!(d.validate().is_ok());
         assert!(check_descriptor(&d).is_empty());
-        // No relations
-        assert!(d.relations.is_empty());
-        // Single resource kind
-        assert_eq!(d.resources.len(), 1);
-        let cap = &d.resources[0];
-        assert_eq!(cap.kind.as_str(), "supabase.self_hosted.table");
-        assert_eq!(cap.coverage.module, "supabase.self_hosted.tables");
+        assert_eq!(d.resources.len(), 2);
+        let instance = d
+            .resources
+            .iter()
+            .find(|cap| cap.kind.as_str() == "supabase.self_hosted.instance")
+            .expect("instance capability");
+        assert_eq!(instance.coverage.level, ConnectorCoverageLevel::Supported);
+        assert!(instance.coverage.reason.is_none());
+        let table = d
+            .resources
+            .iter()
+            .find(|cap| cap.kind.as_str() == "supabase.self_hosted.table")
+            .expect("table capability");
+        assert_eq!(table.coverage.module, "supabase.self_hosted.tables");
+
+        assert_eq!(d.relations.len(), 1);
+        let relation = &d.relations[0];
+        assert_eq!(relation.kind.as_str(), "supabase.contains");
+        assert_eq!(
+            relation.source_kind.as_str(),
+            "supabase.self_hosted.instance"
+        );
+        assert_eq!(relation.target_kind.as_str(), "supabase.self_hosted.table");
     }
 
     #[test]
@@ -413,6 +551,26 @@ mod tests {
         );
         // Hyphens are filtered out
         assert_eq!(sanitize_external_id("/my-table"), "table_mytable");
+    }
+
+    #[test]
+    fn instance_external_id_is_stable_and_opaque() {
+        let scope = Scope::new("fixture-scope").unwrap();
+        let at = Timestamp::from_unix_millis(0).unwrap();
+        let first = map_instance(&scope, "Fixture Supabase", at).unwrap();
+        let second = map_instance(&scope, "Fixture Supabase", at).unwrap();
+
+        assert_eq!(first.external_id, second.external_id);
+        assert!(
+            first
+                .external_id
+                .as_str()
+                .starts_with("supabase.self_hosted.instance:")
+        );
+        assert!(!first.external_id.as_str().contains(scope.as_str()));
+        assert_eq!(first.name, "Fixture Supabase");
+        assert_eq!(first.display_name, "Fixture Supabase");
+        assert_ne!(first.display_name, scope.as_str());
     }
 
     #[test]
@@ -471,7 +629,7 @@ mod tests {
                 connection_id: next_infra_core::ConnectionId::new("fixture-connection").unwrap(),
                 connector_type: next_infra_core::ConnectorType::new("supabase-self-hosted")
                     .unwrap(),
-                config: serde_json::json!({}),
+                config: serde_json::json!({ "base_url": "fixture-base" }),
                 config_schema_version: SchemaVersion::new(1).unwrap(),
             },
             mode: SyncMode::Full,
@@ -481,11 +639,54 @@ mod tests {
         }
     }
 
+    fn assert_instance_batch(
+        batch: &next_infra_connector_api::ObservationBatch,
+        expected_table_count: usize,
+    ) {
+        assert_eq!(batch.resources.len(), expected_table_count + 1);
+        assert_eq!(batch.relations.len(), expected_table_count);
+
+        let instance = batch
+            .resources
+            .iter()
+            .find(|resource| resource.kind.as_str() == "supabase.self_hosted.instance")
+            .expect("instance resource");
+        assert_eq!(instance.name, DEFAULT_INSTANCE_DISPLAY_NAME);
+        assert_eq!(instance.display_name, DEFAULT_INSTANCE_DISPLAY_NAME);
+        assert_ne!(instance.display_name, "fixture-scope");
+
+        let tables = batch
+            .resources
+            .iter()
+            .filter(|resource| resource.kind.as_str() == "supabase.self_hosted.table")
+            .collect::<Vec<_>>();
+        assert_eq!(tables.len(), expected_table_count);
+
+        for relation in &batch.relations {
+            assert_eq!(relation.kind.as_str(), "supabase.contains");
+            assert_eq!(relation.source.kind, instance.kind);
+            assert_eq!(relation.source.external_id, instance.external_id);
+            assert_eq!(relation.target.kind.as_str(), "supabase.self_hosted.table");
+            assert!(
+                tables
+                    .iter()
+                    .any(|table| { table.external_id == relation.target.external_id })
+            );
+            assert!(
+                relation
+                    .evidence_key
+                    .as_str()
+                    .starts_with("supabase:contains:")
+            );
+            assert_eq!(relation.field_path.as_str(), "paths");
+        }
+    }
+
     #[tokio::test]
     async fn complete_outcome_when_under_limit() {
         let body = serde_json::json!({
             "paths": {
-                "/users": {},
+                "/users": {"description": "ignored-response-value"},
                 "/posts": {}
             }
         })
@@ -504,15 +705,15 @@ mod tests {
 
         match outcome {
             SyncOutcome::Complete { batch } => {
-                assert_eq!(batch.resources.len(), 2);
+                assert_instance_batch(&batch, 2);
                 assert!(matches!(
                     batch.coverage,
                     next_infra_core::SyncCoverage::AuthoritativeFull { .. }
                 ));
-                // No credentials leaked
-                let json = serde_json::to_string(&batch.resources).unwrap();
+                let json = serde_json::to_string(&batch).unwrap();
                 assert!(!json.contains("fixture-token"));
                 assert!(!json.contains("apikey"));
+                assert!(!json.contains("ignored-response-value"));
             }
             other => panic!("expected Complete, got {other:?}"),
         }
@@ -541,7 +742,7 @@ mod tests {
 
         match outcome {
             SyncOutcome::Partial { batch, failure } => {
-                assert_eq!(batch.resources.len(), MAX_TABLES);
+                assert_instance_batch(&batch, MAX_TABLES);
                 assert!(matches!(
                     batch.coverage,
                     next_infra_core::SyncCoverage::Partial {
@@ -551,7 +752,7 @@ mod tests {
                 ));
                 assert!(!batch.warnings.is_empty());
                 assert!(failure.message.contains("truncated"));
-                let json = serde_json::to_string(&batch.resources).unwrap();
+                let json = serde_json::to_string(&batch).unwrap();
                 assert!(!json.contains("fixture-token"));
             }
             other => panic!("expected Partial, got {other:?}"),
@@ -600,13 +801,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn validate_requires_correct_connector_type() {
+    async fn validate_keeps_v1_config_valid_and_rejects_wrong_connector_type() {
         let body = serde_json::json!({ "paths": { "/users": {} } })
             .to_string()
             .into_bytes();
         let connector = SupabaseSelfHostedConnector::new(FakeSelfHostedTransport {
             body: Mutex::new(Ok(body)),
         });
+
+        let v1 = next_infra_connector_api::ValidationRequest {
+            connection: sync_request().connection,
+        };
+        let report = connector.validate(v1, None).await.unwrap();
+        assert!(matches!(
+            report.status,
+            next_infra_connector_api::ValidationStatus::Valid
+        ));
 
         // Wrong connector type → Invalid
         let wrong_type = next_infra_connector_api::ValidationRequest {

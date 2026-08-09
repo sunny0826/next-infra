@@ -9,7 +9,7 @@ use crate::host::authorization::authorize_launch;
 use crate::host::lifecycle::LaunchSource;
 use crate::host::local_rpc::LocalRpcHost;
 use crate::scheduled_sync::{self, DriverHandle};
-use next_infra_binding::{BindingInput, BindingService};
+use next_infra_binding::{BindingError, BindingInput, BindingService};
 use next_infra_connector_aliyun::{
     AliyunConnector, AliyunTransport, SignedRequest as AliyunSignedRequest,
     descriptor as aliyun_descriptor,
@@ -4323,16 +4323,12 @@ fn binding_create(
     let binding = state
         .store
         .write(|store| {
-            BindingService::new(store)
-                .create(
-                    input,
-                    now().map_err(|_| {
-                        next_infra_store::StoreError::Contract("clock unavailable".into())
-                    })?,
-                )
-                .map_err(binding_store_error)
+            let at = now()
+                .map_err(|_| next_infra_store::StoreError::Contract("clock unavailable".into()))?;
+            Ok(BindingService::new(store).create(input, at))
         })
-        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?;
+        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?
+        .map_err(binding_command_error)?;
     binding_result(&state, binding)
 }
 
@@ -4351,17 +4347,12 @@ fn binding_update(
     let binding = state
         .store
         .write(|store| {
-            BindingService::new(store)
-                .update(
-                    &binding_id,
-                    input,
-                    now().map_err(|_| {
-                        next_infra_store::StoreError::Contract("clock unavailable".into())
-                    })?,
-                )
-                .map_err(binding_store_error)
+            let at = now()
+                .map_err(|_| next_infra_store::StoreError::Contract("clock unavailable".into()))?;
+            Ok(BindingService::new(store).update(&binding_id, input, at))
         })
-        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?;
+        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?
+        .map_err(binding_command_error)?;
     binding_result(&state, binding)
 }
 
@@ -4375,16 +4366,12 @@ fn binding_disable(
     let binding = state
         .store
         .write(|store| {
-            BindingService::new(store)
-                .disable(
-                    &binding_id,
-                    now().map_err(|_| {
-                        next_infra_store::StoreError::Contract("clock unavailable".into())
-                    })?,
-                )
-                .map_err(binding_store_error)
+            let at = now()
+                .map_err(|_| next_infra_store::StoreError::Contract("clock unavailable".into()))?;
+            Ok(BindingService::new(store).disable(&binding_id, at))
         })
-        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?;
+        .map_err(|_| binding_error("binding_unavailable", "Binding could not be saved.", true))?
+        .map_err(binding_command_error)?;
     binding_result(&state, binding)
 }
 
@@ -4393,20 +4380,54 @@ fn binding_input(
     target_resource_id: String,
     kind: String,
 ) -> Result<BindingInput, ErrorEnvelope> {
+    const SUPPORTED_KINDS: [&str; 6] = [
+        "infra.deployed_via",
+        "infra.accessed_via",
+        "network.routes_to",
+        "automation.deploys_to",
+        "data.writes_to",
+        "infra.depends_on",
+    ];
+    let kind = next_infra_core::RelationKind::new(kind)
+        .map_err(|_| binding_error("invalid_binding", "Binding kind is invalid.", false))?;
+    if !SUPPORTED_KINDS.contains(&kind.as_str()) {
+        return Err(binding_error(
+            "invalid_binding",
+            "Binding kind is not supported.",
+            false,
+        ));
+    }
     Ok(BindingInput {
         source_resource_id: next_infra_core::ResourceId::new(source_resource_id)
             .map_err(|_| binding_error("invalid_binding", "Binding source is invalid.", false))?,
         target_resource_id: next_infra_core::ResourceId::new(target_resource_id)
             .map_err(|_| binding_error("invalid_binding", "Binding target is invalid.", false))?,
-        kind: next_infra_core::RelationKind::new(kind)
-            .map_err(|_| binding_error("invalid_binding", "Binding kind is invalid.", false))?,
+        kind,
     })
 }
 
-fn binding_store_error(
-    error: next_infra_binding::BindingError<next_infra_store::StoreError>,
-) -> next_infra_store::StoreError {
-    next_infra_store::StoreError::Contract(error.to_string())
+fn binding_command_error(error: BindingError<next_infra_store::StoreError>) -> ErrorEnvelope {
+    match error {
+        BindingError::Invalid(_) => {
+            binding_error("invalid_binding", "Binding input is invalid.", false)
+        }
+        BindingError::NotFound => {
+            binding_error("binding_not_found", "Binding was not found.", false)
+        }
+        BindingError::Duplicate => binding_error(
+            "binding_conflict",
+            "An active binding already exists for these resources and relation type.",
+            false,
+        ),
+        BindingError::TemporalConflict => binding_error(
+            "binding_temporal_conflict",
+            "Binding changed before this mutation could be applied. Refresh and try again.",
+            false,
+        ),
+        BindingError::Store(_) => {
+            binding_error("binding_unavailable", "Binding could not be saved.", true)
+        }
+    }
 }
 
 fn binding_result(
@@ -5344,10 +5365,53 @@ mod tests {
         assert!(!error.retryable);
         assert_eq!(error.message, "Binding source is invalid.");
 
+        let unsupported = binding_input(
+            "fixture-source".into(),
+            "fixture-target".into(),
+            "custom.links_to".into(),
+        )
+        .unwrap_err();
+        assert_eq!(unsupported.code, "invalid_binding");
+        assert_eq!(unsupported.message, "Binding kind is not supported.");
+
+        for kind in [
+            "infra.deployed_via",
+            "infra.accessed_via",
+            "network.routes_to",
+            "automation.deploys_to",
+            "data.writes_to",
+            "infra.depends_on",
+        ] {
+            assert!(
+                binding_input(
+                    "fixture-source".into(),
+                    "fixture-target".into(),
+                    kind.into()
+                )
+                .is_ok()
+            );
+        }
+
         let error = binding_error("binding_unavailable", "Binding could not be saved.", true);
         assert_eq!(error.code, "binding_unavailable");
         assert!(error.retryable);
         assert!(!error.message.contains("StoreError"));
+
+        let conflict = binding_command_error(BindingError::Duplicate);
+        assert_eq!(conflict.code, "binding_conflict");
+        assert!(!conflict.retryable);
+
+        let temporal = binding_command_error(BindingError::TemporalConflict);
+        assert_eq!(temporal.code, "binding_temporal_conflict");
+        assert!(!temporal.retryable);
+        assert_ne!(temporal.message, conflict.message);
+
+        let unavailable = binding_command_error(BindingError::Store(
+            next_infra_store::StoreError::Contract("internal store detail".into()),
+        ));
+        assert_eq!(unavailable.code, "binding_unavailable");
+        assert!(unavailable.retryable);
+        assert!(!unavailable.message.contains("internal store detail"));
     }
 
     // ── Scheduler integration tests ─────────────────────────────────────────

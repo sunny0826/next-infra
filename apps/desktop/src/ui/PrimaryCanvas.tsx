@@ -19,15 +19,31 @@ interface PrimaryCanvasProps {
   onNavigate: (routeId: RouteId) => void;
   onInspectResource: (resource: ResourceDto) => void;
   onInspectRelation: (relation: RelationDto) => void;
+  onCreateRelation: (source: ResourceDto | null) => void;
+  onEditRelation: (relation: RelationDto) => void;
   onSelectResource: (resource: ResourceDto) => void;
   onTopologyFocus: (resourceId: string) => void;
 }
 
-export function PrimaryCanvas({ inspectorOpen, onOpenInspector, route, detailResourceId, topologyFocusId, queryVersion, onNavigate, onInspectResource, onInspectRelation, onSelectResource, onTopologyFocus }: PrimaryCanvasProps) {
+export function PrimaryCanvas({
+  inspectorOpen,
+  onOpenInspector,
+  route,
+  detailResourceId,
+  topologyFocusId,
+  queryVersion,
+  onNavigate,
+  onInspectResource,
+  onInspectRelation,
+  onCreateRelation,
+  onEditRelation,
+  onSelectResource,
+  onTopologyFocus,
+}: PrimaryCanvasProps) {
   let content;
   if (route.id === "overview") content = <OverviewPage onInspectResource={onInspectResource} onNavigate={onNavigate} queryVersion={queryVersion} />;
   else if (route.id === "inventory") content = detailResourceId ? <ResourceDetailPage resourceId={detailResourceId} queryVersion={queryVersion} /> : <InventoryPage onSelectResource={onSelectResource} queryVersion={queryVersion} />;
-  else if (route.id === "topology") content = topologyFocusId ? <TopologyPage focusResourceId={topologyFocusId} onFocusResource={onTopologyFocus} onInspectRelation={onInspectRelation} onInspectResource={onInspectResource} queryVersion={queryVersion} /> : <><header className="shell-route-header"><div className="shell-route-title"><p className="shell-eyebrow">受限关系查询</p><h1>{route.label}</h1><p>{route.description}</p></div></header><section className="shell-placeholder"><div><h2>选择拓扑焦点</h2><p>从资源清单或全局搜索中选择资源，以打开受限焦点视图。</p></div></section></>;
+  else if (route.id === "topology") content = topologyFocusId ? <TopologyPage focusResourceId={topologyFocusId} onCreateRelation={onCreateRelation} onEditRelation={onEditRelation} onFocusResource={onTopologyFocus} onInspectRelation={onInspectRelation} onInspectResource={onInspectResource} queryVersion={queryVersion} /> : <><header className="shell-route-header"><div className="shell-route-title"><p className="shell-eyebrow">受限关系查询</p><h1>{route.label}</h1><p>{route.description}</p></div></header><section className="shell-placeholder"><div><h2>建立或查看资源关系</h2><p>直接创建手工关系，或从资源清单与全局搜索选择资源作为拓扑焦点。</p><button className="shell-control-button" onClick={() => onCreateRelation(null)} type="button">新增关联</button></div></section></>;
   else if (route.id === "timeline") content = <TimelinePage queryVersion={queryVersion} />;
   else if (route.id === "connectors") content = <ConnectorsPage queryVersion={queryVersion} />;
   else if (route.id === "settings") content = <SettingsPage queryVersion={queryVersion} />;

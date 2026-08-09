@@ -10,6 +10,8 @@ export type InspectorSelection =
 
 interface InspectorHostProps {
   onClose: () => void;
+  onCreateRelation: (source: ResourceDto | null) => void;
+  onEditRelation: (relation: RelationDto) => void;
   open: boolean;
   routeLabel: string;
   selection: InspectorSelection;
@@ -63,7 +65,14 @@ function RelationEvidence({ relation }: { relation: RelationDto }) {
   );
 }
 
-export function InspectorHost({ onClose, open, routeLabel, selection }: InspectorHostProps) {
+export function InspectorHost({
+  onClose,
+  onCreateRelation,
+  onEditRelation,
+  open,
+  routeLabel,
+  selection,
+}: InspectorHostProps) {
   return (
     <aside aria-label="证据检查器" className="shell-inspector" hidden={!open}>
       <div className="shell-inspector-head">
@@ -101,6 +110,13 @@ export function InspectorHost({ onClose, open, routeLabel, selection }: Inspecto
             </dl>
             <h4>证据</h4>
             <p className="shell-inspector-subtitle">ResourceDto 仅提供当前事实；此选择中不包含关系来源。</p>
+            <button
+              className="shell-control-button"
+              onClick={() => onCreateRelation(selection.resource)}
+              type="button"
+            >
+              从此资源建立关联
+            </button>
           </>
         ) : null}
 
@@ -118,6 +134,15 @@ export function InspectorHost({ onClose, open, routeLabel, selection }: Inspecto
             </dl>
             <h4>证据</h4>
             <RelationEvidence relation={selection.relation} />
+            {selection.relation.evidence.type === "configured" ? (
+              <button
+                className="shell-control-button"
+                onClick={() => onEditRelation(selection.relation)}
+                type="button"
+              >
+                编辑关联
+              </button>
+            ) : null}
           </>
         ) : null}
       </div>

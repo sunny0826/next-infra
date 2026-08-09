@@ -10,6 +10,7 @@ import type {
   Unsubscribe,
 } from "./platform/desktop-adapter/desktop-adapter";
 import { MockDesktopAdapter } from "./platform/desktop-adapter/mock-desktop-adapter";
+import { createManualRelationAdapter } from "./test/fixtures/manual-relation-adapter";
 import { createQueryEvidenceLifecycleSnapshotFixture } from "./test/fixtures/query-fixtures";
 
 afterEach(() => {
@@ -256,6 +257,54 @@ describe("React app shell", () => {
     expect(screen.getByText("受限")).toBeInTheDocument();
   });
 
+  it("creates a relation from an unfocused Topology page and reveals the refreshed topology", async () => {
+    const user = userEvent.setup();
+    renderShell(createManualRelationAdapter());
+
+    await user.click(screen.getByRole("button", { name: "拓扑" }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "建立或查看资源关系" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "新增关联" }));
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    const dialog = screen.getByRole("dialog", { name: "资源关系配置" });
+    expect(
+      within(dialog).getByRole("heading", { level: 2, name: "建立本地关系" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /来源资源：选择资源/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: /目标资源：选择资源/ }),
+    ).toBeInTheDocument();
+    expect(
+      within(inspector).queryByRole("heading", { level: 2, name: "建立本地关系" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: /来源资源：选择资源/ }),
+    );
+    await user.click(
+      await within(dialog).findByRole("option", {
+        name: /Fixture Supabase Self-hosted Instance/,
+      }),
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: /目标资源：选择资源/ }),
+    );
+    await user.click(
+      await within(dialog).findByRole("option", { name: /Fixture Dokploy Project/ }),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "保存关联" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("关联已保存");
+    expect(
+      (await screen.findAllByText("infra.deployed_via · 人工声明")).length,
+    ).toBeGreaterThan(1);
+    expect(screen.getByLabelText("受限关系边")).toBeInTheDocument();
+  });
+
   it("routes topology node and relation selection into the Inspector", async () => {
     const user = userEvent.setup();
     renderShell();
@@ -295,6 +344,136 @@ describe("React app shell", () => {
       ).toBeInTheDocument();
     });
     expect(within(inspector).getByText("fixture-sync-run-complete")).toBeInTheDocument();
+  });
+
+  it("creates a cross-provider relation from the resource Inspector and observes the re-query", async () => {
+    const user = userEvent.setup();
+    const adapter = createManualRelationAdapter();
+    renderShell(adapter);
+
+    const search = screen.getByRole("combobox", {
+      name: "搜索本地基础设施",
+    });
+    await user.type(search, "Fixture GitHub Workflow");
+    await user.click(
+      await screen.findByRole("option", { name: /Fixture GitHub Workflow/ }),
+    );
+
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    await waitFor(() => {
+      expect(
+        within(inspector).getByRole("heading", {
+          level: 3,
+          name: "Fixture GitHub Workflow",
+        }),
+      ).toBeInTheDocument();
+    });
+    await user.click(
+      within(inspector).getByRole("button", { name: "从此资源建立关联" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "资源关系配置" });
+    expect(
+      within(dialog).getByRole("heading", { level: 2, name: "建立本地关系" }),
+    ).toBeInTheDocument();
+    expect(
+      within(inspector).getByRole("heading", { level: 3, name: "Fixture GitHub Workflow" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      within(dialog).getByRole("button", { name: /目标资源：选择资源/ }),
+    );
+    await user.click(
+      await within(dialog).findByRole("option", {
+        name: /Fixture Supabase Managed Project/,
+      }),
+    );
+    await user.click(
+      within(dialog).getByRole("option", { name: /声明写入目标数据服务/ }),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "保存关联" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "资源关系配置" })).not.toBeInTheDocument();
+    });
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("关联已保存");
+    await user.click(within(notice).getByRole("button", { name: "查看拓扑" }));
+    expect(
+      await screen.findByText("data.writes_to · 人工声明"),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "已配置关系 data.writes_to" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "编辑关联 data.writes_to" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "提供方关系 automation.deploys_to" }),
+    );
+    expect(
+      within(inspector).queryByRole("button", { name: "编辑关联" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears the stale relation selection from the Inspector after editing and saving", async () => {
+    const user = userEvent.setup();
+    renderShell(createManualRelationAdapter());
+
+    const search = screen.getByRole("combobox", { name: "搜索本地基础设施" });
+    await user.type(search, "Fixture Supabase Self-hosted Instance");
+    await user.click(
+      await screen.findByRole("option", { name: /Fixture Supabase Self-hosted Instance/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "拓扑" }));
+    await user.click(
+      await screen.findByRole("button", { name: "已配置关系 infra.deployed_via" }),
+    );
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    expect(
+      within(inspector).getByRole("button", { name: "编辑关联" }),
+    ).toBeInTheDocument();
+
+    await user.click(within(inspector).getByRole("button", { name: "编辑关联" }));
+    const dialog = screen.getByRole("dialog", { name: "资源关系配置" });
+    expect(
+      within(dialog).getByRole("heading", { level: 2, name: "编辑本地关系" }),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "保存修改" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("关联修改已保存");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "资源关系配置" })).not.toBeInTheDocument();
+    });
+    expect(
+      within(inspector).queryByRole("button", { name: "编辑关联" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears the stale relation selection from the Inspector after disabling", async () => {
+    const user = userEvent.setup();
+    renderShell(createManualRelationAdapter());
+
+    const search = screen.getByRole("combobox", { name: "搜索本地基础设施" });
+    await user.type(search, "Fixture Supabase Self-hosted Instance");
+    await user.click(
+      await screen.findByRole("option", { name: /Fixture Supabase Self-hosted Instance/ }),
+    );
+    await user.click(screen.getByRole("button", { name: "拓扑" }));
+    await user.click(
+      await screen.findByRole("button", { name: "已配置关系 infra.deployed_via" }),
+    );
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    await user.click(within(inspector).getByRole("button", { name: "编辑关联" }));
+    const dialog = screen.getByRole("dialog", { name: "资源关系配置" });
+    await user.click(within(dialog).getByRole("button", { name: "禁用关系" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent("关联已禁用");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "资源关系配置" })).not.toBeInTheDocument();
+    });
+    expect(
+      within(inspector).queryByRole("button", { name: "编辑关联" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the connection dialog and its draft open across window focus", async () => {
