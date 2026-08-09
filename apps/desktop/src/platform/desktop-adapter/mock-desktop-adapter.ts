@@ -7,6 +7,7 @@ import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TimelineGroupDto } from "../../generated/query/TimelineGroupDto";
 import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
+import type { TopologyDto } from "../../generated/query/TopologyDto";
 
 import type { DesktopAdapter } from "./desktop-adapter";
 import type {
@@ -124,7 +125,7 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async getTopology(input: GetTopologyInput) {
+  async getTopology(input: GetTopologyInput): Promise<TopologyDto> {
     if (
       !this.#snapshot.resources.some(
         (item) => item.resource_id === input.focus_resource_id,

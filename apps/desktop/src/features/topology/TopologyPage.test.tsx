@@ -1,13 +1,20 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GetTopologyInput } from "../../platform/desktop-adapter/desktop-adapter";
 import { DesktopAdapterProvider } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { MockDesktopAdapter } from "../../platform/desktop-adapter/mock-desktop-adapter";
 import { createQueryEvidenceLifecycleSnapshotFixture } from "../../test/fixtures/query-fixtures";
+import {
+  createTopologyHierarchyAdapter,
+  TOPOLOGY_HIERARCHY_FIXTURE_IDS,
+} from "../../test/topology-hierarchy/topology-hierarchy-adapter";
 import { TopologyPage } from "./TopologyPage";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 class TrackingAdapter extends MockDesktopAdapter {
   request: GetTopologyInput | null = null;
@@ -26,7 +33,7 @@ describe("TopologyPage", () => {
   it("distinguishes every evidence type with text", async () => {
     render(<DesktopAdapterProvider adapter={new MockDesktopAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><TopologyPage focusResourceId="fixture-resource-alpha" /></DesktopAdapterProvider>);
     expect(await screen.findByText(/上游来源/)).toBeInTheDocument();
-    expect(screen.getByText(/当前焦点/)).toBeInTheDocument();
+    expect(screen.getAllByText(/当前焦点/)).toHaveLength(2);
     expect(screen.getByText(/下游目标/)).toBeInTheDocument();
     expect(await screen.findByText("提供方 · 实线")).toBeInTheDocument();
     expect(screen.getByText("已配置 · 双线")).toBeInTheDocument();
@@ -37,16 +44,16 @@ describe("TopologyPage", () => {
   it("selects a node for the inspector", async () => {
     const onInspect = vi.fn();
     render(<DesktopAdapterProvider adapter={new MockDesktopAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><TopologyPage focusResourceId="fixture-resource-alpha" onInspectResource={onInspect} /></DesktopAdapterProvider>);
-    fireEvent.click(await screen.findByRole("button", { name: /Fixture Compute Alpha/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /层级焦点 Fixture Compute Alpha/ }));
     expect(onInspect).toHaveBeenCalledTimes(1);
   });
 
   it("moves arrow-key focus only across the bounded adjacency", async () => {
     render(<DesktopAdapterProvider adapter={new MockDesktopAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><TopologyPage focusResourceId="fixture-resource-alpha" /></DesktopAdapterProvider>);
-    const alpha = await screen.findByRole("button", { name: /Fixture Compute Alpha/ });
+    const alpha = await screen.findByRole("button", { name: /运行关系资源 Fixture Compute Alpha/ });
     alpha.focus();
     fireEvent.keyDown(alpha, { key: "ArrowRight" });
-    expect(screen.getByRole("button", { name: /Fixture Database Beta/ })).toHaveFocus();
+    expect(screen.getByRole("button", { name: /运行关系资源 Fixture Database Beta/ })).toHaveFocus();
   });
 
   it("routes toolbar create to the focused resource without an inline mutation form", async () => {
@@ -111,5 +118,83 @@ describe("TopologyPage", () => {
     expect(await screen.findByText("提供方 · 实线")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "已配置关系 fixture.depends_on" })).not.toBeInTheDocument();
     expect(screen.queryByText("fixture.depends_on · 人工声明")).not.toBeInTheDocument();
+  });
+
+  it("groups containment children by resource kind instead of drawing them as operational edges", async () => {
+    render(
+      <DesktopAdapterProvider adapter={createTopologyHierarchyAdapter()}>
+        <TopologyPage focusResourceId={TOPOLOGY_HIERARCHY_FIXTURE_IDS.cloudflareAccount} />
+      </DesktopAdapterProvider>,
+    );
+
+    expect(await screen.findByText("cloudflare.zone")).toBeInTheDocument();
+    expect(screen.getByText("cloudflare.tunnel")).toBeInTheDocument();
+    expect(screen.getByText("cloudflare.worker")).toBeInTheDocument();
+    expect(screen.getByText("当前焦点没有直接运行或依赖关系。")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提供方关系 cloudflare.contains" })).not.toBeInTheDocument();
+  });
+
+  it("centers the hierarchy focus inside a narrow scroll container", async () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("topology-hierarchy-scroll") ? 279 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains("topology-hierarchy-scroll") ? 840 : 0;
+    });
+
+    render(
+      <DesktopAdapterProvider adapter={createTopologyHierarchyAdapter()}>
+        <TopologyPage focusResourceId={TOPOLOGY_HIERARCHY_FIXTURE_IDS.cloudflareAccount} />
+      </DesktopAdapterProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: /层级焦点 Fixture Cloudflare Account/ })).toBeInTheDocument();
+    const scrollContainer = document.querySelector<HTMLElement>(".topology-hierarchy-scroll");
+    expect(scrollContainer).not.toBeNull();
+    expect(scrollContainer?.scrollLeft).toBe(280.5);
+  });
+
+  it("expands a hierarchy group without losing resource, evidence, or focus actions", async () => {
+    const onInspectResource = vi.fn();
+    const onInspectRelation = vi.fn();
+    const onFocusResource = vi.fn();
+    render(
+      <DesktopAdapterProvider adapter={createTopologyHierarchyAdapter()}>
+        <TopologyPage
+          focusResourceId={TOPOLOGY_HIERARCHY_FIXTURE_IDS.cloudflareAccount}
+          onFocusResource={onFocusResource}
+          onInspectRelation={onInspectRelation}
+          onInspectResource={onInspectResource}
+        />
+      </DesktopAdapterProvider>,
+    );
+
+    const groupLabel = await screen.findByText("cloudflare.zone");
+    const group = groupLabel.closest("section");
+    expect(group).not.toBeNull();
+    fireEvent.click(within(group!).getByRole("button", { name: "展开 cloudflare.zone 分组" }));
+    fireEvent.click(within(group!).getByTitle("Fixture Cloudflare Zone"));
+    fireEvent.click(within(group!).getByRole("button", { name: "查看 Fixture Cloudflare Zone 的关系证据 cloudflare.contains" }));
+    fireEvent.click(within(group!).getByRole("button", { name: "将 Fixture Cloudflare Zone 设为焦点" }));
+
+    expect(onInspectResource).toHaveBeenCalledWith(expect.objectContaining({
+      resource_id: TOPOLOGY_HIERARCHY_FIXTURE_IDS.cloudflareZone,
+    }));
+    expect(onInspectRelation).toHaveBeenCalledWith(expect.objectContaining({ kind: "cloudflare.contains" }));
+    expect(onFocusResource).toHaveBeenCalledWith(TOPOLOGY_HIERARCHY_FIXTURE_IDS.cloudflareZone);
+  });
+
+  it("shows containment parents as membership while keeping executes operational", async () => {
+    render(
+      <DesktopAdapterProvider adapter={createTopologyHierarchyAdapter()}>
+        <TopologyPage focusResourceId={TOPOLOGY_HIERARCHY_FIXTURE_IDS.githubWorkflow} />
+      </DesktopAdapterProvider>,
+    );
+
+    expect(await screen.findByText("所属资源")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "层级资源 Fixture GitHub Repository github.repository 健康 新鲜" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看 Fixture GitHub Repository 的关系证据 github.contains" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "提供方关系 github.executes" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "提供方关系 github.contains" })).not.toBeInTheDocument();
   });
 });

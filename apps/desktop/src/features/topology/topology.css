@@ -209,6 +209,224 @@
   margin-left: auto;
 }
 
+.topology-selection-bar--static {
+  left: auto;
+  position: static;
+  right: auto;
+  top: auto;
+}
+
+.topology-selection-bar--static code {
+  margin-left: 0;
+}
+
+.topology-selection-bar--static button {
+  margin-left: auto;
+}
+
+.topology-plane-header {
+  align-items: end;
+  display: flex;
+  justify-content: space-between;
+}
+
+.topology-plane-header h2 {
+  font-size: 13px;
+  font-weight: 620;
+  margin: 2px 0 0;
+}
+
+.topology-plane-header p,
+.topology-plane-header > span {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.topology-hierarchy,
+.topology-operational {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.topology-hierarchy-scroll {
+  background: var(--topology-canvas);
+  border: 1px solid var(--aluminum-line);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.topology-hierarchy-canvas {
+  min-width: 840px;
+  position: relative;
+  width: 840px;
+}
+
+.topology-hierarchy-label {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+  left: 24px;
+  letter-spacing: .06em;
+  position: absolute;
+  text-transform: uppercase;
+  z-index: 3;
+}
+
+.topology-hierarchy-label--parent {
+  top: 6px;
+}
+
+.topology-hierarchy-none {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+  left: 24px;
+  margin: 0;
+  position: absolute;
+}
+
+.topology-hierarchy-parent {
+  position: absolute;
+  z-index: 2;
+}
+
+.topology-membership {
+  align-items: stretch;
+  background: var(--rack-surface);
+  border: 1px solid var(--aluminum-line);
+  display: flex;
+  height: 100%;
+  min-width: 0;
+}
+
+.topology-membership.is-relation-selected {
+  border-color: var(--telemetry-cyan);
+}
+
+.topology-hierarchy-resource,
+.topology-membership-unresolved {
+  background: transparent;
+  border: 0;
+  border-left: 3px solid var(--cloud-unknown);
+  color: var(--label-primary);
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  padding: 5px 6px;
+  text-align: left;
+}
+
+.topology-hierarchy-resource:hover {
+  background: var(--rack-hover);
+}
+
+.topology-hierarchy-resource:focus-visible,
+.topology-membership-actions button:focus-visible,
+.topology-hierarchy-group-header button:focus-visible {
+  outline: 2px solid var(--telemetry-cyan);
+  outline-offset: -2px;
+}
+
+.topology-hierarchy-resource strong,
+.topology-hierarchy-resource span,
+.topology-membership-unresolved {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topology-hierarchy-resource strong {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.topology-hierarchy-resource span,
+.topology-membership-unresolved {
+  color: var(--label-muted);
+  font: 8px var(--font-mono);
+}
+
+.topology-membership-unresolved {
+  border-left-style: dashed;
+}
+
+.topology-membership-actions {
+  border-left: 1px solid var(--aluminum-line);
+  display: grid;
+  width: 54px;
+}
+
+.topology-membership-actions button,
+.topology-hierarchy-group-header button {
+  background: var(--rack-raised);
+  border: 0;
+  color: var(--label-secondary);
+  font: 8px var(--font-mono);
+  padding: 0 4px;
+}
+
+.topology-membership-actions button + button {
+  border-top: 1px solid var(--aluminum-line);
+}
+
+.topology-hierarchy-group {
+  background: var(--rack-surface);
+  border: 1px solid var(--aluminum-line);
+  position: absolute;
+  z-index: 2;
+}
+
+.topology-hierarchy-group-header {
+  align-items: stretch;
+  border-bottom: 1px solid var(--aluminum-line);
+  display: flex;
+  height: 40px;
+  justify-content: space-between;
+}
+
+.topology-hierarchy-group-header > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 8px;
+}
+
+.topology-hierarchy-group-header strong,
+.topology-hierarchy-group-header span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topology-hierarchy-group-header strong {
+  font-size: 10px;
+}
+
+.topology-hierarchy-group-header span {
+  color: var(--label-muted);
+  font: 8px var(--font-mono);
+}
+
+.topology-hierarchy-group-header button {
+  border-left: 1px solid var(--aluminum-line);
+  width: 46px;
+}
+
+.topology-hierarchy-item {
+  height: 48px;
+  position: absolute;
+  right: 16px;
+}
+
+.topology-operational-empty {
+  background: var(--rack-surface);
+  border: 1px solid var(--aluminum-line);
+  color: var(--label-secondary);
+  padding: var(--space-4);
+  text-align: center;
+}
+
 .topology-canvas marker path {
   fill: var(--label-muted);
 }
@@ -396,6 +614,13 @@
   padding: var(--space-2);
   right: 12px;
   width: 324px;
+}
+
+.topology-frontier--static {
+  bottom: auto;
+  position: static;
+  right: auto;
+  width: auto;
 }
 
 .topology-frontier > div,
