@@ -193,6 +193,11 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
     setToken("");
     setDokployToken("");
   }, []);
+  const backToProviderPicker = useCallback(() => {
+    setDialogProvider(null);
+    setToken("");
+    setDokployToken("");
+  }, []);
   const [dialogProvider, setDialogProvider] = useState<string | null>(null);
   const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
   const [purging, setPurging] = useState(false);
@@ -501,7 +506,7 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
             <div className="connectors-dialog-header">
               <h2>{dialogProvider === null ? "选择连接器" : PROVIDER_TITLES[dialogProvider]}</h2>
               <div className="connectors-dialog-actions">
-                {dialogProvider !== null ? <button onClick={() => setDialogProvider(null)} type="button">返回</button> : null}
+                {dialogProvider !== null ? <button onClick={backToProviderPicker} type="button">返回</button> : null}
                 <button onClick={closeConnectorDialog} type="button">关闭</button>
               </div>
             </div>

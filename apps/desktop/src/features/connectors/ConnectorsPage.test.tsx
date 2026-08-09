@@ -49,6 +49,31 @@ describe("ConnectorsPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("clears the in-memory token when the dialog is closed without creating", async () => {
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("GitHub");
+    const token = await screen.findByLabelText("细粒度 Token");
+    fireEvent.change(token, { target: { value: "test-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    // Reopening the dialog must start with an empty token (explicit closeConnectorDialog clearing)
+    await openProviderForm("GitHub");
+    expect(screen.getByLabelText("细粒度 Token")).toHaveValue("");
+  });
+
+  it("clears the in-memory token when navigating back to the provider picker", async () => {
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("GitHub");
+    const token = await screen.findByLabelText("细粒度 Token");
+    fireEvent.change(token, { target: { value: "test-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    await openProviderForm("GitHub");
+    expect(screen.getByLabelText("细粒度 Token")).toHaveValue("");
+  });
+
   it("renders Goal 9 modules as separate coverage rows", async () => {
     render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
     expect(await screen.findByText("连接器覆盖矩阵")).toBeInTheDocument();
@@ -178,6 +203,26 @@ describe("ConnectorsPage", () => {
     fireEvent.submit(screen.getByRole("button", { name: "创建连接并同步" }).closest("form")!);
     expect(await screen.findByText(/Dokploy 连接已创建，将在后台同步：fixture-dokploy-sync/)).toBeInTheDocument();
     expect(createdToken).toBe("fixture-token");
+  });
+
+  it("disables Dokploy create after editing a validated field", async () => {
+    class DokployOkAdapter extends ConnectorAdapter {
+      override async validateDokployConnection() { return { project_count: 3 }; }
+      override async createDokployConnection(input: { token: string }) { return { connection_id: "fixture-dokploy-conn", sync_run_id: "fixture-dokploy-sync" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new DokployOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("Dokploy");
+    fireEvent.change(await screen.findByLabelText("Dokploy 连接名称"), { target: { value: "Prod" } });
+    fireEvent.change(screen.getByLabelText(/实例 URL/), { target: { value: "https://fixture.example.test" } });
+    fireEvent.change(screen.getByLabelText("API Token"), { target: { value: "fixture-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计项目" }));
+    expect(await screen.findByText(/已验证 Dokploy 实例，发现 3 个项目/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建连接并同步" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("API Token"), { target: { value: "fixture-token-changed" } });
+    expect(screen.getByRole("button", { name: "创建连接并同步" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计项目" }));
+    expect(await screen.findByText(/已验证 Dokploy 实例，发现 3 个项目/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建连接并同步" })).toBeEnabled();
   });
 
   it("validates and creates a Cloudflare connection", async () => {
