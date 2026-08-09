@@ -122,7 +122,6 @@ function ProviderConnectionForm({
       setValidated(false);
       onError(`无法验证${descriptor.title}（${desktopErrorCode(error)}）。请检查配置后重试。`);
     } finally {
-      setSecrets({});
       setValidating(false);
     }
   }
@@ -386,7 +385,6 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
       setDokployValidated(false);
       setError(`无法验证 Dokploy 实例（${desktopErrorCode(error)}）。请检查 URL 与 Token 后重试。`);
     } finally {
-      setDokployToken("");
       setDokployValidating(false);
     }
   }

@@ -162,9 +162,10 @@ describe("ConnectorsPage", () => {
   });
 
   it("validates a Dokploy instance and creates a scoped connection", async () => {
+    let createdToken = "";
     class DokployOkAdapter extends ConnectorAdapter {
       override async validateDokployConnection() { return { project_count: 3 }; }
-      override async createDokployConnection() { return { connection_id: "fixture-dokploy-conn", sync_run_id: "fixture-dokploy-sync" }; }
+      override async createDokployConnection(input: { token: string }) { createdToken = input.token; return { connection_id: "fixture-dokploy-conn", sync_run_id: "fixture-dokploy-sync" }; }
     }
     render(<DesktopAdapterProvider adapter={new DokployOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
     await openProviderForm("Dokploy");
@@ -176,6 +177,7 @@ describe("ConnectorsPage", () => {
     expect(screen.getByRole("button", { name: "创建连接并同步" })).toBeEnabled();
     fireEvent.submit(screen.getByRole("button", { name: "创建连接并同步" }).closest("form")!);
     expect(await screen.findByText(/Dokploy 连接已创建，将在后台同步：fixture-dokploy-sync/)).toBeInTheDocument();
+    expect(createdToken).toBe("fixture-token");
   });
 
   it("validates and creates a Cloudflare connection", async () => {
