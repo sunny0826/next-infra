@@ -62,9 +62,9 @@ describe("React app shell", () => {
       await screen.findByRole("heading", { level: 1, name: "概览" }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByRole("heading", { level: 2, name: "关注队列" }),
+      await screen.findByRole("heading", { level: 2, name: "需要关注" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("已保存事实已过期")).not.toHaveLength(0);
+    expect(screen.getAllByText(/最后更新/)).not.toHaveLength(0);
     expect(screen.queryByRole("heading", { name: "Goal 1 placeholder" })).not.toBeInTheDocument();
     const runtime = screen.getByRole("contentinfo", { name: "控制平面运行时" });
     expect(within(runtime).getByText("Goal 3 查询界面")).toBeInTheDocument();
@@ -317,7 +317,7 @@ describe("React app shell", () => {
     const adapter = new TrackingAdapter(createQueryEvidenceLifecycleSnapshotFixture());
     const { unmount } = renderShell(adapter);
 
-    expect(await screen.findAllByText("已保存事实已过期")).not.toHaveLength(0);
+    expect(await screen.findAllByText(/最后更新/)).not.toHaveLength(0);
     await waitFor(() => expect(adapter.invalidationListener).not.toBeNull());
 
     const initialSearchCount = adapter.searchRequests.length;

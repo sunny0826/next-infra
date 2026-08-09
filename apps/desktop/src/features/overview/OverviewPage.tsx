@@ -1,43 +1,191 @@
 import { useEffect, useMemo, useState } from "react";
 
+import type { RouteId } from "../../app/routes";
 import type { ChangeDto } from "../../generated/query/ChangeDto";
-import type { ConnectionDto } from "../../generated/query/ConnectionDto";
+import type { HealthSummaryDto } from "../../generated/query/HealthSummaryDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
-import type { GitHubActionsSummarySnapshot } from "../../platform/desktop-adapter/desktop-adapter";
 import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { desktopErrorCode } from "../../platform/desktop-adapter/desktop-adapter";
+import type { GitHubActionsSummarySnapshot } from "../../platform/desktop-adapter/desktop-adapter";
 
 import "./overview.css";
+import { formatRelativeTime } from "./time";
 
 interface OverviewState {
+  readonly healthSummary: HealthSummaryDto;
   readonly resources: readonly ResourceDto[];
-  readonly connections: readonly ConnectionDto[];
   readonly changes: readonly ChangeDto[];
+  readonly changesHasMore: boolean;
   readonly githubActionsSummary: GitHubActionsSummarySnapshot;
 }
 
 interface OverviewPageProps {
   readonly onInspectResource?: (resource: ResourceDto) => void;
+  readonly onNavigate?: (routeId: RouteId) => void;
   readonly queryVersion?: number;
 }
 
-function attentionReason(resource: ResourceDto): string | null {
-  if (resource.health === "unhealthy") return "资源报告为不健康";
-  if (resource.health === "degraded") return "资源报告为降级";
-  if (resource.freshness === "expired") return "已保存事实已过期";
-  if (resource.freshness === "stale") return "已保存事实已过时";
-  if (resource.lifecycle !== "active") return `生命周期为 ${displayEnum(resource.lifecycle)}`;
+type AttentionTone = "fault" | "inspect" | "unknown";
+
+interface AttentionItem {
+  readonly resource: ResourceDto;
+  readonly severity: number;
+  readonly tone: AttentionTone;
+  readonly badge: string;
+  readonly reason: string;
+}
+
+function buildAttentionItem(resource: ResourceDto): AttentionItem | null {
+  if (resource.health === "unhealthy") {
+    return {
+      resource,
+      severity: 0,
+      tone: "fault",
+      badge: displayEnum(resource.health),
+      reason: "报告不健康",
+    };
+  }
+  if (resource.freshness === "expired") {
+    return {
+      resource,
+      severity: 1,
+      tone: "inspect",
+      badge: displayEnum(resource.freshness),
+      reason: "最后更新",
+    };
+  }
+  if (resource.health === "degraded") {
+    return {
+      resource,
+      severity: 2,
+      tone: "inspect",
+      badge: displayEnum(resource.health),
+      reason: "状态降级",
+    };
+  }
+  if (resource.freshness === "stale") {
+    return {
+      resource,
+      severity: 3,
+      tone: "unknown",
+      badge: displayEnum(resource.freshness),
+      reason: "数据较旧 · 最后更新",
+    };
+  }
+  if (resource.lifecycle !== "active") {
+    return {
+      resource,
+      severity: 4,
+      tone: "unknown",
+      badge: displayEnum(resource.lifecycle),
+      reason: `生命周期为 ${displayEnum(resource.lifecycle)}`,
+    };
+  }
   return null;
 }
 
-function attentionTone(resource: ResourceDto): string {
-  if (resource.health === "unhealthy") return "fault";
-  if (resource.freshness === "expired" || resource.health === "degraded") return "inspect";
-  return "unknown";
+type ConclusionTone = "fault" | "attention" | "healthy";
+
+interface Conclusion {
+  readonly tone: ConclusionTone;
+  readonly text: string;
 }
 
-export function OverviewPage({ onInspectResource, queryVersion = 0 }: OverviewPageProps) {
+interface OverviewDerived {
+  readonly totalResources: number;
+  readonly totalConnections: number;
+  readonly abnormalConnections: number;
+  readonly attention: readonly AttentionItem[];
+  readonly attentionCellTone: AttentionTone | "none";
+  readonly conclusion: Conclusion;
+  readonly githubTile: string | null;
+}
+
+function deriveOverview(state: OverviewState): OverviewDerived {
+  const { resource_health, freshness, connector_health } = state.healthSummary;
+  const totalResources =
+    resource_health.healthy +
+    resource_health.degraded +
+    resource_health.unhealthy +
+    resource_health.unknown;
+  const totalConnections =
+    connector_health.healthy +
+    connector_health.degraded +
+    connector_health.auth_failed +
+    connector_health.rate_limited +
+    connector_health.unreachable +
+    connector_health.disabled;
+  const abnormalConnections =
+    connector_health.degraded +
+    connector_health.auth_failed +
+    connector_health.rate_limited +
+    connector_health.unreachable;
+
+  const attention = state.resources
+    .filter((resource) => resource.kind !== "github.workflow_run")
+    .map((resource) => buildAttentionItem(resource))
+    .filter((item): item is AttentionItem => item !== null)
+    .sort((left, right) => left.severity - right.severity);
+
+  const attentionCellTone: AttentionTone | "none" = attention.some(
+    (item) => item.tone === "fault",
+  )
+    ? "fault"
+    : attention.some((item) => item.tone === "inspect")
+      ? "inspect"
+      : attention.length === 0
+        ? "none"
+        : "unknown";
+
+  const conclusion: Conclusion =
+    resource_health.unhealthy > 0
+      ? {
+          tone: "fault",
+          text: `有 ${resource_health.unhealthy} 个资源异常，需要优先处理。`,
+        }
+      : resource_health.degraded > 0 ||
+          freshness.expired > 0 ||
+          freshness.stale > 0 ||
+          abnormalConnections > 0
+        ? {
+            tone: "attention",
+            text:
+              attention.length > 0
+                ? `总体可用，有 ${attention.length} 个事项需要你留意。`
+                : `总体可用，有 ${abnormalConnections} 个连接异常需要你留意。`,
+          }
+        : { tone: "healthy", text: "总体健康，没有需要处理的事项。" };
+
+  let githubTotal = 0;
+  let githubSucceeded = 0;
+  let githubRunning = 0;
+  for (const connection of state.githubActionsSummary.items) {
+    for (const repository of connection.repositories) {
+      githubTotal += repository.action_count;
+      githubSucceeded += repository.succeeded;
+      githubRunning += repository.running;
+    }
+  }
+  const githubTile =
+    state.githubActionsSummary.items.length === 0
+      ? null
+      : githubTotal > 0
+        ? `GitHub Actions · 通过率 ${Math.round((githubSucceeded / githubTotal) * 100)}% · ${githubRunning} 运行中`
+        : `GitHub Actions · 通过率 ${githubSucceeded}/${githubTotal} · ${githubRunning} 运行中`;
+
+  return {
+    totalResources,
+    totalConnections,
+    abnormalConnections,
+    attention,
+    attentionCellTone,
+    conclusion,
+    githubTile,
+  };
+}
+
+export function OverviewPage({ onInspectResource, onNavigate, queryVersion = 0 }: OverviewPageProps) {
   const adapter = useDesktopAdapter();
   const [state, setState] = useState<OverviewState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,17 +193,18 @@ export function OverviewPage({ onInspectResource, queryVersion = 0 }: OverviewPa
   useEffect(() => {
     let active = true;
     Promise.all([
+      adapter.getHealthSummary(),
       adapter.searchResources({ limit: 25 }),
-      adapter.listConnections(),
-      adapter.getRecentChanges({ limit: 8 }),
+      adapter.getRecentChanges({ limit: 20 }),
       adapter.getGitHubActionsSummary(),
     ])
-      .then(([resourcePage, connectionsSnapshot, changePage, githubActionsSummary]) => {
+      .then(([healthSummary, resourcePage, changePage, githubActionsSummary]) => {
         if (!active) return;
         setState({
+          healthSummary,
           resources: resourcePage.items,
-          connections: connectionsSnapshot.items,
           changes: changePage.items,
+          changesHasMore: changePage.page_info.next_cursor !== null,
           githubActionsSummary,
         });
       })
@@ -67,15 +216,8 @@ export function OverviewPage({ onInspectResource, queryVersion = 0 }: OverviewPa
     };
   }, [adapter, queryVersion]);
 
-  const attention = useMemo(
-    () =>
-      state?.resources
-        .filter((resource) => resource.kind !== "github.workflow_run")
-        .map((resource) => ({ resource, reason: attentionReason(resource) }))
-        .filter(
-          (item): item is { resource: ResourceDto; reason: string } =>
-            item.reason !== null,
-        ) ?? [],
+  const derived = useMemo(
+    () => (state === null ? null : deriveOverview(state)),
     [state],
   );
 
@@ -88,7 +230,7 @@ export function OverviewPage({ onInspectResource, queryVersion = 0 }: OverviewPa
     );
   }
 
-  if (state === null) {
+  if (state === null || derived === null) {
     return (
       <section className="overview-state" aria-busy="true">
         <strong>正在读取本地快照</strong>
@@ -96,6 +238,17 @@ export function OverviewPage({ onInspectResource, queryVersion = 0 }: OverviewPa
       </section>
     );
   }
+
+  const headerCount = `共 ${derived.totalResources} 个资源`;
+  const resourceStat = `${derived.totalResources} 个资源`;
+  const attentionStat = `${derived.attention.length} 条事项`;
+  const connectionStat = `${derived.totalConnections} 个连接`;
+  const abnormalStat = `${derived.abnormalConnections} 异常`;
+  const snapshotStat = formatRelativeTime(state.healthSummary.metadata.generated_at);
+
+  const inventoryTile = `资源清单 · 共 ${derived.totalResources} 个资源`;
+  const connectorsTile = `连接器 · ${derived.totalConnections} 个连接`;
+  const timelineTile = `时间线 · ${state.changes.length} 项变更${state.changesHasMore ? "+" : ""}`;
 
   return (
     <div className="overview-page">
@@ -105,148 +258,132 @@ export function OverviewPage({ onInspectResource, queryVersion = 0 }: OverviewPa
           <h1>概览</h1>
           <p>在打开提供方控制台前，先找到需要检查的事实。</p>
         </div>
-        <span className="overview-snapshot-count">
-          {state.resources.length} 个受限资源
-        </span>
+        <span className="overview-snapshot-count">{headerCount}</span>
       </header>
+
+      <section className="overview-summary" aria-label="本地状态摘要">
+        <div className="overview-summary-stats">
+          <div className="overview-summary-cell">
+            <span className="overview-summary-label">资源</span>
+            <strong>{resourceStat}</strong>
+          </div>
+          <div className={`overview-summary-cell overview-summary-cell--${derived.attentionCellTone}`}>
+            <span className="overview-summary-label">需关注</span>
+            <strong>{attentionStat}</strong>
+          </div>
+          <div
+            className={`overview-summary-cell${derived.abnormalConnections > 0 ? " overview-summary-cell--fault" : ""}`}
+          >
+            <span className="overview-summary-label">连接</span>
+            <strong>{connectionStat}</strong>
+            {derived.abnormalConnections > 0 ? <small>{abnormalStat}</small> : null}
+          </div>
+          <div className="overview-summary-cell">
+            <span className="overview-summary-label">上次快照</span>
+            <strong>{snapshotStat}</strong>
+          </div>
+        </div>
+        <p className={`overview-conclusion overview-conclusion--${derived.conclusion.tone}`}>
+          <span className="overview-conclusion-dot" aria-hidden="true" />
+          {derived.conclusion.text}
+        </p>
+      </section>
 
       <section className="overview-section" aria-labelledby="overview-attention">
         <div className="overview-section-heading">
           <div>
             <p className="overview-eyebrow">优先核验</p>
-            <h2 id="overview-attention">关注队列</h2>
+            <h2 id="overview-attention">需要关注</h2>
           </div>
-          <span>{attention.length} 条事实</span>
         </div>
-        {attention.length === 0 ? (
-          <p className="overview-empty">此页面没有不健康、过期、过时或非活动的事实。</p>
+        {state.resources.length < derived.totalResources ? (
+          <p className="overview-truncation-note">仅基于前 25 个资源计算。</p>
+        ) : null}
+        {derived.attention.length === 0 ? (
+          <p className="overview-empty">
+            没有需要关注的事项。
+            <button
+              className="overview-inline-link"
+              onClick={() => onNavigate?.("inventory")}
+              type="button"
+            >
+              查看全部资源
+            </button>
+          </p>
         ) : (
           <div className="overview-attention-list">
-            {attention.map(({ resource, reason }) => (
+            {derived.attention.map((item) => (
               <button
-                className={`overview-attention-row overview-attention-row--${attentionTone(resource)}`}
-                key={resource.resource_id}
-                onClick={() => onInspectResource?.(resource)}
+                className={`overview-attention-row overview-attention-row--${item.tone}`}
+                key={item.resource.resource_id}
+                onClick={() => onInspectResource?.(item.resource)}
                 type="button"
               >
                 <span className="overview-attention-marker" aria-hidden="true" />
                 <span className="overview-attention-identity">
-                  <strong>{resource.display_name}</strong>
-                  <code>{resource.kind}</code>
+                  <strong>{item.resource.display_name}</strong>
+                  <code>{item.resource.kind}</code>
                 </span>
-                <span className="overview-attention-reason">{reason}</span>
-                <span className="overview-attention-facts">
-                  <small>健康度</small> {displayEnum(resource.health)}
-                  <small>新鲜度</small> {displayEnum(resource.freshness)}
+                <span className={`overview-attention-badge overview-attention-badge--${item.tone}`}>
+                  {item.badge}
                 </span>
-                <time dateTime={resource.observed_at}>{resource.observed_at}</time>
+                <span className="overview-attention-reason">
+                  {item.reason}
+                  {" "}
+                  <time dateTime={item.resource.observed_at} title={item.resource.observed_at}>
+                    {formatRelativeTime(item.resource.observed_at)}
+                  </time>
+                </span>
+                <span className="overview-attention-chevron" aria-hidden="true">
+                  ›
+                </span>
               </button>
             ))}
           </div>
         )}
       </section>
 
-      <section className="overview-section" aria-labelledby="overview-observations">
-        <div className="overview-section-heading">
-          <div>
-            <p className="overview-eyebrow">连接器心跳</p>
-            <h2 id="overview-observations">观测概览</h2>
-          </div>
-          <span>{state.connections.length} 个连接</span>
-        </div>
-        <div className="overview-observation-strip">
-          {state.connections.map((connection) => (
-            <article key={connection.connection_id}>
-              <span className={`overview-connection-state state-${connection.health}`}>
-                {displayEnum(connection.health)}
-              </span>
-              <strong>{connection.display_name}</strong>
-              <code>{connection.connector_type}</code>
-              <dl>
-                <div><dt>最近成功</dt><dd>{connection.last_success_at ?? "从未"}</dd></div>
-                <div><dt>最近尝试</dt><dd>{connection.last_attempt_at ?? "从未"}</dd></div>
-              </dl>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="overview-section" aria-labelledby="overview-github-actions">
-        <div className="overview-section-heading">
-          <div>
-            <p className="overview-eyebrow">GitHub CI/CD</p>
-            <h2 id="overview-github-actions">GitHub Actions 聚合</h2>
-          </div>
-        </div>
-        {state.githubActionsSummary.items.length === 0 ? (
-          <p className="overview-empty">没有已同步的 GitHub Actions 数据。</p>
-        ) : (
-          <div className="overview-github-actions-table">
-            {state.githubActionsSummary.items.map((connection) => (
-              <div key={connection.connection_id} className="overview-github-actions-connection">
-                <h3>{connection.connection_name}</h3>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>仓库</th>
-                      <th>Action 数量</th>
-                      <th>成功</th>
-                      <th>失败</th>
-                      <th>进行中</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {connection.repositories.map((repo) => (
-                      <tr key={repo.repository_id}>
-                        <td>{repo.repository_name}</td>
-                        <td>{repo.action_count}</td>
-                        <td className="overview-github-actions--success">{repo.succeeded}</td>
-                        <td className="overview-github-actions--failed">{repo.failed}</td>
-                        <td className="overview-github-actions--running">{repo.running}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ))}
-          </div>
+      <nav className="overview-quicknav" aria-label="快速导航">
+        <button
+          className="overview-nav-tile"
+          onClick={() => onNavigate?.("inventory")}
+          type="button"
+        >
+          <span>{inventoryTile}</span>
+          <span aria-hidden="true">›</span>
+        </button>
+        <button
+          className="overview-nav-tile"
+          onClick={() => onNavigate?.("connectors")}
+          type="button"
+        >
+          <span>
+            {connectorsTile}
+            {derived.abnormalConnections > 0 ? (
+              <span className="overview-nav-tile-abnormal"> · {derived.abnormalConnections} 异常</span>
+            ) : null}
+          </span>
+          <span aria-hidden="true">›</span>
+        </button>
+        <button
+          className="overview-nav-tile"
+          onClick={() => onNavigate?.("timeline")}
+          type="button"
+        >
+          <span>{timelineTile}</span>
+          <span aria-hidden="true">›</span>
+        </button>
+        {derived.githubTile === null ? null : (
+          <button
+            className="overview-nav-tile"
+            onClick={() => onNavigate?.("connectors")}
+            type="button"
+          >
+            <span>{derived.githubTile}</span>
+            <span aria-hidden="true">›</span>
+          </button>
         )}
-      </section>
-
-      <section className="overview-section overview-critical" aria-labelledby="overview-critical">
-        <div className="overview-section-heading">
-          <div>
-            <p className="overview-eyebrow">仅限已配置路径</p>
-            <h2 id="overview-critical">关键路径</h2>
-          </div>
-        </div>
-        <p>
-          当前没有固定关键路径。Next Infra 不会根据展示名称或近期活动推断重要性。
-        </p>
-      </section>
-
-      <section className="overview-section" aria-labelledby="overview-changes">
-        <div className="overview-section-heading">
-          <div>
-            <p className="overview-eyebrow">结构化差异</p>
-            <h2 id="overview-changes">近期变更</h2>
-          </div>
-          <span>{state.changes.length} 项变更</span>
-        </div>
-        {state.changes.length === 0 ? (
-          <p className="overview-empty">受限查询中没有结构化变更。</p>
-        ) : (
-          <ol className="overview-change-list">
-            {state.changes.map((change) => (
-              <li key={change.change_id}>
-                <time dateTime={change.observed_at}>{change.observed_at}</time>
-                <code>{change.change_id}</code>
-                <span>{change.fields.length} 个变更字段</span>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      </nav>
     </div>
   );
 }

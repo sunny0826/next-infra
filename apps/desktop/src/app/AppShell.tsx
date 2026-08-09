@@ -164,6 +164,7 @@ export function AppShell() {
         inspectorOpen={inspectorOpen}
         onInspectRelation={inspectRelation}
         onInspectResource={inspectResource}
+        onNavigate={navigate}
         onOpenInspector={() => setInspectorOpen(true)}
         onSelectResource={selectInventoryResource}
         onTopologyFocus={focusTopology}
