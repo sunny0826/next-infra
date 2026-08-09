@@ -150,11 +150,11 @@ function ProviderConnectionForm({
   return (
     <section className="connectors-section" aria-labelledby={`provider-${descriptor.title}`}>
       <form className="connectors-form" onSubmit={createProvider}>
-        <label>{descriptor.nameLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} /></label>
+        <label>{descriptor.nameLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={120} onChange={(event) => { setName(event.target.value); setValidated(false); }} required value={name} /></label>
         {descriptor.secretFields.map((field) => (
-          <label key={field.key}>{field.label}<input autoComplete="off" disabled={validating || connecting} maxLength={4096} onChange={(event) => setSecrets((current) => ({ ...current, [field.key]: event.target.value }))} required type="password" value={secrets[field.key] ?? ""} /></label>
+          <label key={field.key}>{field.label}<input autoComplete="off" disabled={validating || connecting} maxLength={4096} onChange={(event) => { setSecrets((current) => ({ ...current, [field.key]: event.target.value })); setValidated(false); }} required type="password" value={secrets[field.key] ?? ""} /></label>
         ))}
-        {descriptor.regionLabel !== undefined ? <label>{descriptor.regionLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={64} onChange={(event) => setRegion(event.target.value)} placeholder={descriptor.defaultRegion} required value={region} /></label> : null}
+        {descriptor.regionLabel !== undefined ? <label>{descriptor.regionLabel}<input autoComplete="off" disabled={validating || connecting} maxLength={64} onChange={(event) => { setRegion(event.target.value); setValidated(false); }} placeholder={descriptor.defaultRegion} required value={region} /></label> : null}
         <button disabled={validating || connecting} onClick={validateProvider} type="button">{validating ? "正在验证…" : descriptor.validateButtonLabel}{validating ? <span aria-hidden="true" className="connectors-button-progress" /> : null}</button>
         <button disabled={connecting || !validated} type="submit">{connecting ? "连接中…" : descriptor.createButtonLabel}</button>
       </form>
@@ -188,6 +188,11 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
   const [dokployValidating, setDokployValidating] = useState(false);
   const [dokployConnecting, setDokployConnecting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const closeConnectorDialog = useCallback(() => {
+    setDialogOpen(false);
+    setToken("");
+    setDokployToken("");
+  }, []);
   const [dialogProvider, setDialogProvider] = useState<string | null>(null);
   const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
   const [purging, setPurging] = useState(false);
@@ -491,13 +496,13 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
         </div>
       </section>
       {dialogOpen ? (
-        <div className="connectors-dialog-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { setDialogOpen(false); } }}>
+        <div className="connectors-dialog-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) { closeConnectorDialog(); } }}>
           <div className="connectors-dialog" role="dialog" aria-modal="true" aria-label="添加连接">
             <div className="connectors-dialog-header">
               <h2>{dialogProvider === null ? "选择连接器" : PROVIDER_TITLES[dialogProvider]}</h2>
               <div className="connectors-dialog-actions">
                 {dialogProvider !== null ? <button onClick={() => setDialogProvider(null)} type="button">返回</button> : null}
-                <button onClick={() => setDialogOpen(false)} type="button">关闭</button>
+                <button onClick={closeConnectorDialog} type="button">关闭</button>
               </div>
             </div>
             {dialogProvider === null ? (
@@ -547,9 +552,9 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
       </section>
       ) : null}{dialogProvider === "dokploy" ? (<section className="connectors-section" aria-labelledby="dokploy-connection">
         <form className="connectors-form" onSubmit={createDokployConnection}>
-          <label>Dokploy 连接名称<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={120} onChange={(event) => setDokployDisplayName(event.target.value)} required value={dokployDisplayName} /></label>
-          <label>实例 URL<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={512} onChange={(event) => setDokployUrl(event.target.value)} placeholder="https://dokploy.example.com" required value={dokployUrl} /><span className="connectors-field-hint">实例基础地址（不带 /api 后缀）</span></label>
-          <label>API Token<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={4096} onChange={(event) => setDokployToken(event.target.value)} required type="password" value={dokployToken} /></label>
+          <label>Dokploy 连接名称<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={120} onChange={(event) => { setDokployDisplayName(event.target.value); setDokployValidated(false); }} required value={dokployDisplayName} /></label>
+          <label>实例 URL<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={512} onChange={(event) => { setDokployUrl(event.target.value); setDokployValidated(false); }} placeholder="https://dokploy.example.com" required value={dokployUrl} /><span className="connectors-field-hint">实例基础地址（不带 /api 后缀）</span></label>
+          <label>API Token<input autoComplete="off" disabled={dokployValidating || dokployConnecting} maxLength={4096} onChange={(event) => { setDokployToken(event.target.value); setDokployValidated(false); }} required type="password" value={dokployToken} /></label>
           <button disabled={dokployValidating || dokployConnecting} onClick={validateDokployConnection} type="button">{dokployValidating ? "正在验证…" : "验证并统计项目"}{dokployValidating ? <span aria-hidden="true" className="connectors-button-progress" /> : null}</button>
           <button disabled={dokployConnecting || !dokployValidated} type="submit">{dokployConnecting ? "连接中…" : "创建连接并同步"}</button>
         </form>

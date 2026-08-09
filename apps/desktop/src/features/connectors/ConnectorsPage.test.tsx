@@ -181,9 +181,10 @@ describe("ConnectorsPage", () => {
   });
 
   it("validates and creates a Cloudflare connection", async () => {
+    let createdToken = "";
     class CloudflareOkAdapter extends ConnectorAdapter {
       override async validateCloudflareConnection() { return { account_count: 2 }; }
-      override async createCloudflareConnection() { return { connection_id: "fixture-cf-conn", sync_run_id: "fixture-cf-sync" }; }
+      override async createCloudflareConnection(input: { token: string }) { createdToken = input.token; return { connection_id: "fixture-cf-conn", sync_run_id: "fixture-cf-sync" }; }
     }
     render(<DesktopAdapterProvider adapter={new CloudflareOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
     await openProviderForm("Cloudflare");
@@ -193,6 +194,25 @@ describe("ConnectorsPage", () => {
     expect(await screen.findByText(/已验证 Cloudflare 账户，发现 2 个账户/)).toBeInTheDocument();
     fireEvent.submit(screen.getByRole("button", { name: "创建 Cloudflare 连接并同步" }).closest("form")!);
     expect(await screen.findByText(/Cloudflare 连接已创建，将在后台同步：fixture-cf-sync/)).toBeInTheDocument();
+    expect(createdToken).toBe("fixture-token");
+  });
+
+  it("disables create after editing a validated secret and clears secrets on dialog close", async () => {
+    class CloudflareOkAdapter extends ConnectorAdapter {
+      override async validateCloudflareConnection() { return { account_count: 2 }; }
+      override async createCloudflareConnection(input: { token: string }) { return { connection_id: "fixture-cf-conn", sync_run_id: "fixture-cf-sync" }; }
+    }
+    render(<DesktopAdapterProvider adapter={new CloudflareOkAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
+    await openProviderForm("Cloudflare");
+    fireEvent.change(await screen.findByLabelText("Cloudflare 连接名称"), { target: { value: "CF" } });
+    fireEvent.change(screen.getByLabelText("Cloudflare Token"), { target: { value: "fixture-token" } });
+    fireEvent.click(screen.getByRole("button", { name: "验证并统计账户" }));
+    expect(await screen.findByText(/已验证 Cloudflare 账户，发现 2 个账户/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "创建 Cloudflare 连接并同步" })).toBeEnabled();
+    fireEvent.change(screen.getByLabelText("Cloudflare Token"), { target: { value: "fixture-token-changed" } });
+    expect(screen.getByRole("button", { name: "创建 Cloudflare 连接并同步" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("validates and creates a Supabase managed connection", async () => {
