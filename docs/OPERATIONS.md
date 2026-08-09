@@ -95,6 +95,7 @@ Settings 仅用于本地生命周期、保留策略、数据预算和能力开�
 - Desktop Host 将 token 存储于 SQLite `connection_secrets` 表（`connection_id` → BLOB）；DB 文件必须为当前用户拥有的 `0600`，所在目录必须为当前用户的 `0700`；FK 级联清除（删除 connection 时自动清理 secret 行）。
 - token 不写入设置、日志、错误、fixture、URL 或命令行。React 在提交结束后清空密码输入；MCP Bridge、QueryService 与普通 CLI 不能通过投影读取 `connection_secrets` 表。
 - `credential_unavailable` 表示 secret 缺失或无法读取，不要通过手工写入 SQLite 来规避。
+- `secret_storage_unavailable` 表示建连时 secret 写入本地存储失败；create 已回滚 connection 与 secret（对齐 GitHub 的清理路径），不会留下无凭据的悬空连接。
 - **Keychain 方向已取消（2026-08-07 用户决策）**；Secret 一律存 SQLite `connection_secrets`，不追求 Keychain 迁移。
 - SSH 使用现有 SSH config alias、SSH Agent 或 IdentityFile；Next Infra 不复制私钥，也没有任意命令入口。
 - MCP 工具只读，且不接受 Secret、SSH 命令或任意目标地址作为参数。
@@ -111,7 +112,8 @@ Settings 仅用于本地生命周期、保留策略、数据预算和能力开�
 | --- | --- |
 | 主窗口关闭后仍有托盘图标 | 正常。选择托盘 Quit 才会停止 Host。 |
 | Connector 显示 `partial` | 某些模块、权限、区域、分页或限流信息不完整；已有成功观察会保留，不能据此推断资源已删除。 |
-| `credential_unavailable` | GitHub token 文件缺失、非当前用户拥有或权限不是 `0600`。不要将 Secret 写入日志或配置。 |
+| `credential_unavailable` | 本地 `connection_secrets` 表中缺少对应 connection 的 secret，或存储不可用。不要将 Secret 写入日志或配置，也不要手工写入 SQLite 规避。 |
+| `secret_storage_unavailable` | 建连时 secret 写入本地存储失败（create 已回滚，未留下悬空连接）。属内部存储故障，通常不可由用户恢复；重试或重启 App 后仍未恢复时检查数据目录权限。 |
 | Manual Sync 不可用 | 只有 enabled 的 GitHub 连接支持手动同步；其他 connector 尚未开放。 |
 | 需要移除一次范围过大的 GitHub 同步 | 在 Connectors 的对应 GitHub 行选择“删除本地数据”，核对预览数量并再次确认；不要手动编辑 SQLite。 |
 | MCP 返回 `host_unavailable` | 先交互式启动 App；若用户曾显式 Quit，保持该状态。不要通过重启 Bridge 绕过它。 |
