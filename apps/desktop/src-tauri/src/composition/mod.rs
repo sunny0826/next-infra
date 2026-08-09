@@ -2255,20 +2255,9 @@ pub(crate) async fn sync_ssh(
         cursor: None,
         targeted_resources: Vec::new(),
     };
-    let secret = store
-        .read(|s| s.connection_secret(&connection.connection_id))
-        .map_err(|_| {
-            safe_error(
-                "credential_unavailable",
-                "SSH credential is unavailable from local storage.",
-            )
-        })?
-        .ok_or_else(|| {
-            safe_error(
-                "credential_unavailable",
-                "SSH credential is unavailable from local storage.",
-            )
-        })?;
+    // SSH probes the local machine via the SSH config alias; no per-connection
+    // credential is stored or required by the connector.
+    let secret: Option<SecretValue> = None;
     let mut engine = SyncEngine::new(store.clone());
     let handle = engine
         .start(
@@ -2283,7 +2272,7 @@ pub(crate) async fn sync_ssh(
             },
         )
         .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?;
-    let outcome = connector.sync(request.clone(), Some(&secret)).await;
+    let outcome = connector.sync(request.clone(), secret.as_ref()).await;
     let finished_at = now()
         .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not finish."))?;
 
