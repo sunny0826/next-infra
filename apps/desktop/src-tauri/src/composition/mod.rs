@@ -5265,6 +5265,7 @@ mod tests {
             state.query.list_connections().unwrap().items.is_empty(),
             "no connection row should be created when the credential guard rejects the input"
         );
+        state.persist_user_quit_and_stop().unwrap();
     }
 
     #[test]
@@ -5292,6 +5293,11 @@ mod tests {
             result.sync_run_id.starts_with("dokploy-sync-"),
             "a background sync should be enqueued after persistence"
         );
+        // The enqueued background sync (tauri::async_runtime::spawn) is intentionally
+        // fire-and-forget: it fails fast against the fixture URL and is ignored by the
+        // spawn wrapper. Stopping the scheduler driver thread joins the driver; the
+        // background task itself resolves independently of this test's lifetime.
+        state.persist_user_quit_and_stop().unwrap();
     }
 
     #[test]
