@@ -58,9 +58,11 @@ impl fmt::Display for LaunchdParseError {
 
 impl std::error::Error for LaunchdParseError {}
 
+/// `Some(allowlist)`: strict sync contract (malformed/duplicate/overflow fail).
+/// `None`: best-effort discovery (skip bad rows, truncate at the output cap).
 pub fn parse_launchd_services(
     input: &[u8],
-    allowlist: &[ServiceId],
+    allowlist: Option<&[ServiceId]>,
 ) -> Result<Vec<LaunchdService>, LaunchdParseError> {
     let text = checked_text(input)?;
     let mut lines = text.lines().filter(|line| !line.trim().is_empty());
@@ -71,10 +73,8 @@ pub fn parse_launchd_services(
         return Err(error(LaunchdParseErrorKind::MissingHeader));
     }
 
-    let allowed = allowlist
-        .iter()
-        .map(ServiceId::expose)
-        .collect::<BTreeSet<_>>();
+    let allowed = allowlist.map(|ids| ids.iter().map(ServiceId::expose).collect::<BTreeSet<_>>());
+    let discovery = allowlist.is_none();
     let mut seen = BTreeSet::new();
     let mut services = Vec::new();
     for (row, line) in lines.enumerate() {
@@ -85,13 +85,21 @@ pub fn parse_launchd_services(
         let Some(label) = fields.last().copied() else {
             continue;
         };
-        if !allowed.contains(label) {
+        if let Some(allowed) = &allowed
+            && !allowed.contains(label)
+        {
             continue;
         }
         if fields.len() != 3 || ServiceId::parse(label).is_err() {
+            if discovery {
+                continue;
+            }
             return Err(error(LaunchdParseErrorKind::Malformed));
         }
         if !seen.insert(label) {
+            if discovery {
+                continue;
+            }
             return Err(error(LaunchdParseErrorKind::Duplicate));
         }
         let pid_present = match fields[0] {
@@ -99,11 +107,19 @@ pub fn parse_launchd_services(
             value => value.parse::<u32>().ok().is_some_and(|pid| pid > 0),
         };
         if fields[0] != "-" && !pid_present {
+            if discovery {
+                continue;
+            }
             return Err(error(LaunchdParseErrorKind::Malformed));
         }
-        let last_exit_status = fields[1]
-            .parse::<i32>()
-            .map_err(|_| error(LaunchdParseErrorKind::Malformed))?;
+        let last_exit_status = match fields[1].parse::<i32>() {
+            Ok(status) => status,
+            Err(_) if discovery => continue,
+            Err(_) => return Err(error(LaunchdParseErrorKind::Malformed)),
+        };
+        if services.len() >= MAX_LAUNCHD_OUTPUTS && discovery {
+            break;
+        }
         services.push(LaunchdService {
             service_label: label.to_owned(),
             pid_present,
@@ -124,7 +140,7 @@ pub fn map_launchd_services(
     input: &[u8],
     allowlist: &[ServiceId],
 ) -> Result<(Vec<ResourceObservation>, Vec<RelationObservation>), LaunchdParseError> {
-    let services = parse_launchd_services(input, allowlist)?;
+    let services = parse_launchd_services(input, Some(allowlist))?;
     let host = ResourceLocator {
         kind: kind("ssh.host"),
         external_id: host_identity.external_id(),
@@ -247,7 +263,7 @@ mod tests {
     fn parses_allowlisted_running_on_demand_and_failed_services() {
         let services = parse_launchd_services(
             b"PID Status Label\n123 0 app.running\n- 0 app.ondemand\n- 78 app.failed\n999 0 ignored.service\n",
-            &allowed(&["app.running", "app.ondemand", "app.failed", "missing.service"]),
+            Some(&allowed(&["app.running", "app.ondemand", "app.failed", "missing.service"])),
         )
         .unwrap();
         assert_eq!(services.len(), 3);
@@ -260,10 +276,33 @@ mod tests {
     fn missing_is_empty_and_unallowlisted_malformed_rows_are_discarded() {
         let services = parse_launchd_services(
             b"PID Status Label\nnot-a-pid not-a-status ignored.service\n",
-            &allowed(&["missing.service"]),
+            Some(&allowed(&["missing.service"])),
         )
         .unwrap();
         assert!(services.is_empty());
+    }
+
+    #[test]
+    fn discovery_skips_bad_rows_and_truncates_at_the_output_cap() {
+        let services = parse_launchd_services(
+            b"PID Status Label\n123 0 app.running\nnot-a-pid not-a-status ignored.service\n- 0 app.ondemand\n",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            services
+                .iter()
+                .map(|service| service.service_label.as_str())
+                .collect::<Vec<_>>(),
+            ["app.ondemand", "app.running"]
+        );
+
+        let mut rows = String::from("PID Status Label\n");
+        for index in 0..(MAX_LAUNCHD_OUTPUTS + 8) {
+            rows.push_str(&format!("{index} 0 cap-{index}.service\n"));
+        }
+        let capped = parse_launchd_services(rows.as_bytes(), None).unwrap();
+        assert_eq!(capped.len(), MAX_LAUNCHD_OUTPUTS);
     }
 
     #[test]
@@ -272,18 +311,19 @@ mod tests {
         assert_eq!(
             parse_launchd_services(
                 b"PID Status Label\n1 0 app.service\n2 0 app.service\n",
-                &allowlist,
+                Some(&allowlist),
             )
             .unwrap_err()
             .kind,
             LaunchdParseErrorKind::Duplicate
         );
         assert!(
-            parse_launchd_services(b"PID Status Label\n0 0 app.service\n", &allowlist).is_err()
+            parse_launchd_services(b"PID Status Label\n0 0 app.service\n", Some(&allowlist))
+                .is_err()
         );
         let error = parse_launchd_services(
             b"PID Status Label\n1 0 app.service Bearer fixture-secret\n",
-            &allowlist,
+            Some(&allowlist),
         )
         .unwrap_err();
         assert_eq!(error.kind, LaunchdParseErrorKind::UnsafeOutput);
@@ -294,7 +334,7 @@ mod tests {
             rows.push_str("- 0 ignored.service\n");
         }
         assert_eq!(
-            parse_launchd_services(rows.as_bytes(), &[])
+            parse_launchd_services(rows.as_bytes(), Some(&[]))
                 .unwrap_err()
                 .kind,
             LaunchdParseErrorKind::RowLimit
