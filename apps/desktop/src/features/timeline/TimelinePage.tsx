@@ -51,8 +51,9 @@ export function TimelinePage({ queryVersion = 0 }: TimelinePageProps) {
     const sequence = ++sequenceRef.current;
     const isInitial = nextCursor === undefined;
     setLoading(true);
-    if (isInitial) setInitialError(null);
-    else setLoadMoreError(null);
+    // A fresh load supersedes both error states; a load-more only its own.
+    setInitialError(null);
+    setLoadMoreError(null);
     adapter
       .getTimeline(isInitial ? {} : { cursor: nextCursor, limit: PAGE_SIZE })
       .then((page) => {
@@ -79,7 +80,11 @@ export function TimelinePage({ queryVersion = 0 }: TimelinePageProps) {
 
   const itemCount = groups.reduce((total, group) => total + group.items.length, 0);
   const showSkeleton = loading && groups.length === 0 && initialError === null;
-  const showEmpty = !loading && groups.length === 0 && initialError === null;
+  // Empty state is only valid when the backend also says there is nothing
+  // left; an empty page carrying a cursor (backend anomaly) keeps the
+  // load-more affordance instead of contradicting it with an empty message.
+  const showEmpty =
+    !loading && groups.length === 0 && cursor === null && initialError === null;
 
   return (
     <section className="timeline-page" aria-labelledby="timeline-title">
@@ -111,7 +116,7 @@ export function TimelinePage({ queryVersion = 0 }: TimelinePageProps) {
         {showEmpty ? (
           <div className="timeline-empty">
             <p className="timeline-empty-primary">没有已持久化的变更。</p>
-            <p className="timeline-empty-hint">完成一次同步或建立绑定后,审计记录会出现在这里。</p>
+            <p className="timeline-empty-hint">完成一次同步或建立绑定后，审计记录会出现在这里。</p>
           </div>
         ) : null}
       </div>

@@ -73,7 +73,7 @@ describe("TimelinePage", () => {
       await screen.findByText("没有已持久化的变更。"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("完成一次同步或建立绑定后,审计记录会出现在这里。"),
+      screen.getByText("完成一次同步或建立绑定后，审计记录会出现在这里。"),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "时间线" })).toBeInTheDocument();
   });
@@ -232,5 +232,110 @@ describe("TimelinePage", () => {
       expect(screen.queryByText("fixture-change-race-a")).not.toBeInTheDocument(),
     );
     expect(screen.getByText("fixture-change-race-b")).toBeInTheDocument();
+    expect(screen.getByText("已加载 1 项变更")).toBeInTheDocument();
+    // The stale .finally must not leave the page stuck in the loading state.
+    expect(document.querySelector(".timeline-scroll[aria-busy='true']")).toBeNull();
+  });
+
+  it("falls back to safe labels and classes for malformed DTO types", async () => {
+    const malformed: TimelinePageDto = {
+      metadata: createTimelinePageFixture().metadata,
+      groups: [
+        {
+          group_id: "fixture-timeline-group-malformed",
+          origin: { type: "widget", widget_id: "nope" } as never,
+          occurred_at: "2000-01-01T00:00:00Z",
+          items: [
+            {
+              change: {
+                change_id: "fixture-change-malformed",
+                subject: { type: "gizmo", gizmo_id: "nope" } as never,
+                observed_at: "2000-01-01T00:00:00Z",
+                fields: [],
+                origin: { type: "sync_run", sync_run_id: "fixture-sync-run-complete" },
+              },
+              version_links: [],
+            },
+          ],
+        },
+      ],
+      page_info: { next_cursor: null },
+    };
+
+    renderPage(new SequentialTimelineAdapter([malformed]));
+
+    expect(await screen.findByLabelText("未知来源")).toBeInTheDocument();
+    expect(screen.getByText("未知")).toBeInTheDocument();
+    // Class names must come from the closed label map, not the raw DTO type.
+    expect(screen.getByText("未知来源")).not.toHaveClass("timeline-origin-dot--widget");
+    expect(screen.getByText("未知")).not.toHaveClass("timeline-subject-badge--gizmo");
+  });
+
+  it("renders a fallback when a diff value cannot be serialized", async () => {
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    const page: TimelinePageDto = {
+      metadata: createTimelinePageFixture().metadata,
+      groups: [
+        {
+          group_id: "fixture-timeline-group-cyclic",
+          origin: { type: "sync_run", sync_run_id: "fixture-sync-run-complete" },
+          occurred_at: "2000-01-01T00:00:00Z",
+          items: [
+            {
+              change: {
+                change_id: "fixture-change-cyclic",
+                subject: { type: "resource", resource_id: "fixture-resource-alpha" },
+                observed_at: "2000-01-01T00:00:00Z",
+                fields: [{ path: "attributes.state", before: cyclic, after: "ready" }],
+                origin: { type: "sync_run", sync_run_id: "fixture-sync-run-complete" },
+              },
+              version_links: [],
+            },
+          ],
+        },
+      ],
+      page_info: { next_cursor: null },
+    };
+
+    renderPage(new SequentialTimelineAdapter([page]));
+
+    expect(await screen.findByText("（无法序列化）")).toBeInTheDocument();
+    expect(screen.getByText("ready")).toBeInTheDocument();
+  });
+
+  it("shows load-more instead of the empty state for an empty page with a cursor", async () => {
+    const emptyPage: TimelinePageDto = {
+      metadata: createTimelinePageFixture().metadata,
+      groups: [],
+      page_info: { next_cursor: "fixture-cursor-empty" as never },
+    };
+    const user = userEvent.setup();
+    renderPage(new SequentialTimelineAdapter([emptyPage]));
+
+    expect(await screen.findByRole("button", { name: "加载更多" })).toBeInTheDocument();
+    expect(screen.queryByText("没有已持久化的变更。")).not.toBeInTheDocument();
+  });
+
+  it("clears a stale load-more error when a fresh query reload succeeds", async () => {
+    const [first, second] = createSplitGroupTimelinePagesFixture();
+    const adapter = new SequentialTimelineAdapter([first, second]);
+    adapter.failRequestIndex = 1;
+    const user = userEvent.setup();
+    const { rerender } = renderPage(adapter, 0);
+
+    await screen.findByText("50 项");
+    await user.click(screen.getByRole("button", { name: "加载更多" }));
+    expect(await screen.findByText("无法加载更多变更。")).toBeInTheDocument();
+
+    // A queryVersion bump triggers a fresh initial load that replaces the
+    // groups and must clear the previous load-more error once it succeeds.
+    rerender(
+      <DesktopAdapterProvider adapter={adapter}>
+        <TimelinePage queryVersion={1} />
+      </DesktopAdapterProvider>,
+    );
+    expect(await screen.findByText("2 项")).toBeInTheDocument();
+    expect(screen.queryByText("无法加载更多变更。")).not.toBeInTheDocument();
   });
 });

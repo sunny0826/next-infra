@@ -11,7 +11,9 @@ const originLabels: Readonly<Record<TimelineOriginDto["type"], string>> = {
   inference: "推断",
 };
 
-function originId(origin: TimelineOriginDto): string {
+const UNKNOWN_ORIGIN_LABEL = "未知来源";
+
+function originId(origin: TimelineOriginDto): string | undefined {
   switch (origin.type) {
     case "sync_run":
       return origin.sync_run_id;
@@ -19,7 +21,16 @@ function originId(origin: TimelineOriginDto): string {
       return origin.binding_id;
     case "inference":
       return origin.rule_version;
+    default:
+      // Unknown origin types (malformed DTO) have no id to display.
+      return undefined;
   }
+}
+
+function originTone(type: TimelineOriginDto["type"]): string {
+  // The class suffix is derived only from the closed label map so a
+  // malformed DTO type cannot inject an arbitrary class name.
+  return type in originLabels ? type : "unknown";
 }
 
 interface TimelineGroupProps {
@@ -27,17 +38,18 @@ interface TimelineGroupProps {
 }
 
 export function TimelineGroup({ group }: TimelineGroupProps) {
-  const label = originLabels[group.origin.type];
+  const type = group.origin.type;
+  const label = originLabels[type] ?? UNKNOWN_ORIGIN_LABEL;
   const id = originId(group.origin);
   return (
-    <section className="timeline-group" aria-label={`${label} ${id}`}>
+    <section className="timeline-group" aria-label={id === undefined ? label : `${label} ${id}`}>
       <header className="timeline-group-header">
         <span
           aria-hidden="true"
-          className={`timeline-origin-dot timeline-origin-dot--${group.origin.type}`}
+          className={`timeline-origin-dot timeline-origin-dot--${originTone(type)}`}
         />
         <strong className="timeline-origin-label">{label}</strong>
-        <code className="timeline-origin-id">{id}</code>
+        <code className="timeline-origin-id">{id ?? "—"}</code>
         <span className="timeline-group-count">{group.items.length} 项</span>
         <time
           className="timeline-group-time"

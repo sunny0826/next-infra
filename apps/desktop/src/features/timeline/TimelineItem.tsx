@@ -14,7 +14,15 @@ const subjectTypeLabels: Readonly<Record<ChangeSubjectDto["type"], string>> = {
   binding: "绑定",
 };
 
-function subjectId(subject: ChangeSubjectDto): string {
+const UNKNOWN_SUBJECT_LABEL = "未知";
+
+function subjectTypeTone(type: ChangeSubjectDto["type"]): string {
+  // The class suffix is derived only from the closed label map so a
+  // malformed DTO type cannot inject an arbitrary class name.
+  return type in subjectTypeLabels ? type : "unknown";
+}
+
+function subjectId(subject: ChangeSubjectDto): string | undefined {
   switch (subject.type) {
     case "resource":
       return subject.resource_id;
@@ -22,6 +30,9 @@ function subjectId(subject: ChangeSubjectDto): string {
       return subject.relation_id;
     case "binding":
       return subject.binding_id;
+    default:
+      // Unknown subject types (malformed DTO) have no id to display.
+      return undefined;
   }
 }
 
@@ -35,17 +46,20 @@ interface TimelineItemProps {
 
 export function TimelineItem({ item }: TimelineItemProps) {
   const { change, version_links } = item;
+  const subjectType = change.subject.type;
   return (
     <article className="timeline-item">
       <div className="timeline-subject">
-        <span className={`timeline-subject-badge timeline-subject-badge--${change.subject.type}`}>
-          {subjectTypeLabels[change.subject.type]}
+        <span
+          className={`timeline-subject-badge timeline-subject-badge--${subjectTypeTone(subjectType)}`}
+        >
+          {subjectTypeLabels[subjectType] ?? UNKNOWN_SUBJECT_LABEL}
         </span>
-        <code className="timeline-subject-id">{subjectId(change.subject)}</code>
+        <code className="timeline-subject-id">{subjectId(change.subject) ?? "—"}</code>
         <code className="timeline-change-id">{change.change_id}</code>
       </div>
-      {change.fields.map((field) => (
-        <FieldDiff key={field.path} field={field} />
+      {change.fields.map((field, index) => (
+        <FieldDiff key={`${field.path}-${index}`} field={field} />
       ))}
       {version_links.length > 0 ? (
         <div className="timeline-links">
