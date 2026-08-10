@@ -583,6 +583,26 @@ pub struct HealthSummaryDto {
     pub connector_health: ConnectorHealthCountsDto,
 }
 
+/// Result of previewing or executing a local connection snapshot purge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct ConnectionPurgeSummary {
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub resources: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub relations: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub resource_versions: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub relation_versions: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub changes: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub bindings: u64,
+    #[cfg_attr(feature = "typescript-bindings", ts(type = "number"))]
+    pub sync_runs: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
 pub struct ChangePageDto {

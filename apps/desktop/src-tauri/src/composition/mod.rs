@@ -31,7 +31,7 @@ use next_infra_connector_github::{
 };
 use next_infra_connector_ssh::{
     HostAlias, OpenSshClient, ProbeProfile, ServiceId, SshConnectionConfigV1, SshConnector,
-    ssh_descriptor,
+    SshProbeClient, ssh_descriptor,
 };
 use next_infra_connector_supabase_managed::{
     ManagementRequest, ManagementTransport, SupabaseManagedConnector,
@@ -54,10 +54,10 @@ use next_infra_host_integration::{
 use next_infra_local_rpc::session::QueryServiceHandler;
 use next_infra_normalizer::{AttributeSchema, Normalizer, RelationSchema};
 use next_infra_query::dto::{
-    BindingCommandResultDto, BindingDto, ChangePageDto, ConnectionSnapshotDto,
-    ConnectorCoverageSnapshotDto, CreateBindingCommandDto, DisableBindingCommandDto, ErrorEnvelope,
-    HealthSummaryDto, ResourceDetailDto, ResourcePageDto, SyncStatusDto, TimelinePageDto,
-    TopologyDto, UpdateBindingCommandDto,
+    BindingCommandResultDto, BindingDto, ChangePageDto, ConnectionPurgeSummary,
+    ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, CreateBindingCommandDto,
+    DisableBindingCommandDto, ErrorEnvelope, HealthSummaryDto, ResourceDetailDto, ResourcePageDto,
+    SyncStatusDto, TimelinePageDto, TopologyDto, UpdateBindingCommandDto,
 };
 use next_infra_query::service::QueryService;
 use next_infra_runtime::{
@@ -397,6 +397,7 @@ impl AppState {
         let store_for_driver_clone = store_for_driver.clone();
         let query_context_for_driver = query_context.clone();
         let github_connector_for_driver = github_connector.clone();
+        let legacy_github_secret_dir_for_driver = paths.root.join("github-secrets-v1");
         let cloudflare_connector_for_driver = cloudflare_connector.clone();
         let dokploy_running_for_driver = Arc::new(AtomicBool::new(false));
         let dokploy_running_for_driver_clone = dokploy_running_for_driver.clone();
@@ -426,6 +427,7 @@ impl AppState {
                     Ok(()) => break,
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                         let github_connector = github_connector_for_driver.clone();
+                        let legacy_github_secret_dir = legacy_github_secret_dir_for_driver.clone();
                         let cloudflare_connector = cloudflare_connector_for_driver.clone();
                         let Ok(at) = now() else {
                             continue;
@@ -473,6 +475,7 @@ impl AppState {
                                                 })?;
                                                 scheduled_sync::spawn_github_sync(
                                                     store.clone(),
+                                                    legacy_github_secret_dir.clone(),
                                                     running.clone(),
                                                     github_connector.clone(),
                                                     conn,
@@ -1577,27 +1580,22 @@ impl AppState {
         self.enqueue_github_sync(connection, SyncTrigger::User)
     }
 
-    fn preview_github_connection_purge(
+    fn preview_connection_purge(
         &self,
         connection_id: String,
-    ) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
-        let connection_id = self.github_connection_id(&connection_id)?;
+    ) -> Result<ConnectionPurgeSummary, ErrorEnvelope> {
+        let connection = self.existing_connection(&connection_id)?;
         let summary = self
             .store
-            .read(|store| store.preview_connection_purge(&connection_id))
+            .read(|store| store.preview_connection_purge(&connection.connection_id))
             .map_err(|_| {
                 safe_error(
                     "connection_purge_unavailable",
                     "The local connection snapshot could not be inspected.",
                 )
             })?
-            .ok_or_else(|| {
-                safe_error(
-                    "connection_unavailable",
-                    "GitHub connection is unavailable.",
-                )
-            })?;
-        Ok(summary.into())
+            .ok_or_else(|| safe_error("connection_unavailable", "Connection is unavailable."))?;
+        Ok(connection_purge_summary(summary))
     }
 
     fn query_github_actions_summary(&self) -> Result<GitHubActionsSummarySnapshot, ErrorEnvelope> {
@@ -1651,75 +1649,83 @@ impl AppState {
         Ok(GitHubActionsSummarySnapshot { items })
     }
 
-    fn purge_github_connection(
+    fn purge_connection(
         &self,
         connection_id: String,
-    ) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
-        if self.github_sync_running.swap(true, Ordering::AcqRel) {
-            return Err(ErrorEnvelope {
-                schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
-                code: "sync_in_progress".into(),
-                message: "A GitHub synchronization is already running.".into(),
-                retryable: true,
-            });
-        }
-        let result = (|| {
-            let connection_id = self.github_connection_id(&connection_id)?;
-            let summary = self
-                .store
-                .write(|store| store.purge_connection(&connection_id))
-                .map_err(|_| {
-                    safe_error(
-                        "connection_purge_unavailable",
-                        "The local connection snapshot could not be removed.",
-                    )
-                })?;
-            self.runtime
-                .lock()
-                .map_err(|_| {
-                    safe_error(
-                        "scheduler_unavailable",
-                        "Cannot remove scheduler entry: runtime unavailable.",
-                    )
-                })?
-                .scheduler_mut()
-                .remove(&connection_id);
-
-            // The driver thread stays alive for the whole AppState lifetime
-            // (it is a no-op while no entries are registered). It is stopped
-            // only by explicit Quit or power-off; a later connection create
-            // re-registers an entry without needing to restart the driver.
-            self.refresh_query_context(now().map_err(|_| {
+    ) -> Result<ConnectionPurgeSummary, ErrorEnvelope> {
+        let connection = self.existing_connection(&connection_id)?;
+        let _guard = self.acquire_sync_guard(&connection.connector_type)?;
+        let connection_id = connection.connection_id;
+        let summary = self
+            .store
+            .write(|store| store.purge_connection(&connection_id))
+            .map_err(|_| {
                 safe_error(
-                    "query_context_unavailable",
-                    "Local query context is unavailable.",
+                    "connection_purge_unavailable",
+                    "The local connection snapshot could not be removed.",
                 )
-            })?)?;
-            Ok(summary.into())
-        })();
-        self.github_sync_running.store(false, Ordering::Release);
-        result
+            })?;
+        self.runtime
+            .lock()
+            .map_err(|_| {
+                safe_error(
+                    "scheduler_unavailable",
+                    "Cannot remove scheduler entry: runtime unavailable.",
+                )
+            })?
+            .scheduler_mut()
+            .remove(&connection_id);
+
+        // The driver thread stays alive for the whole AppState lifetime
+        // (it is a no-op while no entries are registered). It is stopped
+        // only by explicit Quit or power-off; a later connection create
+        // re-registers an entry without needing to restart the driver.
+        self.refresh_query_context(now().map_err(|_| {
+            safe_error(
+                "query_context_unavailable",
+                "Local query context is unavailable.",
+            )
+        })?)?;
+        Ok(connection_purge_summary(summary))
     }
 
-    fn github_connection_id(&self, connection_id: &str) -> Result<ConnectionId, ErrorEnvelope> {
+    /// Resolves a connection ID to an existing, non-deleted connection of any
+    /// connector type.
+    fn existing_connection(&self, connection_id: &str) -> Result<Connection, ErrorEnvelope> {
         let connection_id = ConnectionId::new(connection_id.to_owned())
             .map_err(|_| safe_error("invalid_connection", "Connection identifier is invalid."))?;
         self.store
             .read(|store| store.get_connection(&connection_id))
-            .map_err(|_| {
-                safe_error(
-                    "connection_unavailable",
-                    "GitHub connection is unavailable.",
-                )
-            })?
-            .filter(|connection| connection.connector_type.as_str() == "github")
-            .ok_or_else(|| {
-                safe_error(
-                    "connection_unavailable",
-                    "GitHub connection is unavailable.",
-                )
-            })?;
-        Ok(connection_id)
+            .map_err(|_| safe_error("connection_unavailable", "Connection is unavailable."))?
+            .filter(|connection| connection.deleted_at.is_none())
+            .ok_or_else(|| safe_error("connection_unavailable", "Connection is unavailable."))
+    }
+
+    /// Acquires the per-connector single-flight sync guard so a purge cannot
+    /// race a running sync of the same connection. Connector types without a
+    /// live sync path have no running flag and need no guard.
+    fn acquire_sync_guard(
+        &self,
+        connector_type: &ConnectorType,
+    ) -> Result<scheduled_sync::SyncRunGuard, ErrorEnvelope> {
+        let running = match connector_type.as_str() {
+            "github" => &self.github_sync_running,
+            "ssh" => &self.ssh_sync_running,
+            "dokploy" => &self.dokploy_sync_running,
+            "cloudflare" => &self.cloudflare_sync_running,
+            "supabase-managed" => &self.supabase_managed_sync_running,
+            "aliyun" => &self.aliyun_sync_running,
+            "tencent" => &self.tencent_sync_running,
+            // Connector types without a live sync path have no running flag and
+            // need no guard.
+            _ => return Ok(scheduled_sync::SyncRunGuard::released()),
+        };
+        scheduled_sync::SyncRunGuard::acquire(running).map_err(|_| ErrorEnvelope {
+            schema_version: next_infra_query::dto::QUERY_DTO_SCHEMA_VERSION,
+            code: "sync_in_progress".into(),
+            message: "A synchronization is already running for this connection.".into(),
+            retryable: true,
+        })
     }
 
     fn register_github_connection(&self, connection: &Connection) -> Result<(), ErrorEnvelope> {
@@ -1785,6 +1791,7 @@ impl AppState {
             })?;
         scheduled_sync::spawn_github_sync(
             self.store.clone(),
+            self.integration_paths.root.join("github-secrets-v1"),
             self.github_sync_running.clone(),
             self.github_connector.clone(),
             connection,
@@ -1806,6 +1813,9 @@ impl AppState {
     }
 
     fn register_ssh_connection(&self, connection: &Connection) -> Result<(), DomainError> {
+        if !has_live_sync_path(&connection.connector_type) {
+            return Ok(());
+        }
         let evaluated_at = now().map_err(DomainError::invalid_value)?;
         let interval = query_sync_interval_millis(&connection.connector_type);
         let next_due = evaluated_at.unix_millis().saturating_add(interval as i64);
@@ -2091,13 +2101,33 @@ impl AppState {
     }
 }
 
-pub(crate) async fn sync_github(
+/// Lazily reads a legacy file-based GitHub token for the connection from the
+/// pre-SQLite secret store layout (`{root}/github-secrets-v1/{connection_id}.token`).
+/// Returns `None` when no legacy token is present. Token contents are never
+/// logged or emitted.
+fn read_legacy_github_secret(
+    legacy_secret_dir: &Path,
+    connection_id: &ConnectionId,
+) -> Option<SecretValue> {
+    let path = legacy_secret_dir.join(format!("{}.token", connection_id.as_str()));
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(SecretValue::new(bytes))
+}
+
+pub(crate) async fn sync_github<C>(
     store: SharedStore,
-    connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
+    legacy_secret_dir: &Path,
+    connector: Arc<C>,
     mut connection: Connection,
     trigger: SyncTrigger,
     sync_run_id: SyncRunId,
-) -> Result<(), ErrorEnvelope> {
+) -> Result<(), ErrorEnvelope>
+where
+    C: ReadConnector + 'static,
+{
     let started_at = now().map_err(|_| {
         safe_error(
             "sync_unavailable",
@@ -2133,20 +2163,41 @@ pub(crate) async fn sync_github(
         cursor: None,
         targeted_resources: Vec::new(),
     };
-    let secret = store
-        .read(|s| s.connection_secret(&connection.connection_id))
-        .map_err(|_| {
-            safe_error(
+    let secret = match store.read(|s| s.connection_secret(&connection.connection_id)) {
+        Ok(Some(secret)) => secret,
+        Ok(None) => {
+            match read_legacy_github_secret(legacy_secret_dir, &connection.connection_id) {
+                Some(secret) => {
+                    // Opportunistic lazy backfill into the SQLite secret store;
+                    // failures are tolerated and retried on the next sync.
+                    let _ = store
+                        .write(|s| s.upsert_connection_secret(&connection.connection_id, &secret));
+                    secret
+                }
+                None => {
+                    connection.health = ConnectorHealth::AuthFailed;
+                    store
+                        .write(|s| s.upsert_connection(connection.clone()))
+                        .map_err(|_| {
+                            safe_error(
+                                "connection_unavailable",
+                                "GitHub connection status could not be saved.",
+                            )
+                        })?;
+                    return Err(safe_error(
+                        "credential_unavailable",
+                        "GitHub token is unavailable from local storage.",
+                    ));
+                }
+            }
+        }
+        Err(_) => {
+            return Err(safe_error(
                 "credential_unavailable",
                 "GitHub token is unavailable from local storage.",
-            )
-        })?
-        .ok_or_else(|| {
-            safe_error(
-                "credential_unavailable",
-                "GitHub token is unavailable from local storage.",
-            )
-        })?;
+            ));
+        }
+    };
     let mut engine = SyncEngine::new(store.clone());
     let handle = engine
         .start(
@@ -2161,6 +2212,8 @@ pub(crate) async fn sync_github(
             },
         )
         .map_err(|_| {
+            connection.health = connector_health(ErrorCode::Internal);
+            let _ = store.write(|s| s.upsert_connection(connection.clone()));
             safe_error(
                 "sync_unavailable",
                 "GitHub synchronization could not start.",
@@ -2179,6 +2232,7 @@ pub(crate) async fn sync_github(
             let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
                 ConnectorHealth::Degraded
             } else {
+                connection.last_success_at = Some(finished_at);
                 ConnectorHealth::Healthy
             };
             let normalized = match github_normalizer().normalize(&request, outcome.batch().clone())
@@ -2194,6 +2248,8 @@ pub(crate) async fn sync_github(
                         },
                         finished_at,
                     );
+                    connection.health = connector_health(ErrorCode::Internal);
+                    let _ = store.write(|s| s.upsert_connection(connection.clone()));
                     return Err(safe_error(
                         "sync_unavailable",
                         "GitHub data could not be saved.",
@@ -2202,8 +2258,11 @@ pub(crate) async fn sync_github(
             };
             engine
                 .commit(handle, normalized, finished_at)
-                .map_err(|_| safe_error("sync_unavailable", "GitHub data could not be saved."))?;
-            connection.last_success_at = Some(finished_at);
+                .map_err(|_| {
+                    connection.health = connector_health(ErrorCode::Internal);
+                    let _ = store.write(|s| s.upsert_connection(connection.clone()));
+                    safe_error("sync_unavailable", "GitHub data could not be saved.")
+                })?;
             health
         }
         Err(failure) => {
@@ -2290,7 +2349,11 @@ pub(crate) async fn sync_ssh(
                 targeted_resources: Vec::new(),
             },
         )
-        .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not start."))?;
+        .map_err(|_| {
+            connection.health = ssh_connector_health(ErrorCode::Internal);
+            let _ = store.write(|s| s.upsert_connection(connection.clone()));
+            safe_error("sync_unavailable", "SSH synchronization could not start.")
+        })?;
     let outcome = connector.sync(request.clone(), None).await;
     let finished_at = now()
         .map_err(|_| safe_error("sync_unavailable", "SSH synchronization could not finish."))?;
@@ -2300,6 +2363,7 @@ pub(crate) async fn sync_ssh(
             let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
                 ConnectorHealth::Degraded
             } else {
+                connection.last_success_at = Some(finished_at);
                 ConnectorHealth::Healthy
             };
             let normalized = match ssh_normalizer().normalize(&request, outcome.batch().clone()) {
@@ -2314,6 +2378,8 @@ pub(crate) async fn sync_ssh(
                         },
                         finished_at,
                     );
+                    connection.health = ssh_connector_health(ErrorCode::Internal);
+                    let _ = store.write(|s| s.upsert_connection(connection.clone()));
                     return Err(safe_error(
                         "sync_unavailable",
                         "SSH data could not be saved.",
@@ -2322,8 +2388,11 @@ pub(crate) async fn sync_ssh(
             };
             engine
                 .commit(handle, normalized, finished_at)
-                .map_err(|_| safe_error("sync_unavailable", "SSH data could not be saved."))?;
-            connection.last_success_at = Some(finished_at);
+                .map_err(|_| {
+                    connection.health = ssh_connector_health(ErrorCode::Internal);
+                    let _ = store.write(|s| s.upsert_connection(connection.clone()));
+                    safe_error("sync_unavailable", "SSH data could not be saved.")
+                })?;
             health
         }
         Err(failure) => {
@@ -2483,6 +2552,7 @@ pub(crate) async fn sync_dokploy(
             let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
                 ConnectorHealth::Degraded
             } else {
+                connection.last_success_at = Some(finished_at);
                 ConnectorHealth::Healthy
             };
             let normalized = match dokploy_normalizer().normalize(&request, outcome.batch().clone())
@@ -2507,7 +2577,6 @@ pub(crate) async fn sync_dokploy(
             engine
                 .commit(handle, normalized, finished_at)
                 .map_err(|_| safe_error("sync_unavailable", "Dokploy data could not be saved."))?;
-            connection.last_success_at = Some(finished_at);
             health
         }
         Err(failure) => {
@@ -2647,6 +2716,7 @@ pub(crate) async fn sync_cloudflare(
             let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
                 ConnectorHealth::Degraded
             } else {
+                connection.last_success_at = Some(finished_at);
                 ConnectorHealth::Healthy
             };
             let normalized =
@@ -2673,7 +2743,6 @@ pub(crate) async fn sync_cloudflare(
                 .map_err(|_| {
                     safe_error("sync_unavailable", "Cloudflare data could not be saved.")
                 })?;
-            connection.last_success_at = Some(finished_at);
             health
         }
         Err(failure) => {
@@ -2818,6 +2887,7 @@ pub(crate) async fn sync_supabase_managed(
             let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
                 ConnectorHealth::Degraded
             } else {
+                connection.last_success_at = Some(finished_at);
                 ConnectorHealth::Healthy
             };
             let normalized =
@@ -2847,7 +2917,6 @@ pub(crate) async fn sync_supabase_managed(
                         "Supabase managed data could not be saved.",
                     )
                 })?;
-            connection.last_success_at = Some(finished_at);
             health
         }
         Err(failure) => {
@@ -2992,6 +3061,7 @@ pub(crate) async fn sync_aliyun(
             let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
                 ConnectorHealth::Degraded
             } else {
+                connection.last_success_at = Some(finished_at);
                 ConnectorHealth::Healthy
             };
             let normalized = match aliyun_normalizer().normalize(&request, outcome.batch().clone())
@@ -3016,7 +3086,6 @@ pub(crate) async fn sync_aliyun(
             engine
                 .commit(handle, normalized, finished_at)
                 .map_err(|_| safe_error("sync_unavailable", "Aliyun data could not be saved."))?;
-            connection.last_success_at = Some(finished_at);
             health
         }
         Err(failure) => {
@@ -3161,6 +3230,7 @@ pub(crate) async fn sync_tencent(
             let health = if matches!(outcome, SyncOutcome::Partial { .. }) {
                 ConnectorHealth::Degraded
             } else {
+                connection.last_success_at = Some(finished_at);
                 ConnectorHealth::Healthy
             };
             let normalized = match tencent_normalizer().normalize(&request, outcome.batch().clone())
@@ -3185,7 +3255,6 @@ pub(crate) async fn sync_tencent(
             engine
                 .commit(handle, normalized, finished_at)
                 .map_err(|_| safe_error("sync_unavailable", "Tencent data could not be saved."))?;
-            connection.last_success_at = Some(finished_at);
             health
         }
         Err(failure) => {
@@ -3431,8 +3500,8 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         query_github_actions_summary,
         github_discover_repositories,
         github_connect,
-        github_connection_purge_preview,
-        github_connection_purge,
+        connection_purge_preview,
+        connection_purge,
         ssh_validate,
         ssh_connect,
         cloudflare_validate,
@@ -3475,32 +3544,21 @@ struct GitHubConnectResult {
 }
 
 #[derive(Deserialize)]
-struct GitHubConnectionPurgeCommand {
+struct ConnectionPurgeCommand {
     connection_id: String,
 }
 
-#[derive(Serialize)]
-struct GitHubConnectionPurgeSummary {
-    resources: u64,
-    relations: u64,
-    resource_versions: u64,
-    relation_versions: u64,
-    changes: u64,
-    bindings: u64,
-    sync_runs: u64,
-}
-
-impl From<next_infra_store::ConnectionPurgeSummary> for GitHubConnectionPurgeSummary {
-    fn from(value: next_infra_store::ConnectionPurgeSummary) -> Self {
-        Self {
-            resources: value.resources,
-            relations: value.relations,
-            resource_versions: value.resource_versions,
-            relation_versions: value.relation_versions,
-            changes: value.changes,
-            bindings: value.bindings,
-            sync_runs: value.sync_runs,
-        }
+fn connection_purge_summary(
+    value: next_infra_store::ConnectionPurgeSummary,
+) -> ConnectionPurgeSummary {
+    ConnectionPurgeSummary {
+        resources: value.resources,
+        relations: value.relations,
+        resource_versions: value.resource_versions,
+        relation_versions: value.relation_versions,
+        changes: value.changes,
+        bindings: value.bindings,
+        sync_runs: value.sync_runs,
     }
 }
 
@@ -3542,8 +3600,8 @@ struct SshValidateCommand {
 
 #[derive(Serialize)]
 struct SshServiceOption {
-    service_id: String,
-    service_type: String,
+    id: String,
+    name: String,
 }
 
 #[derive(Serialize)]
@@ -3770,11 +3828,11 @@ async fn github_discover_repositories(
 }
 
 #[tauri::command]
-fn github_connection_purge_preview(
+fn connection_purge_preview(
     state: State<'_, AppState>,
-    request: GitHubConnectionPurgeCommand,
-) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
-    state.preview_github_connection_purge(request.connection_id)
+    request: ConnectionPurgeCommand,
+) -> Result<ConnectionPurgeSummary, ErrorEnvelope> {
+    state.preview_connection_purge(request.connection_id)
 }
 
 #[tauri::command]
@@ -3785,11 +3843,11 @@ fn query_github_actions_summary(
 }
 
 #[tauri::command]
-fn github_connection_purge(
+fn connection_purge(
     state: State<'_, AppState>,
-    request: GitHubConnectionPurgeCommand,
-) -> Result<GitHubConnectionPurgeSummary, ErrorEnvelope> {
-    state.purge_github_connection(request.connection_id)
+    request: ConnectionPurgeCommand,
+) -> Result<ConnectionPurgeSummary, ErrorEnvelope> {
+    state.purge_connection(request.connection_id)
 }
 
 #[tauri::command]
@@ -3800,14 +3858,32 @@ async fn ssh_validate(
     let host_alias = HostAlias::parse(&request.host_alias)
         .map_err(|_| ssh_validation_error(next_infra_core::ErrorCode::InvalidDomainValue))?;
     let timeout_secs = request.connect_timeout_secs.unwrap_or(10);
-    let config = serde_json::to_value(SshConnectionConfigV1 {
+    validate_and_discover_ssh(state.ssh_connector.as_ref(), host_alias, timeout_secs).await
+}
+
+/// Runs identity validation followed by best-effort service discovery and maps
+/// the result to the command DTO. Kept generic over the probe client so the
+/// host tests can drive it with a fake instead of the real ssh binary.
+async fn validate_and_discover_ssh<T: SshProbeClient>(
+    connector: &SshConnector<T>,
+    host_alias: HostAlias,
+    timeout_secs: u8,
+) -> Result<SshValidateResult, ErrorEnvelope> {
+    if !(5..=14).contains(&timeout_secs) {
+        return Err(safe_error(
+            "invalid_connection",
+            "SSH connection timeout must be between 5 and 14 seconds.",
+        ));
+    }
+    let ssh_config = SshConnectionConfigV1 {
         host_identity: next_infra_connector_ssh::HostIdentity::generate(),
         host_alias,
         connect_timeout_secs: timeout_secs,
         probe_profile: ProbeProfile::BaselineV1,
         allowed_service_ids: Vec::new(),
-    })
-    .map_err(|_| ssh_validation_error(next_infra_core::ErrorCode::Internal))?;
+    };
+    let config = serde_json::to_value(&ssh_config)
+        .map_err(|_| ssh_validation_error(next_infra_core::ErrorCode::Internal))?;
     let validation_request = ValidationRequest {
         connection: ConnectionInput {
             connection_id: ConnectionId::new("ssh-validate-temp").unwrap(),
@@ -3816,13 +3892,25 @@ async fn ssh_validate(
             config_schema_version: SchemaVersion::new(1).unwrap(),
         },
     };
-    let outcome = state
-        .ssh_connector
+    let outcome = connector
         .validate(validation_request, None)
         .await
         .map_err(|failure| ssh_validation_error(failure.code))?;
     let discovered_services = match outcome.status {
-        ValidationStatus::Valid => Vec::new(),
+        ValidationStatus::Valid => {
+            let discovery = connector.discover_services(&ssh_config).await;
+            for warning in &discovery.warnings {
+                eprintln!("ssh_validate: service discovery degraded: {warning}");
+            }
+            discovery
+                .services
+                .into_iter()
+                .map(|service| SshServiceOption {
+                    id: service.service_id.clone(),
+                    name: service.service_id,
+                })
+                .collect()
+        }
         ValidationStatus::Invalid => Vec::new(),
     };
     Ok(SshValidateResult {
@@ -5034,12 +5122,13 @@ fn committed_query_context(
     .map_err(|_| "desktop query context unavailable".into())
 }
 
-/// True only for "github" today — single source of truth per plan §2.2.
-/// Other connectors use offline replay/fixtures and are NOT scheduled.
+/// Connectors with a live scheduled sync path — the single source of truth per
+/// plan §2.2. SSH is intentionally excluded: it syncs once at connection
+/// creation and is not re-scheduled.
 pub(crate) fn has_live_sync_path(connector_type: &ConnectorType) -> bool {
     matches!(
         connector_type.as_str(),
-        "github" | "ssh" | "dokploy" | "cloudflare" | "supabase-managed" | "aliyun" | "tencent"
+        "github" | "dokploy" | "cloudflare" | "supabase-managed" | "aliyun" | "tencent"
     )
 }
 
@@ -5094,6 +5183,12 @@ fn safe_error(code: &str, message: &str) -> ErrorEnvelope {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use next_infra_connector_api::{ObservationBatch, ResourceObservation, ValidationReport};
+    use next_infra_connector_ssh::{
+        ProbeId, ProbeOutcome, ProbeOutput, SshBatchOutput, SshCancellation,
+    };
+    use next_infra_core::{CoverageGapReason, ExternalId, ResourceHealth, SyncCoverage};
     use tempfile::{Builder, TempDir};
 
     #[test]
@@ -5214,7 +5309,7 @@ mod tests {
     }
 
     #[test]
-    fn github_connection_purge_removes_the_scoped_snapshot_and_credential() {
+    fn connection_purge_removes_the_scoped_snapshot_and_credential() {
         let directory = test_home();
         let paths = IntegrationPaths::from_home(directory.path());
         let state =
@@ -5246,11 +5341,11 @@ mod tests {
             .unwrap();
 
         let preview = state
-            .preview_github_connection_purge(connection_id.as_str().into())
+            .preview_connection_purge(connection_id.as_str().into())
             .unwrap();
         assert_eq!(preview.resources, 0);
         let result = state
-            .purge_github_connection(connection_id.as_str().into())
+            .purge_connection(connection_id.as_str().into())
             .unwrap();
 
         assert_eq!(result.resources, 0);
@@ -5263,6 +5358,131 @@ mod tests {
                 .is_none()
         );
         assert!(state.query.list_connections().unwrap().items.is_empty());
+    }
+
+    #[test]
+    fn connection_purge_works_for_ssh_connections() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let connection_id = ConnectionId::new("ssh-purge-fixture").unwrap();
+        state
+            .store
+            .write(|store| {
+                store.upsert_connection(Connection {
+                    connection_id: connection_id.clone(),
+                    connector_type: ConnectorType::new("ssh").unwrap(),
+                    display_name: "SSH purge fixture".into(),
+                    enabled: true,
+                    config: serde_json::json!({}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+
+        let preview = state
+            .preview_connection_purge(connection_id.as_str().into())
+            .unwrap();
+        assert_eq!(preview.resources, 0);
+        let result = state
+            .purge_connection(connection_id.as_str().into())
+            .unwrap();
+        assert_eq!(result.resources, 0);
+        assert_eq!(state.store.get_connection(&connection_id).unwrap(), None);
+        state.persist_user_quit_and_stop().unwrap();
+    }
+
+    #[test]
+    fn connection_purge_is_mutually_exclusive_with_the_connections_sync() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let connection_id = ConnectionId::new("github-purge-exclusive").unwrap();
+        state
+            .store
+            .write(|store| {
+                store.upsert_connection(Connection {
+                    connection_id: connection_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "Purge exclusive".into(),
+                    enabled: true,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+
+        state.github_sync_running.store(true, Ordering::Release);
+        let error = state
+            .purge_connection(connection_id.as_str().into())
+            .unwrap_err();
+        assert_eq!(error.code, "sync_in_progress");
+
+        state.github_sync_running.store(false, Ordering::Release);
+        state
+            .purge_connection(connection_id.as_str().into())
+            .unwrap();
+        assert!(!state.github_sync_running.load(Ordering::Acquire));
+        state.persist_user_quit_and_stop().unwrap();
+    }
+
+    #[test]
+    fn connection_purge_uses_the_connections_own_sync_guard() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let github_id = ConnectionId::new("github-purge-own-guard").unwrap();
+        let ssh_id = ConnectionId::new("ssh-purge-own-guard").unwrap();
+        state
+            .store
+            .write(|store| {
+                store.upsert_connection(Connection {
+                    connection_id: github_id.clone(),
+                    connector_type: ConnectorType::new("github").unwrap(),
+                    display_name: "GitHub own guard".into(),
+                    enabled: true,
+                    config: serde_json::json!({"selected_repository_ids": ["42"]}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })?;
+                store.upsert_connection(Connection {
+                    connection_id: ssh_id.clone(),
+                    connector_type: ConnectorType::new("ssh").unwrap(),
+                    display_name: "SSH own guard".into(),
+                    enabled: true,
+                    config: serde_json::json!({}),
+                    secret_ref: None,
+                    health: ConnectorHealth::Healthy,
+                    last_success_at: None,
+                    last_attempt_at: None,
+                    config_schema_version: SchemaVersion::new(1).unwrap(),
+                    deleted_at: None,
+                })
+            })
+            .unwrap();
+
+        state.github_sync_running.store(true, Ordering::Release);
+        state.purge_connection(ssh_id.as_str().into()).unwrap();
+        assert!(state.github_sync_running.load(Ordering::Acquire));
+        assert!(!state.ssh_sync_running.load(Ordering::Acquire));
+        state.persist_user_quit_and_stop().unwrap();
     }
 
     #[test]
@@ -5582,7 +5802,7 @@ mod tests {
             "driver should be running"
         );
 
-        state.purge_github_connection(conn_id.to_string()).unwrap();
+        state.purge_connection(conn_id.to_string()).unwrap();
 
         assert!(
             state
@@ -5642,6 +5862,314 @@ mod tests {
             "driver should be stopped after quit"
         );
         state.persist_user_quit_and_stop().unwrap();
+    }
+
+    struct FakeConnector(Result<SyncOutcome, ConnectorFailure>);
+
+    #[async_trait]
+    impl ReadConnector for FakeConnector {
+        fn descriptor(&self) -> &next_infra_connector_api::ConnectorDescriptor {
+            unimplemented!("descriptor is not used by sync_github")
+        }
+        async fn validate(
+            &self,
+            _request: ValidationRequest,
+            _secret: Option<&SecretValue>,
+        ) -> Result<ValidationReport, ConnectorFailure> {
+            unimplemented!("validate is not used by sync_github")
+        }
+        async fn sync(
+            &self,
+            _request: SyncRequest,
+            _secret: Option<&SecretValue>,
+        ) -> Result<SyncOutcome, ConnectorFailure> {
+            self.0.clone()
+        }
+    }
+
+    fn github_repository_observation(scope: Scope) -> ResourceObservation {
+        ResourceObservation {
+            kind: ResourceKind::new("github.repository").unwrap(),
+            external_id: ExternalId::new("10").unwrap(),
+            name: "fixture-repo".into(),
+            display_name: "Fixture Repo".into(),
+            scope,
+            labels: std::collections::BTreeMap::new(),
+            health: ResourceHealth::Healthy,
+            attributes: serde_json::json!({
+                "repository_id": "10",
+                "visibility": "private",
+                "default_branch": "main",
+                "archived": false,
+                "disabled": false,
+                "created_at": "2026-08-05T00:00:00Z",
+                "updated_at": "2026-08-05T00:01:00Z",
+            }),
+            attribute_schema_version: SchemaVersion::new(1).unwrap(),
+            observed_at: Timestamp::from_unix_millis(0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn partial_sync_outcome_persists_degraded_without_last_success_at() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        ensure_data_directory(&paths.root).unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+
+        let connection = Connection {
+            connection_id: ConnectionId::new("github-partial-test").unwrap(),
+            connector_type: ConnectorType::new("github").unwrap(),
+            display_name: "Partial Fixture".into(),
+            enabled: true,
+            config: serde_json::json!({"selected_repository_ids": ["10"]}),
+            secret_ref: None,
+            health: ConnectorHealth::Healthy,
+            last_success_at: None,
+            last_attempt_at: None,
+            config_schema_version: SchemaVersion::new(1).unwrap(),
+            deleted_at: None,
+        };
+        store
+            .write(|s| s.upsert_connection(connection.clone()))
+            .unwrap();
+        store
+            .write(|s| {
+                s.upsert_connection_secret(
+                    &connection.connection_id,
+                    &SecretValue::new("fixture-token"),
+                )
+            })
+            .unwrap();
+
+        let scope = Scope::new(format!("github:{}", connection.connection_id.as_str())).unwrap();
+        let batch = ObservationBatch {
+            resources: vec![github_repository_observation(scope.clone())],
+            relations: Vec::new(),
+            coverage: SyncCoverage::Partial {
+                scope: Some(scope),
+                reason: CoverageGapReason::PaginationIncomplete,
+            },
+            next_cursor: None,
+            warnings: Vec::new(),
+            redaction_report: Default::default(),
+            provider_request_summary: Default::default(),
+        };
+        let failure = ConnectorFailure {
+            code: ErrorCode::PartialPagination,
+            message: "bounded view".into(),
+            retryable: false,
+            retry_after_ms: None,
+        };
+        let outcome = SyncOutcome::Partial { batch, failure };
+
+        let result = tauri::async_runtime::block_on(sync_github(
+            store.clone(),
+            &paths.root.join("github-secrets-v1"),
+            Arc::new(FakeConnector(Ok(outcome))),
+            connection.clone(),
+            SyncTrigger::User,
+            SyncRunId::new("github-sync-partial-test").unwrap(),
+        ));
+        assert!(result.is_ok());
+
+        let persisted = store
+            .read(|s| s.get_connection(&connection.connection_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.health, ConnectorHealth::Degraded);
+        assert!(persisted.last_success_at.is_none());
+    }
+
+    #[test]
+    fn missing_github_secret_persists_auth_failed_and_errors() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        ensure_data_directory(&paths.root).unwrap();
+        let store = SharedStore::open(&paths.root.join("next-infra.db")).unwrap();
+
+        let connection = Connection {
+            connection_id: ConnectionId::new("github-missing-secret").unwrap(),
+            connector_type: ConnectorType::new("github").unwrap(),
+            display_name: "Missing Secret".into(),
+            enabled: true,
+            config: serde_json::json!({"selected_repository_ids": ["10"]}),
+            secret_ref: None,
+            health: ConnectorHealth::Healthy,
+            last_success_at: None,
+            last_attempt_at: None,
+            config_schema_version: SchemaVersion::new(1).unwrap(),
+            deleted_at: None,
+        };
+        store
+            .write(|s| s.upsert_connection(connection.clone()))
+            .unwrap();
+
+        let result = tauri::async_runtime::block_on(sync_github(
+            store.clone(),
+            &paths.root.join("github-secrets-v1"),
+            Arc::new(FakeConnector(Err(ConnectorFailure {
+                code: ErrorCode::AuthenticationFailed,
+                message: "never called".into(),
+                retryable: false,
+                retry_after_ms: None,
+            }))),
+            connection.clone(),
+            SyncTrigger::User,
+            SyncRunId::new("github-sync-missing-secret").unwrap(),
+        ));
+        assert!(result.is_err());
+
+        let persisted = store
+            .read(|s| s.get_connection(&connection.connection_id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.health, ConnectorHealth::AuthFailed);
+    }
+
+    #[test]
+    fn ssh_connection_is_not_registered_in_scheduler() {
+        let directory = test_home();
+        let paths = IntegrationPaths::from_home(directory.path());
+        let state =
+            AppState::open(&paths, LaunchSource::UserInteractive, &paths.stable_app).unwrap();
+        let connection = Connection {
+            connection_id: ConnectionId::new("ssh-not-scheduled").unwrap(),
+            connector_type: ConnectorType::new("ssh").unwrap(),
+            display_name: "SSH Not Scheduled".into(),
+            enabled: true,
+            config: serde_json::json!({}),
+            secret_ref: None,
+            health: ConnectorHealth::Healthy,
+            last_success_at: None,
+            last_attempt_at: None,
+            config_schema_version: SchemaVersion::new(1).unwrap(),
+            deleted_at: None,
+        };
+        state.register_ssh_connection(&connection).unwrap();
+        assert!(
+            state
+                .runtime()
+                .lock()
+                .unwrap()
+                .scheduler()
+                .entry(&connection.connection_id)
+                .is_none()
+        );
+        state.persist_user_quit_and_stop().unwrap();
+    }
+
+    struct FakeSshProbeClient {
+        batches: std::sync::Mutex<Vec<Result<SshBatchOutput, ConnectorFailure>>>,
+    }
+
+    impl FakeSshProbeClient {
+        fn new(batches: Vec<Result<SshBatchOutput, ConnectorFailure>>) -> Self {
+            Self {
+                batches: std::sync::Mutex::new(batches.into_iter().rev().collect()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl SshProbeClient for FakeSshProbeClient {
+        async fn execute_batch(
+            &self,
+            _config: &SshConnectionConfigV1,
+            _probes: &[ProbeId],
+            _cancellation: &SshCancellation,
+        ) -> Result<SshBatchOutput, ConnectorFailure> {
+            self.batches.lock().unwrap().pop().unwrap()
+        }
+    }
+
+    fn ssh_batch(outcomes: Vec<ProbeOutcome>) -> Result<SshBatchOutput, ConnectorFailure> {
+        Ok(SshBatchOutput {
+            outcomes,
+            elapsed_ms: 5,
+            output_bytes: 100,
+        })
+    }
+
+    fn ssh_success(probe_id: ProbeId, stdout: &'static [u8]) -> ProbeOutcome {
+        ProbeOutcome::Success(
+            ProbeOutput::from_collected_stdout(probe_id, stdout.to_vec(), 1).unwrap(),
+        )
+    }
+
+    #[test]
+    fn ssh_validate_returns_discovered_services_after_identity_passes() {
+        let fake = FakeSshProbeClient::new(vec![
+            ssh_batch(vec![ssh_success(
+                ProbeId::HostIdentityV1,
+                b"Darwin\narm64\n",
+            )]),
+            ssh_batch(vec![ssh_success(
+                ProbeId::HostIdentityV1,
+                b"Darwin\narm64\n",
+            )]),
+            ssh_batch(vec![ssh_success(
+                ProbeId::MacosLaunchdServicesV1,
+                b"PID Status Label\n123 0 app.running\n- 0 app.ondemand\n",
+            )]),
+        ]);
+        let connector = SshConnector::new(fake);
+        let result = tauri::async_runtime::block_on(validate_and_discover_ssh(
+            &connector,
+            HostAlias::parse("fixture-host").unwrap(),
+            10,
+        ))
+        .unwrap();
+        assert_eq!(result.discovered_services.len(), 2);
+        assert_eq!(result.discovered_services[0].id, "app.ondemand");
+        assert_eq!(result.discovered_services[0].name, "app.ondemand");
+        assert_eq!(result.discovered_services[1].id, "app.running");
+    }
+
+    #[test]
+    fn ssh_validate_degrades_to_empty_services_on_discovery_failure() {
+        let fake = FakeSshProbeClient::new(vec![
+            ssh_batch(vec![ssh_success(
+                ProbeId::HostIdentityV1,
+                b"Linux\nx86_64\n",
+            )]),
+            ssh_batch(vec![ssh_success(
+                ProbeId::HostIdentityV1,
+                b"Linux\nx86_64\n",
+            )]),
+            ssh_batch(vec![ProbeOutcome::Failure {
+                probe_id: ProbeId::LinuxSystemdServicesV1,
+                failure: ConnectorFailure {
+                    code: ErrorCode::ProviderUnavailable,
+                    message: "SSH probe failed".into(),
+                    retryable: true,
+                    retry_after_ms: None,
+                },
+            }]),
+        ]);
+        let connector = SshConnector::new(fake);
+        let result = tauri::async_runtime::block_on(validate_and_discover_ssh(
+            &connector,
+            HostAlias::parse("fixture-host").unwrap(),
+            10,
+        ))
+        .unwrap();
+        assert!(result.discovered_services.is_empty());
+    }
+
+    #[test]
+    fn ssh_validate_rejects_out_of_range_timeout() {
+        let fake = FakeSshProbeClient::new(vec![]);
+        let connector = SshConnector::new(fake);
+        let result = tauri::async_runtime::block_on(validate_and_discover_ssh(
+            &connector,
+            HostAlias::parse("fixture-host").unwrap(),
+            3,
+        ));
+        let Err(envelope) = result else {
+            panic!("out-of-range timeout must be rejected")
+        };
+        assert_eq!(envelope.code, "invalid_connection");
     }
 
     fn test_home() -> TempDir {

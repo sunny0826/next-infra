@@ -6,20 +6,21 @@ use std::path::{Path, PathBuf};
 
 use next_infra_query::dto::{
     BindingCommandResultDto, BindingDto, BindingSnapshotDto, BindingStatusDto, ChangeDto,
-    ChangeOriginDto, ChangePageDto, ChangeSubjectDto, ConnectionDto, ConnectionSnapshotDto,
-    ConnectorCoverageDto, ConnectorCoverageLevelDto, ConnectorCoverageSnapshotDto, ConnectorHealth,
-    ConnectorHealthCountsDto, CreateBindingCommandDto, DisableBindingCommandDto, ErrorEnvelope,
-    EvidenceType, FieldChangeDto, Freshness, FreshnessCountsDto, FrontierDirectionDto,
-    HealthSummaryDto, Lifecycle, PageInfo, QueryViewState, RelationDto, RelationEvidenceDto,
-    ResourceDetailDto, ResourceDto, ResourceHealth, ResourceHealthCountsDto, ResourcePageDto,
-    SchemaVersion, SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto,
-    SyncRunErrorDto, SyncRunStatusDto, SyncRunWarningDto, SyncStatusDto, SyncTriggerDto,
-    TimelineGroupDto, TimelineItemDto, TimelineOriginDto, TimelinePageDto, TimelineVersionLinkDto,
-    TopologyDto, TopologyFrontierDto, UpdateBindingCommandDto,
+    ChangeOriginDto, ChangePageDto, ChangeSubjectDto, ConnectionDto, ConnectionPurgeSummary,
+    ConnectionSnapshotDto, ConnectorCoverageDto, ConnectorCoverageLevelDto,
+    ConnectorCoverageSnapshotDto, ConnectorHealth, ConnectorHealthCountsDto,
+    CreateBindingCommandDto, DisableBindingCommandDto, ErrorEnvelope, EvidenceType, FieldChangeDto,
+    Freshness, FreshnessCountsDto, FrontierDirectionDto, HealthSummaryDto, Lifecycle, PageInfo,
+    QueryViewState, RelationDto, RelationEvidenceDto, ResourceDetailDto, ResourceDto,
+    ResourceHealth, ResourceHealthCountsDto, ResourcePageDto, SchemaVersion, SnapshotMetadata,
+    SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto, SyncRunErrorDto, SyncRunStatusDto,
+    SyncRunWarningDto, SyncStatusDto, SyncTriggerDto, TimelineGroupDto, TimelineItemDto,
+    TimelineOriginDto, TimelinePageDto, TimelineVersionLinkDto, TopologyDto, TopologyFrontierDto,
+    UpdateBindingCommandDto,
 };
 use ts_rs::{Config, TS};
 
-const EXPECTED_BINDINGS: [&str; 53] = [
+const EXPECTED_BINDINGS: [&str; 54] = [
     "BindingCommandResultDto.ts",
     "BindingDto.ts",
     "BindingSnapshotDto.ts",
@@ -29,6 +30,7 @@ const EXPECTED_BINDINGS: [&str; 53] = [
     "ChangePageDto.ts",
     "ChangeSubjectDto.ts",
     "ConnectionDto.ts",
+    "ConnectionPurgeSummary.ts",
     "ConnectionSnapshotDto.ts",
     "ConnectorCoverageDto.ts",
     "ConnectorCoverageLevelDto.ts",
@@ -164,6 +166,8 @@ fn export_types() {
     SyncStatusDto::export_all(&config).expect("failed to export sync status binding");
     ConnectorCoverageSnapshotDto::export_all(&config)
         .expect("failed to export connector coverage snapshot binding");
+    ConnectionPurgeSummary::export_all(&config)
+        .expect("failed to export connection purge summary binding");
 
     let mut generated = BTreeSet::new();
     for entry in fs::read_dir(&output).expect("failed to read generated query bindings") {

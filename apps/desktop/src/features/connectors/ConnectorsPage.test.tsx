@@ -101,6 +101,24 @@ describe("ConnectorsPage", () => {
     expect(await screen.findByText(/已删除 3 个资源、2 条关系/)).toBeInTheDocument();
   });
 
+  it("enables purge for SSH connections and disables it for other connectors", async () => {
+    const purgeableSnapshot = {
+      metadata: { schema_version: 1, snapshot_version: "fixture-purge-allowlist-v1", generated_at: "2000-01-01T00:00:00Z" },
+      resources: [],
+      relations: [],
+      connections: [
+        { connection_id: "fixture-ssh-purge-conn", connector_type: "ssh" as const, display_name: "Fixture SSH Purge", enabled: true, health: "healthy" as const, last_success_at: null, last_attempt_at: null },
+        { connection_id: "fixture-dokploy-purge-conn", connector_type: "dokploy" as const, display_name: "Fixture Dokploy Purge", enabled: true, health: "healthy" as const, last_success_at: null, last_attempt_at: null },
+      ],
+    };
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(purgeableSnapshot)}><ConnectorsPage /></DesktopAdapterProvider>);
+
+    const sshRow = (await screen.findByText("Fixture SSH Purge")).closest("tr") as HTMLElement;
+    const dokployRow = screen.getByText("Fixture Dokploy Purge").closest("tr") as HTMLElement;
+    expect(within(sshRow).getByRole("button", { name: "删除本地数据" })).toBeEnabled();
+    expect(within(dokployRow).getByRole("button", { name: "删除本地数据" })).toBeDisabled();
+  });
+
   it("renders the SSH connection form section", async () => {
     render(<DesktopAdapterProvider adapter={new ConnectorAdapter(createQueryEvidenceLifecycleSnapshotFixture())}><ConnectorsPage /></DesktopAdapterProvider>);
     await openProviderForm("SSH");

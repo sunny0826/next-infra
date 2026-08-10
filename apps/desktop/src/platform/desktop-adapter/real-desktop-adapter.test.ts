@@ -93,7 +93,7 @@ describe("RealDesktopAdapter", () => {
     });
   });
 
-  it("previews and purges one GitHub connection through dedicated local commands", async () => {
+  it("previews and purges one connection through dedicated local commands", async () => {
     const { fake, invoke } = transport();
     const summary = {
       resources: 4,
@@ -107,13 +107,13 @@ describe("RealDesktopAdapter", () => {
     invoke.mockResolvedValue(summary);
     const adapter = new RealDesktopAdapter(fake);
 
-    await expect(adapter.previewGitHubConnectionPurge("github-fixture")).resolves.toEqual(summary);
-    await expect(adapter.purgeGitHubConnection("github-fixture")).resolves.toEqual(summary);
+    await expect(adapter.previewConnectionPurge("github-fixture")).resolves.toEqual(summary);
+    await expect(adapter.purgeConnection("github-fixture")).resolves.toEqual(summary);
 
-    expect(invoke).toHaveBeenNthCalledWith(1, "github_connection_purge_preview", {
+    expect(invoke).toHaveBeenNthCalledWith(1, "connection_purge_preview", {
       request: { connection_id: "github-fixture" },
     });
-    expect(invoke).toHaveBeenNthCalledWith(2, "github_connection_purge", {
+    expect(invoke).toHaveBeenNthCalledWith(2, "connection_purge", {
       request: { connection_id: "github-fixture" },
     });
   });

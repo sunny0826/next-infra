@@ -19,6 +19,9 @@ const CONNECTOR_DRAFT_PREFIX = "next-infra.connector-draft";
 
 const SYNC_RUN_LIMIT = 5;
 
+/** Connector types whose local snapshot may be purged (delete) from the UI. */
+const PURGEABLE_CONNECTOR_TYPES = new Set(["github", "ssh"]);
+
 interface ConnectionRow {
   readonly connection: ConnectionDto;
   readonly nextScheduledAt: string | null;
@@ -442,25 +445,25 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
     }
   }
 
-  async function previewGitHubConnectionPurge(connection: ConnectionDto) {
+  async function previewConnectionPurge(connection: ConnectionDto) {
     if (purging) return;
     setNotice(null);
     setError(null);
     try {
-      const summary = await adapter.previewGitHubConnectionPurge(connection.connection_id);
+      const summary = await adapter.previewConnectionPurge(connection.connection_id);
       setPurgeConfirmation({ connection, summary });
     } catch {
       setError("无法读取该连接的本地快照清理范围。");
     }
   }
 
-  async function purgeGitHubConnection() {
+  async function purgeConnection() {
     if (purgeConfirmation === null || purging) return;
     setPurging(true);
     setNotice(null);
     setError(null);
     try {
-      const summary = await adapter.purgeGitHubConnection(
+      const summary = await adapter.purgeConnection(
         purgeConfirmation.connection.connection_id,
       );
       setPurgeConfirmation(null);
@@ -495,7 +498,7 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
           <div><dt>同步记录</dt><dd>{purgeConfirmation.summary.sync_runs}</dd></div>
         </dl>
         {purgeConfirmation.summary.bindings > 0 ? <p>包含关联到该连接资源的手工绑定；这些绑定也会被删除。</p> : null}
-        <div className="connectors-purge-actions"><button disabled={purging} onClick={() => setPurgeConfirmation(null)} type="button">取消</button><button disabled={purging} onClick={purgeGitHubConnection} type="button">{purging ? "正在删除…" : "确认删除本地快照"}</button></div>
+        <div className="connectors-purge-actions"><button disabled={purging} onClick={() => setPurgeConfirmation(null)} type="button">取消</button><button disabled={purging} onClick={purgeConnection} type="button">{purging ? "正在删除…" : "确认删除本地快照"}</button></div>
       </section> : null}
             <section className="connectors-section" aria-labelledby="add-connection">
         <div className="overview-section-heading">
@@ -677,7 +680,7 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
             <td><span className={`connectors-status state-${connection.health}`}>{displayEnum(connection.health)}</span></td>
             <td><time>{connection.last_success_at ?? "从未"}</time></td><td><time>{connection.last_attempt_at ?? "从未"}</time></td>
             <td><code>{recentStatus ? displayEnum(recentStatus) : "无"}</code></td><td><span>{recentError ?? "无"}</span></td><td><span>{recentWarning ?? "无"}</span></td><td><time>{nextScheduledAt ?? "未计划"}</time></td>
-            <td><div className="connectors-actions"><button disabled={!connection.enabled || connection.connector_type !== "github" || connecting || purging} onClick={() => startManualSync(connection)} type="button">手动同步</button><button disabled={connection.connector_type !== "github" || connecting || purging} onClick={() => previewGitHubConnectionPurge(connection)} type="button">删除本地数据</button></div></td>
+            <td><div className="connectors-actions"><button disabled={!connection.enabled || connection.connector_type !== "github" || connecting || purging} onClick={() => startManualSync(connection)} type="button">手动同步</button><button disabled={!PURGEABLE_CONNECTOR_TYPES.has(connection.connector_type) || connecting || purging} onClick={() => previewConnectionPurge(connection)} type="button">删除本地数据</button></div></td>
             </tr>
             {expanded ? <tr className="connectors-detail-row" id={`connectors-run-detail-${connection.connection_id}`}><td colSpan={9}><SyncRunDetail connection={connection} runs={row.recentRuns} /></td></tr> : null}
             </Fragment>;

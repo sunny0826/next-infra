@@ -303,7 +303,7 @@ export class MockDesktopAdapter implements DesktopAdapter {
     return { connection_id: `fixture-tencent-${input.display_name || "connection"}`, sync_run_id: "fixture-tencent-sync" };
   }
 
-  async previewGitHubConnectionPurge(connectionId: string) {
+  async previewConnectionPurge(connectionId: string) {
     const resourceIds = new Set(
       this.#snapshot.resources
         .filter((resource) => resource.connection_id === connectionId)
@@ -324,8 +324,8 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async purgeGitHubConnection(connectionId: string) {
-    return this.previewGitHubConnectionPurge(connectionId);
+  async purgeConnection(connectionId: string) {
+    return this.previewConnectionPurge(connectionId);
   }
 
   async manualSync(connectionId: string) {

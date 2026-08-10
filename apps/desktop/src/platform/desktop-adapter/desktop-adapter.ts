@@ -10,6 +10,9 @@ import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TopologyDto } from "../../generated/query/TopologyDto";
 import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
 import type { BindingCommandResultDto } from "../../generated/query/BindingCommandResultDto";
+import type { ConnectionPurgeSummary } from "../../generated/query/ConnectionPurgeSummary";
+
+export type { ConnectionPurgeSummary };
 
 export interface SearchResourcesInput {
   readonly query?: string;
@@ -202,16 +205,6 @@ export interface TencentConnectResult {
   readonly sync_run_id: string;
 }
 
-export interface ConnectionPurgeSummary {
-  readonly resources: number;
-  readonly relations: number;
-  readonly resource_versions: number;
-  readonly relation_versions: number;
-  readonly changes: number;
-  readonly bindings: number;
-  readonly sync_runs: number;
-}
-
 export interface GitHubRepositoryActions {
   readonly repository_id: string;
   readonly repository_name: string;
@@ -286,8 +279,8 @@ export interface DesktopAdapter {
   createAliyunConnection(input: AliyunConnectInput): Promise<AliyunConnectResult>;
   validateTencentConnection(input: TencentValidateInput): Promise<TencentValidateResult>;
   createTencentConnection(input: TencentConnectInput): Promise<TencentConnectResult>;
-  previewGitHubConnectionPurge(connectionId: string): Promise<ConnectionPurgeSummary>;
-  purgeGitHubConnection(connectionId: string): Promise<ConnectionPurgeSummary>;
+  previewConnectionPurge(connectionId: string): Promise<ConnectionPurgeSummary>;
+  purgeConnection(connectionId: string): Promise<ConnectionPurgeSummary>;
   manualSync(connectionId: string): Promise<ManualSyncResult>;
   getLocalSettings(): Promise<LocalSettings>;
   updateLocalSettings(settings: LocalSettings): Promise<LocalSettings>;

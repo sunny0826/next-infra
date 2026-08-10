@@ -10,7 +10,6 @@
 //!   calling the pure driver and dispatching via the real AppState enqueue path.
 
 use next_infra_connector_cloudflare::{CloudflareConnector, ReqwestCloudflareTransport};
-use next_infra_connector_github::{GitHubConnector, ReqwestGitHubTransport};
 use next_infra_connector_ssh::{OpenSshClient, SshConnector};
 use next_infra_core::{Connection, ConnectionId, SyncTrigger, Timestamp};
 use next_infra_runtime::{Runtime, ScheduledSync};
@@ -28,6 +27,34 @@ pub enum EnqueueError {
     SyncInProgress,
     /// Connection or secrets are unavailable.
     Unavailable,
+}
+
+/// Releases a single-flight `AtomicBool` guard on drop, including during
+/// panic unwinding, so a panicking sync task can never permanently block
+/// future syncs for the same connection.
+pub(crate) struct SyncRunGuard(Arc<AtomicBool>);
+
+impl SyncRunGuard {
+    /// Acquires the single-flight flag, returning `SyncInProgress` if it is
+    /// already held. The returned guard releases it on drop.
+    pub(crate) fn acquire(running: &Arc<AtomicBool>) -> Result<Self, EnqueueError> {
+        if running.swap(true, Ordering::AcqRel) {
+            Err(EnqueueError::SyncInProgress)
+        } else {
+            Ok(Self(running.clone()))
+        }
+    }
+
+    /// A no-op guard for connector types without a sync running flag.
+    pub(crate) fn released() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+}
+
+impl Drop for SyncRunGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
 }
 
 /// Handle to stop the driver thread and wait for it to join.
@@ -151,21 +178,31 @@ where
 /// to be Send.
 ///
 /// See plan §2.5 for race safety argument (resolve → begin → enqueue order).
-pub fn spawn_github_sync(
+pub fn spawn_github_sync<C>(
     store: next_infra_runtime::SharedStore,
+    legacy_secret_dir: std::path::PathBuf,
     running: Arc<AtomicBool>,
-    connector: Arc<GitHubConnector<ReqwestGitHubTransport>>,
+    connector: Arc<C>,
     connection: Connection,
     trigger: SyncTrigger,
     sync_run_id: next_infra_core::SyncRunId,
-) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
-    let store = store.clone();
-    let running = running.clone();
+) -> Result<String, next_infra_query::dto::ErrorEnvelope>
+where
+    C: next_infra_connector_api::ReadConnector + 'static,
+{
+    let guard = SyncRunGuard(running);
     let queued_id = sync_run_id.as_str().to_owned();
     tauri::async_runtime::spawn(async move {
-        let _ = crate::composition::sync_github(store, connector, connection, trigger, sync_run_id)
-            .await;
-        running.store(false, Ordering::Release);
+        let _ = crate::composition::sync_github(
+            store,
+            &legacy_secret_dir,
+            connector,
+            connection,
+            trigger,
+            sync_run_id,
+        )
+        .await;
+        drop(guard);
     });
     Ok(queued_id)
 }
@@ -191,13 +228,12 @@ pub fn spawn_ssh_sync(
     trigger: SyncTrigger,
     sync_run_id: next_infra_core::SyncRunId,
 ) -> Result<String, next_infra_query::dto::ErrorEnvelope> {
-    let store = store.clone();
-    let running = running.clone();
+    let guard = SyncRunGuard(running);
     let queued_id = sync_run_id.as_str().to_owned();
     tauri::async_runtime::spawn(async move {
         let _ =
             crate::composition::sync_ssh(store, connector, connection, trigger, sync_run_id).await;
-        running.store(false, Ordering::Release);
+        drop(guard);
     });
     Ok(queued_id)
 }
@@ -661,7 +697,7 @@ mod tests {
         let supabase_self_hosted = ConnectorType::new("supabase-self-hosted").unwrap();
 
         assert!(crate::composition::has_live_sync_path(&github));
-        assert!(crate::composition::has_live_sync_path(&ssh));
+        assert!(!crate::composition::has_live_sync_path(&ssh));
         assert!(crate::composition::has_live_sync_path(&dokploy));
         assert!(crate::composition::has_live_sync_path(&cloudflare));
         assert!(crate::composition::has_live_sync_path(&supabase_managed));
@@ -670,5 +706,25 @@ mod tests {
         assert!(!crate::composition::has_live_sync_path(
             &supabase_self_hosted
         ));
+    }
+
+    #[test]
+    fn sync_run_guard_releases_flag_on_drop() {
+        let flag = Arc::new(AtomicBool::new(true));
+        {
+            let _guard = SyncRunGuard(flag.clone());
+        }
+        assert!(!flag.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn sync_run_guard_releases_flag_when_task_panics() {
+        let flag = Arc::new(AtomicBool::new(true));
+        let outcome = std::panic::catch_unwind(|| {
+            let _guard = SyncRunGuard(flag.clone());
+            panic!("sync task panicked");
+        });
+        assert!(outcome.is_err());
+        assert!(!flag.load(Ordering::Acquire));
     }
 }
