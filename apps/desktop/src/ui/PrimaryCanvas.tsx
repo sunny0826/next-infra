@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import type { RouteId, ShellRoute } from "../app/routes";
 import type { RelationDto } from "../generated/query/RelationDto";
 import type { ResourceDto } from "../generated/query/ResourceDto";
@@ -8,6 +9,7 @@ import { ResourceDetailPage } from "../features/resource-detail/ResourceDetailPa
 import { SettingsPage } from "../features/settings/SettingsPage";
 import { TopologyPage } from "../features/topology/TopologyPage";
 import { TimelinePage } from "../features/timeline/TimelinePage";
+import { INSPECTOR_ASIDE_ID } from "./InspectorHost";
 
 interface PrimaryCanvasProps {
   inspectorOpen: boolean;
@@ -23,6 +25,7 @@ interface PrimaryCanvasProps {
   onEditRelation: (relation: RelationDto) => void;
   onSelectResource: (resource: ResourceDto) => void;
   onTopologyFocus: (resourceId: string) => void;
+  openInspectorButtonRef: Ref<HTMLButtonElement>;
 }
 
 export function PrimaryCanvas({
@@ -39,6 +42,7 @@ export function PrimaryCanvas({
   onEditRelation,
   onSelectResource,
   onTopologyFocus,
+  openInspectorButtonRef,
 }: PrimaryCanvasProps) {
   let content;
   if (route.id === "overview") content = <OverviewPage onInspectResource={onInspectResource} onNavigate={onNavigate} queryVersion={queryVersion} />;
@@ -53,7 +57,14 @@ export function PrimaryCanvas({
       <div className="shell-route-page shell-route-page--feature">
         <header className="shell-feature-controls">
           {!inspectorOpen ? (
-            <button className="shell-control-button" onClick={onOpenInspector} type="button">
+            <button
+              aria-controls={INSPECTOR_ASIDE_ID}
+              aria-expanded={inspectorOpen}
+              className="shell-control-button"
+              onClick={onOpenInspector}
+              ref={openInspectorButtonRef}
+              type="button"
+            >
               打开检查器
             </button>
           ) : null}

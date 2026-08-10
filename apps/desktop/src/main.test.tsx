@@ -55,6 +55,22 @@ function renderShell(adapter = new MockDesktopAdapter(createQueryEvidenceLifecyc
   );
 }
 
+function stubNarrowViewport() {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      matches: query === "(max-width: 1180px)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(() => false),
+    })),
+  );
+}
+
 describe("React app shell", () => {
   it("renders Overview as the default integrated page", async () => {
     renderShell();
@@ -335,15 +351,107 @@ describe("React app shell", () => {
         name: "提供方关系 fixture.depends_on",
       }),
     );
+    const spine = await within(inspector).findByRole("region", {
+      name: "证据链",
+    });
+    expect(await within(spine).findByText("Fixture Compute Alpha")).toBeInTheDocument();
+    expect(within(spine).getByText("Fixture Database Beta")).toBeInTheDocument();
+    expect(within(spine).getByText("3 个来源")).toBeInTheDocument();
+    expect(spine.querySelectorAll(".evidence-spine__step")).toHaveLength(3);
+    expect(
+      within(spine).getByTitle("fixture-relation-provider-alpha-beta"),
+    ).toBeInTheDocument();
+    expect(within(inspector).getByText("fixture-sync-run-complete")).toBeInTheDocument();
+  });
+
+  it("clears the topology relation selection after a re-query changes the focus", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const search = screen.getByRole("combobox", {
+      name: "搜索本地基础设施",
+    });
+
+    await user.type(search, "alpha");
+    await user.click(
+      await screen.findByRole("option", { name: /Fixture Compute Alpha/ }),
+    );
+    await screen.findByRole("heading", { level: 1, name: "Fixture Compute Alpha" });
+    await user.click(screen.getByRole("button", { name: "拓扑" }));
+
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    await user.click(
+      await screen.findByRole("button", { name: "提供方关系 fixture.depends_on" }),
+    );
+    await waitFor(() => {
+      expect(
+        within(inspector).getByRole("region", { name: "证据链" }),
+      ).toBeInTheDocument();
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: /Fixture Database Beta/ }),
+    );
     await waitFor(() => {
       expect(
         within(inspector).getByRole("heading", {
           level: 3,
-          name: "fixture.depends_on",
+          name: "Fixture Database Beta",
         }),
       ).toBeInTheDocument();
     });
-    expect(within(inspector).getByText("fixture-sync-run-complete")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "设为焦点" }));
+    await waitFor(() => {
+      expect(within(inspector).getByText("未选择")).toBeInTheDocument();
+      expect(
+        within(inspector).queryByRole("heading", {
+          level: 3,
+          name: "Fixture Database Beta",
+        }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("links the inspector toggle buttons to the panel with aria-expanded and aria-controls", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    expect(inspector).toHaveAttribute("id", "evidence-inspector");
+    const closeButton = within(inspector).getByRole("button", {
+      name: "关闭检查器",
+    });
+    expect(closeButton).toHaveAttribute("aria-expanded", "true");
+    expect(closeButton).toHaveAttribute("aria-controls", "evidence-inspector");
+
+    await user.click(closeButton);
+    expect(closeButton).toHaveAttribute("aria-expanded", "false");
+
+    const openButton = screen.getByRole("button", { name: "打开检查器" });
+    expect(openButton).toHaveAttribute("aria-expanded", "false");
+    expect(openButton).toHaveAttribute("aria-controls", "evidence-inspector");
+
+    await user.click(openButton);
+    expect(closeButton).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("moves focus into the Inspector when a selection opens it", async () => {
+    stubNarrowViewport();
+    const user = userEvent.setup();
+    renderShell();
+    const search = screen.getByRole("combobox", {
+      name: "搜索本地基础设施",
+    });
+
+    await user.type(search, "alpha");
+    await user.click(
+      await screen.findByRole("option", { name: /Fixture Compute Alpha/ }),
+    );
+
+    const inspector = screen.getByRole("complementary", { name: "证据检查器" });
+    await waitFor(() => {
+      expect(document.activeElement).not.toBeNull();
+      expect(inspector.contains(document.activeElement)).toBe(true);
+    });
   });
 
   it("creates a cross-provider relation from the resource Inspector and observes the re-query", async () => {
@@ -512,19 +620,7 @@ describe("React app shell", () => {
   });
 
   it("starts with the Inspector closed on a narrow viewport", () => {
-    vi.stubGlobal(
-      "matchMedia",
-      vi.fn((query: string) => ({
-        matches: query === "(max-width: 1180px)",
-        media: query,
-        onchange: null,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-        addListener: vi.fn(),
-        removeListener: vi.fn(),
-        dispatchEvent: vi.fn(() => false),
-      })),
-    );
+    stubNarrowViewport();
 
     const { container } = renderShell();
     const inspector = screen.getByLabelText("证据检查器");

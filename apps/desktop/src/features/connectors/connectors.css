@@ -77,3 +77,43 @@
 .connectors-provider-option strong { font-size: 12px; font-weight: 620; }
 .connectors-provider-option span { color: var(--label-muted); font: 9px var(--font-mono); }
 @media (max-width: 480px) { .connectors-provider-grid { grid-template-columns: 1fr; } }
+
+/* SyncRun provenance detail (expanded connection row) */
+.connectors-expand { background: var(--rack-raised); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-secondary); font: 10px var(--font-mono); height: 22px; justify-self: start; padding: 0 var(--space-2); }
+.connectors-expand[aria-expanded="true"] { border-color: var(--telemetry-cyan-soft); color: var(--telemetry-cyan); }
+.connectors-detail-row td { background: var(--rack-surface); height: auto; padding: var(--space-3); }
+.connectors-run-detail { display: grid; gap: var(--space-3); }
+.connectors-provenance { border: 1px solid var(--aluminum-line); display: grid; list-style: none; margin: 0; padding: 0; }
+.connectors-provenance-step { align-items: baseline; display: grid; gap: var(--space-2) var(--space-3); grid-template-columns: minmax(88px, auto) minmax(0, 1fr) minmax(0, auto); padding: var(--space-2) var(--space-3); }
+.connectors-provenance-step + .connectors-provenance-step { border-top: 1px solid var(--aluminum-line); }
+.connectors-provenance-label { color: var(--label-muted); font: 9px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.connectors-provenance-value { color: var(--label-primary); font: 11px var(--font-mono); min-width: 0; overflow-wrap: anywhere; }
+.connectors-provenance-value--empty { color: var(--cloud-unknown); }
+.connectors-provenance-meta { color: var(--label-muted); font: 9px var(--font-mono); text-align: right; }
+.connectors-provenance-step--active .connectors-provenance-value { color: var(--telemetry-cyan); }
+.connectors-chip { align-items: center; border: 1px solid var(--aluminum-line); border-radius: 2px; color: var(--label-primary); display: inline-flex; font: 9px var(--font-mono); gap: var(--space-1); line-height: 1; padding: 3px var(--space-2); text-transform: uppercase; white-space: nowrap; }
+.connectors-chip::before { background: var(--aluminum-strong); border-radius: 50%; content: ""; height: 5px; width: 5px; }
+.connectors-chip--green { color: var(--heartbeat-green); }
+.connectors-chip--green::before { background: var(--heartbeat-green); }
+.connectors-chip--amber { color: var(--inspection-amber); }
+.connectors-chip--amber::before { background: var(--inspection-amber); }
+.connectors-chip--vermilion { color: var(--fault-vermilion); }
+.connectors-chip--vermilion::before { background: var(--fault-vermilion); }
+.connectors-chip--cloud { color: var(--cloud-unknown); }
+.connectors-chip--cloud::before { background: var(--cloud-unknown); }
+.connectors-runs { display: grid; gap: var(--space-2); }
+.connectors-run { border: 1px solid var(--aluminum-line); display: grid; gap: var(--space-2); padding: var(--space-3); }
+.connectors-run-head { align-items: center; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.connectors-run-head code { color: var(--label-secondary); font: 10px var(--font-mono); overflow-wrap: anywhere; }
+.connectors-run-time { color: var(--label-muted); font: 9px var(--font-mono); font-variant-numeric: tabular-nums; margin-left: auto; }
+.connectors-run-facts { display: grid; gap: var(--space-1) var(--space-3); grid-template-columns: minmax(120px, auto) minmax(0, 1fr); margin: 0; }
+.connectors-run-facts dt { color: var(--label-muted); font: 9px var(--font-mono); text-transform: uppercase; }
+.connectors-run-facts dd { color: var(--label-secondary); font: 11px var(--font-mono); margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.connectors-run-facts dd code, .connectors-run-facts dd time { font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.connectors-run-coverage-partial { display: grid; gap: var(--space-1); }
+.connectors-run-reason { color: var(--inspection-amber); font: 10px var(--font-mono); }
+.connectors-run-message-list { display: grid; gap: var(--space-1); list-style: none; margin: 0; padding: 0; }
+.connectors-run-message { color: var(--label-secondary); font: 10px var(--font-mono); margin: 0; }
+.connectors-run-message--error { color: var(--fault-vermilion); }
+.connectors-sync-empty { border: 1px solid var(--aluminum-line); color: var(--label-secondary); font-size: 11px; margin: 0; padding: var(--space-3); }
+.connectors-setup-hint { border: 1px solid var(--aluminum-line); padding: var(--space-3); }

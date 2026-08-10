@@ -4,6 +4,7 @@ import type { RelationDto } from "../../generated/query/RelationDto";
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
+import type { SyncRunDto } from "../../generated/query/SyncRunDto";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TimelineGroupDto } from "../../generated/query/TimelineGroupDto";
 import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
@@ -57,6 +58,11 @@ export interface DesktopAdapterSnapshot {
   readonly resources: readonly ResourceDto[];
   readonly relations: readonly RelationDto[];
   readonly connections: readonly ConnectionDto[];
+  /**
+   * Opt-in SyncRun history, ordered most-recent-first per connection.
+   * Absent snapshots keep the default empty-run behavior.
+   */
+  readonly sync_runs?: readonly SyncRunDto[];
 }
 
 function copyMetadata(metadata: SnapshotMetadata | null): SnapshotMetadata | null {
@@ -73,6 +79,9 @@ function copySnapshot(snapshot: DesktopAdapterSnapshot): DesktopAdapterSnapshot 
     resources: copyItems(snapshot.resources),
     relations: copyItems(snapshot.relations),
     connections: copyItems(snapshot.connections),
+    ...(snapshot.sync_runs !== undefined
+      ? { sync_runs: copyItems(snapshot.sync_runs) }
+      : {}),
   };
 }
 
@@ -208,10 +217,19 @@ export class MockDesktopAdapter implements DesktopAdapter {
       (item) => item.connection_id === input.connection_id,
     );
     if (connection === undefined) throw new Error("Fixture connection was not found.");
+    const runs =
+      this.#snapshot.sync_runs === undefined
+        ? []
+        : copyItems(
+            this.#snapshot.sync_runs.filter(
+              (run) => run.connection_id === input.connection_id,
+            ),
+          );
+    const limit = input.recent_run_limit ?? runs.length;
     return {
       metadata: this.#metadata(),
       connection: { ...connection },
-      recent_runs: [],
+      recent_runs: runs.slice(0, limit),
       next_scheduled_at: null,
     };
   }

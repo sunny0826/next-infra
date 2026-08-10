@@ -1,0 +1,13 @@
+body {
+  background: var(--rack-canvas);
+  color: var(--label-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  overflow: auto;
+}
+
+.connectors-preview {
+  margin: 0 auto;
+  max-width: 1120px;
+  padding: 20px;
+}

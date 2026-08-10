@@ -1,4 +1,5 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createQueryEvidenceLifecycleSnapshotFixture } from "../../test/fixtures/query-fixtures";
@@ -92,5 +93,40 @@ describe("EvidenceSpine", () => {
     expect(row.getByText("fixture-relation-version-alpha")).toBeInTheDocument();
     expect(row.getByText(/92%/)).toBeInTheDocument();
     expect(row.getByText(/9200 bp/)).toBeInTheDocument();
+  });
+
+  it("collapses paths longer than five rows behind an expand toggle", async () => {
+    const fixture = evidenceFixture();
+    const user = userEvent.setup();
+    const longRelations = [
+      ...fixture.relations,
+      ...fixture.relations.map((relation) => ({
+        ...relation,
+        relation_id: `${relation.relation_id}-b`,
+      })),
+    ];
+
+    render(
+      <EvidenceSpine
+        source={fixture.source}
+        target={fixture.target}
+        relations={longRelations}
+      />,
+    );
+
+    expect(screen.getAllByLabelText(/ evidence$/)).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "展开全部 6 条证据" })).toBeInTheDocument();
+    expect(screen.queryByText("fixture-relation-inferred-alpha-beta-b")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "展开全部 6 条证据" }));
+
+    expect(screen.getAllByLabelText(/ evidence$/)).toHaveLength(6);
+    expect(screen.getByText("fixture-relation-inferred-alpha-beta-b")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "收起" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "收起" }));
+
+    expect(screen.getAllByLabelText(/ evidence$/)).toHaveLength(5);
+    expect(screen.queryByText("fixture-relation-inferred-alpha-beta-b")).not.toBeInTheDocument();
   });
 });

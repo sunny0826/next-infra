@@ -11,6 +11,7 @@ import {
   createQueryEvidenceLifecycleSnapshotFixture,
 } from "../../test/fixtures/query-fixtures";
 import { OverviewPage } from "./OverviewPage";
+import { OverviewEvidenceAdapter } from "./overview-evidence-adapter";
 
 afterEach(cleanup);
 
@@ -172,5 +173,34 @@ describe("OverviewPage", () => {
     expect(await screen.findByText("没有需要关注的事项。")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "查看全部资源" }));
     expect(onNavigate).toHaveBeenCalledWith("inventory");
+  });
+
+  it("expands an attention item into the full evidence chain for its relations", async () => {
+    const user = userEvent.setup();
+    renderPage({ adapter: new OverviewEvidenceAdapter() });
+    const row = await screen.findByRole("button", { name: /Fixture Database Beta/ });
+    const item = row.closest(".overview-attention-item");
+    if (item === null) throw new Error("attention item wrapper was not rendered");
+    const summary = item.querySelector("summary");
+    if (summary === null) throw new Error("evidence expander summary was not rendered");
+    await user.click(summary);
+    expect(await screen.findByText("证据链")).toBeInTheDocument();
+    expect(item.querySelectorAll(".evidence-spine__step")).toHaveLength(3);
+    expect(screen.getByText("提供方")).toBeInTheDocument();
+    expect(screen.getByText("已配置")).toBeInTheDocument();
+    expect(screen.getByText("推断")).toBeInTheDocument();
+    expect(screen.getByText("Fixture Compute Alpha")).toBeInTheDocument();
+  });
+
+  it("shows the evidence empty state for an attention item without relations", async () => {
+    const user = userEvent.setup();
+    renderPage({ adapter: new OverviewEvidenceAdapter() });
+    const row = await screen.findByRole("button", { name: /Fixture Tombstoned Endpoint/ });
+    const item = row.closest(".overview-attention-item");
+    if (item === null) throw new Error("attention item wrapper was not rendered");
+    const summary = item.querySelector("summary");
+    if (summary === null) throw new Error("evidence expander summary was not rendered");
+    await user.click(summary);
+    expect(await screen.findByText("这些端点没有可用证据。")).toBeInTheDocument();
   });
 });

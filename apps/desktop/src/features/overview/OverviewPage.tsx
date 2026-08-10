@@ -3,11 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { RouteId } from "../../app/routes";
 import type { ChangeDto } from "../../generated/query/ChangeDto";
 import type { HealthSummaryDto } from "../../generated/query/HealthSummaryDto";
+import type { RelationDto } from "../../generated/query/RelationDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { desktopErrorCode } from "../../platform/desktop-adapter/desktop-adapter";
-import type { GitHubActionsSummarySnapshot } from "../../platform/desktop-adapter/desktop-adapter";
+import type {
+  DesktopAdapter,
+  GitHubActionsSummarySnapshot,
+} from "../../platform/desktop-adapter/desktop-adapter";
+import { EvidenceSpine } from "../evidence/EvidenceSpine";
 
 import "./overview.css";
 import { formatRelativeTime } from "./time";
@@ -83,6 +88,136 @@ function buildAttentionItem(resource: ResourceDto): AttentionItem | null {
     };
   }
   return null;
+}
+
+interface EvidencePair {
+  readonly source: ResourceDto;
+  readonly target: ResourceDto;
+  readonly relations: readonly RelationDto[];
+}
+
+type ItemEvidence =
+  | { readonly status: "loading" }
+  | { readonly status: "error" }
+  | { readonly status: "ready"; readonly pairs: readonly EvidencePair[] };
+
+async function resolveEndpoint(
+  resourceId: string,
+  resourcesById: ReadonlyMap<string, ResourceDto>,
+  adapter: DesktopAdapter,
+): Promise<ResourceDto | null> {
+  const known = resourcesById.get(resourceId);
+  if (known !== undefined) return known;
+  try {
+    return (await adapter.getResource({ resource_id: resourceId })).resource;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Native disclosure for one attention item. The evidence panel mounts lazily
+ * on first open, so closed rows never trigger detail reads.
+ */
+function AttentionEvidence({
+  item,
+  resourcesById,
+}: {
+  readonly item: AttentionItem;
+  readonly resourcesById: ReadonlyMap<string, ResourceDto>;
+}) {
+  const [opened, setOpened] = useState(false);
+  return (
+    <details
+      className="overview-attention-expander"
+      open={opened}
+      onToggle={(event) => setOpened(event.currentTarget.open)}
+    >
+      <summary
+        aria-expanded={opened}
+        onClick={(event) => {
+          event.preventDefault();
+          setOpened((current) => !current);
+        }}
+      >
+        {opened ? "收起证据链" : "展开证据链"}
+      </summary>
+      {opened ? <AttentionEvidencePanel item={item} resourcesById={resourcesById} /> : null}
+    </details>
+  );
+}
+
+function AttentionEvidencePanel({
+  item,
+  resourcesById,
+}: {
+  readonly item: AttentionItem;
+  readonly resourcesById: ReadonlyMap<string, ResourceDto>;
+}) {
+  const adapter = useDesktopAdapter();
+  const [evidence, setEvidence] = useState<ItemEvidence>({ status: "loading" });
+
+  useEffect(() => {
+    let active = true;
+    adapter
+      .getResource({ resource_id: item.resource.resource_id, include: ["relations"] })
+      .then(async (detail) => {
+        const groups = new Map<string, RelationDto[]>();
+        for (const relation of detail.relations) {
+          const key = `${relation.source_resource_id}\u0000${relation.target_resource_id}`;
+          const group = groups.get(key);
+          if (group === undefined) {
+            groups.set(key, [relation]);
+          } else {
+            group.push(relation);
+          }
+        }
+        const pairs: EvidencePair[] = [];
+        for (const [key, relations] of groups) {
+          const [sourceId, targetId] = key.split("\u0000");
+          if (sourceId === undefined || targetId === undefined) continue;
+          const source = await resolveEndpoint(sourceId, resourcesById, adapter);
+          const target = await resolveEndpoint(targetId, resourcesById, adapter);
+          if (source !== null && target !== null) {
+            pairs.push({ source, target, relations });
+          }
+        }
+        if (!active) return;
+        setEvidence({ status: "ready", pairs });
+      })
+      .catch(() => {
+        if (active) setEvidence({ status: "error" });
+      });
+    return () => {
+      active = false;
+    };
+  }, [adapter, item.resource.resource_id, resourcesById]);
+
+  if (evidence.status === "loading") {
+    return <p className="overview-attention-evidence-loading">正在读取证据…</p>;
+  }
+  if (evidence.status === "error") {
+    return <p className="overview-attention-evidence-error">无法读取证据。</p>;
+  }
+  if (evidence.pairs.length === 0) {
+    return (
+      <div className="overview-attention-evidence">
+        <EvidenceSpine source={item.resource} target={item.resource} relations={[]} />
+      </div>
+    );
+  }
+  return (
+    <div className="overview-attention-evidence">
+      {evidence.pairs.map((pair) => (
+        <EvidenceSpine
+          key={`${pair.source.resource_id}\u0000${pair.target.resource_id}`}
+          source={pair.source}
+          target={pair.target}
+          relations={pair.relations}
+        />
+      ))}
+    </div>
+  );
 }
 
 type ConclusionTone = "fault" | "attention" | "healthy";
@@ -220,6 +355,10 @@ export function OverviewPage({ onInspectResource, onNavigate, queryVersion = 0 }
     () => (state === null ? null : deriveOverview(state)),
     [state],
   );
+  const resourcesById = useMemo(
+    () => new Map((state?.resources ?? []).map((resource) => [resource.resource_id, resource] as const)),
+    [state],
+  );
 
   if (error !== null) {
     return (
@@ -313,31 +452,33 @@ export function OverviewPage({ onInspectResource, onNavigate, queryVersion = 0 }
         ) : (
           <div className="overview-attention-list">
             {derived.attention.map((item) => (
-              <button
-                className={`overview-attention-row overview-attention-row--${item.tone}`}
-                key={item.resource.resource_id}
-                onClick={() => onInspectResource?.(item.resource)}
-                type="button"
-              >
-                <span className="overview-attention-marker" aria-hidden="true" />
-                <span className="overview-attention-identity">
-                  <strong>{item.resource.display_name}</strong>
-                  <code>{item.resource.kind}</code>
-                </span>
-                <span className={`overview-attention-badge overview-attention-badge--${item.tone}`}>
-                  {item.badge}
-                </span>
-                <span className="overview-attention-reason">
-                  {item.reason}
-                  {" "}
-                  <time dateTime={item.resource.observed_at} title={item.resource.observed_at}>
-                    {formatRelativeTime(item.resource.observed_at)}
-                  </time>
-                </span>
-                <span className="overview-attention-chevron" aria-hidden="true">
-                  ›
-                </span>
-              </button>
+              <div className="overview-attention-item" key={item.resource.resource_id}>
+                <button
+                  className={`overview-attention-row overview-attention-row--${item.tone}`}
+                  onClick={() => onInspectResource?.(item.resource)}
+                  type="button"
+                >
+                  <span className="overview-attention-marker" aria-hidden="true" />
+                  <span className="overview-attention-identity">
+                    <strong>{item.resource.display_name}</strong>
+                    <code>{item.resource.kind}</code>
+                  </span>
+                  <span className={`overview-attention-badge overview-attention-badge--${item.tone}`}>
+                    {item.badge}
+                  </span>
+                  <span className="overview-attention-reason">
+                    {item.reason}
+                    {" "}
+                    <time dateTime={item.resource.observed_at} title={item.resource.observed_at}>
+                      {formatRelativeTime(item.resource.observed_at)}
+                    </time>
+                  </span>
+                  <span className="overview-attention-chevron" aria-hidden="true">
+                    ›
+                  </span>
+                </button>
+                <AttentionEvidence item={item} resourcesById={resourcesById} />
+              </div>
             ))}
           </div>
         )}

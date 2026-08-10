@@ -1,0 +1,78 @@
+/* Browser-only preview layout for the evidence fixture page. */
+
+body {
+  background: var(--rack-canvas);
+  color: var(--label-primary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.preview-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 316px;
+  min-height: 100vh;
+}
+
+.preview-canvas {
+  min-width: 0;
+  padding: 20px;
+}
+
+.preview-canvas > .evidence-spine + .evidence-spine,
+.preview-canvas > .evidence-spine + .preview-label,
+.preview-canvas > .preview-open-card + .preview-label {
+  margin-top: var(--space-6);
+}
+
+.preview-open-card {
+  max-width: 560px;
+}
+
+.preview-side {
+  min-width: 0;
+  border-left: 1px solid var(--aluminum-strong);
+  background: var(--context-surface);
+  padding: 14px;
+  display: grid;
+  gap: var(--space-5);
+  align-content: start;
+}
+
+.preview-inspector {
+  min-width: 0;
+}
+
+.preview-inspector .shell-inspector {
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+}
+
+.preview-inspector .shell-inspector-head {
+  position: static;
+}
+
+.preview-label {
+  margin: 0 0 var(--space-2);
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+
+@media (max-width: 900px) {
+  .preview-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .preview-side {
+    border-left: 0;
+    border-top: 1px solid var(--aluminum-strong);
+  }
+}
+
+@media (max-width: 560px) {
+  .preview-canvas {
+    padding: 14px;
+  }
+}

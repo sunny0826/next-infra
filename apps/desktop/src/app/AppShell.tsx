@@ -56,6 +56,9 @@ export function AppShell() {
     return !window.matchMedia("(max-width: 1180px)").matches;
   });
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const inspectorAsideHeadRef = useRef<HTMLDivElement>(null);
+  const openInspectorButtonRef = useRef<HTMLButtonElement>(null);
+  const focusTransitionStartedRef = useRef(false);
   const [searchValue, setSearchValue] = useState("");
   const [searchResults, setSearchResults] = useState<readonly ResourceDto[]>([]);
   const [routeState, setRouteState] = useState<RouteShellStateMap>(createRouteShellState);
@@ -103,6 +106,30 @@ export function AppShell() {
       window.removeEventListener("focus", restore);
     };
   }, [adapter]);
+
+  // Move keyboard users into the panel when it opens and back to its toggle
+  // when it closes. The initial render never steals focus.
+  useEffect(() => {
+    if (!focusTransitionStartedRef.current) {
+      focusTransitionStartedRef.current = true;
+      return;
+    }
+    if (inspectorOpen) {
+      inspectorAsideHeadRef.current?.focus();
+    } else {
+      openInspectorButtonRef.current?.focus();
+    }
+  }, [inspectorOpen]);
+
+  // A topology re-query (invalidation or window focus) may drop the selected
+  // relation/resource; never keep a stale selection pointing into an old graph.
+  useEffect(() => {
+    if (activeRoute !== "topology") return;
+    setRouteState((current) => {
+      if (current.topology.selection === null) return current;
+      return { ...current, topology: { ...current.topology, selection: null } };
+    });
+  }, [activeRoute, queryVersion]);
 
   function updateRouteState(routeId: RouteId, patch: Partial<RouteShellState>) {
     setRouteState((current) => ({
@@ -195,7 +222,7 @@ export function AppShell() {
   }
 
   function focusTopology(resourceId: string) {
-    updateRouteState("topology", { topologyFocusId: resourceId });
+    updateRouteState("topology", { selection: null, topologyFocusId: resourceId });
   }
 
   return (
@@ -223,11 +250,13 @@ export function AppShell() {
         onOpenInspector={() => setInspectorOpen(true)}
         onSelectResource={selectInventoryResource}
         onTopologyFocus={focusTopology}
+        openInspectorButtonRef={openInspectorButtonRef}
         queryVersion={queryVersion}
         route={route}
         topologyFocusId={currentRouteState.topologyFocusId}
       />
       <InspectorHost
+        asideHeadRef={inspectorAsideHeadRef}
         onClose={() => setInspectorOpen(false)}
         onCreateRelation={openRelationBuilderCreate}
         onEditRelation={openRelationBuilderEdit}
