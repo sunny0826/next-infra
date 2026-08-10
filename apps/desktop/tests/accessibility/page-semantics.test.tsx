@@ -27,8 +27,10 @@ describe("Goal 3 shell semantics", () => {
         name: /Fixture Database Beta.*已过期/,
       }),
     ).toBeInTheDocument();
-    expect(screen.getByText("不可达")).toBeInTheDocument();
-    expect(screen.getByText("已禁用")).toBeInTheDocument();
+    expect(screen.getByText("1 异常")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "需要关注" }),
+    ).toBeInTheDocument();
   });
 
   it("labels Timeline as a structured committed-change result", async () => {

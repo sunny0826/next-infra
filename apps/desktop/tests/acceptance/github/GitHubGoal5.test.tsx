@@ -61,9 +61,14 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
   it("keeps workflow run health visible without inventing a critical path", async () => {
     renderWithGitHubFixture(<OverviewPage />);
 
-    expect(await screen.findByText("3 个受限资源")).toBeInTheDocument();
-    expect(screen.getByText("GitHub Fixture Connection")).toBeInTheDocument();
-    expect(screen.getByText("当前没有固定关键路径。Next Infra 不会根据展示名称或近期活动推断重要性。")).toBeInTheDocument();
+    expect(await screen.findByText("共 3 个资源")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /连接器\s*·\s*1 个连接\s*·\s*1 异常/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("总体可用，有 1 个连接异常需要你留意。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/关键路径/)).not.toBeInTheDocument();
 
     cleanup();
     renderWithGitHubFixture(

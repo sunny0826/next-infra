@@ -14,6 +14,10 @@ import {
   createSyncRunFixtures,
   createUnresolvedRelationSnapshotFixture,
 } from "./query-fixtures";
+import {
+  createSplitGroupTimelinePagesFixture,
+  createTimelinePageFixture,
+} from "./timeline-fixtures";
 
 describe("UI query fixture catalog", () => {
   it("covers the QDTO-supported lifecycle, freshness, health, and evidence variants", () => {
@@ -84,6 +88,14 @@ describe("UI query fixture catalog", () => {
     expect(JSON.stringify(createUnresolvedRelationSnapshotFixture())).toBe(
       JSON.stringify(createUnresolvedRelationSnapshotFixture()),
     );
+    expect(JSON.stringify(createTimelinePageFixture())).toBe(
+      JSON.stringify(createTimelinePageFixture()),
+    );
+    expect(
+      JSON.stringify(createSplitGroupTimelinePagesFixture()),
+    ).toBe(
+      JSON.stringify(createSplitGroupTimelinePagesFixture()),
+    );
   });
 
   it("contains only synthetic identifiers and no sensitive or real infrastructure values", () => {
@@ -99,6 +111,8 @@ describe("UI query fixture catalog", () => {
       syncRuns: createSyncRunFixtures(),
       states: createQueryViewStateFixtures(),
       unresolved: createUnresolvedRelationSnapshotFixture(),
+      timeline: createTimelinePageFixture(),
+      timelineSplit: createSplitGroupTimelinePagesFixture(),
     });
 
     expect(serialized).toContain("fixture-");

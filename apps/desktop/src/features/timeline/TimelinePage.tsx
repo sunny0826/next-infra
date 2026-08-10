@@ -1,24 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { TimelineGroupDto } from "../../generated/query/TimelineGroupDto";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 
+import { TimelineGroup } from "./TimelineGroup";
+
 import "./timeline.css";
 
-function originLabel(group: TimelineGroupDto): string {
-  switch (group.origin.type) {
-    case "sync_run":
-      return `同步 ${group.origin.sync_run_id}`;
-    case "binding":
-      return `绑定 ${group.origin.binding_id}`;
-    case "inference":
-      return `推断 ${group.origin.rule_version}`;
-  }
-}
+const PAGE_SIZE = 50;
+const INITIAL_ERROR_MESSAGE = "无法读取本地变更时间线。";
+const LOAD_MORE_ERROR_MESSAGE = "无法加载更多变更。";
 
-function compactValue(value: unknown): string {
-  const text = JSON.stringify(value);
-  return text.length > 160 ? `${text.slice(0, 160)}...` : text;
+/**
+ * Appends one fetched page to the loaded groups. The backend can cut a
+ * logical group at the page boundary; when the first incoming group is the
+ * continuation of the last loaded group (identical group_id), its items are
+ * merged into that group instead of rendering a duplicate section.
+ */
+function appendPageGroups(
+  current: readonly TimelineGroupDto[],
+  incoming: readonly TimelineGroupDto[],
+): TimelineGroupDto[] {
+  const merged = [...current];
+  const remaining = [...incoming];
+  const last = merged[merged.length - 1];
+  const first = remaining[0];
+  if (last !== undefined && first !== undefined && first.group_id === last.group_id) {
+    merged[merged.length - 1] = { ...last, items: [...last.items, ...first.items] };
+    remaining.shift();
+  }
+  return [...merged, ...remaining];
 }
 
 interface TimelinePageProps {
@@ -30,53 +41,105 @@ export function TimelinePage({ queryVersion = 0 }: TimelinePageProps) {
   const [groups, setGroups] = useState<readonly TimelineGroupDto[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [initialError, setInitialError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  // Monotonic request sequence: only the newest load may commit state, so a
+  // late-resolving stale response never clobbers a fresher one.
+  const sequenceRef = useRef(0);
 
   const load = (nextCursor?: string) => {
+    const sequence = ++sequenceRef.current;
+    const isInitial = nextCursor === undefined;
     setLoading(true);
-    setError(null);
+    // A fresh load supersedes both error states; a load-more only its own.
+    setInitialError(null);
+    setLoadMoreError(null);
     adapter
-      .getTimeline(nextCursor === undefined ? {} : { cursor: nextCursor, limit: 50 })
+      .getTimeline(isInitial ? {} : { cursor: nextCursor, limit: PAGE_SIZE })
       .then((page) => {
-        setGroups((current) => nextCursor === undefined ? page.groups : [...current, ...page.groups]);
+        if (sequence !== sequenceRef.current) return;
+        setGroups((current) =>
+          isInitial ? [...page.groups] : appendPageGroups(current, page.groups),
+        );
         setCursor(page.page_info.next_cursor);
       })
-      .catch(() => setError("无法读取本地变更时间线。"))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (sequence !== sequenceRef.current) return;
+        if (isInitial) setInitialError(INITIAL_ERROR_MESSAGE);
+        else setLoadMoreError(LOAD_MORE_ERROR_MESSAGE);
+      })
+      .finally(() => {
+        if (sequence !== sequenceRef.current) return;
+        setLoading(false);
+      });
   };
 
-  useEffect(() => { load(); }, [adapter, queryVersion]);
+  useEffect(() => {
+    load();
+  }, [adapter, queryVersion]);
+
+  const itemCount = groups.reduce((total, group) => total + group.items.length, 0);
+  const showSkeleton = loading && groups.length === 0 && initialError === null;
+  // Empty state is only valid when the backend also says there is nothing
+  // left; an empty page carrying a cursor (backend anomaly) keeps the
+  // load-more affordance instead of contradicting it with an empty message.
+  const showEmpty =
+    !loading && groups.length === 0 && cursor === null && initialError === null;
 
   return (
     <section className="timeline-page" aria-labelledby="timeline-title">
       <header className="timeline-header">
-        <div><p className="timeline-eyebrow">已提交的变更历史</p><h1 id="timeline-title">时间线</h1></div>
+        <div>
+          <p className="timeline-eyebrow">已提交的变更历史</p>
+          <h1 id="timeline-title">时间线</h1>
+        </div>
       </header>
-      {error !== null ? <p className="timeline-error" role="alert">{error}</p> : null}
+      {initialError !== null ? (
+        <div className="timeline-banner" role="alert">
+          <span>{initialError}</span>
+          <button className="timeline-retry" type="button" onClick={() => load()}>
+            重试
+          </button>
+        </div>
+      ) : null}
       <div className="timeline-scroll" aria-busy={loading}>
+        {showSkeleton ? (
+          <div className="timeline-skeleton" aria-hidden="true">
+            <div className="timeline-skeleton-row" />
+            <div className="timeline-skeleton-row" />
+            <div className="timeline-skeleton-row" />
+          </div>
+        ) : null}
         {groups.map((group) => (
-          <section className="timeline-group" key={group.group_id}>
-            <header><strong>{originLabel(group)}</strong><time dateTime={group.occurred_at}>{group.occurred_at}</time></header>
-            {group.items.map((item) => (
-              <article className="timeline-item" key={item.change.change_id}>
-                <div className="timeline-subject"><code>{item.change.change_id}</code><span>{item.change.subject.type}</span></div>
-                {item.change.fields.map((field) => (
-                  <details className="timeline-diff" key={field.path}>
-                    <summary>{field.path}</summary>
-                    <div><code>变更前</code><pre>{compactValue(field.before)}</pre></div>
-                    <div><code>变更后</code><pre>{compactValue(field.after)}</pre></div>
-                  </details>
-                ))}
-                {item.version_links.length > 0 ? <div className="timeline-links">
-                  {item.version_links.map((link) => <code key={`${link.type}-${link.type === "resource" ? link.resource_version_id : link.relation_version_id}`}>{link.type === "resource" ? link.resource_version_id : link.relation_version_id}</code>)}
-                </div> : null}
-              </article>
-            ))}
-          </section>
+          <TimelineGroup key={group.group_id} group={group} />
         ))}
-        {!loading && groups.length === 0 && error === null ? <p className="timeline-empty">没有已持久化的变更。</p> : null}
+        {showEmpty ? (
+          <div className="timeline-empty">
+            <p className="timeline-empty-primary">没有已持久化的变更。</p>
+            <p className="timeline-empty-hint">完成一次同步或建立绑定后，审计记录会出现在这里。</p>
+          </div>
+        ) : null}
       </div>
-      {cursor !== null ? <button className="timeline-load-more" disabled={loading} onClick={() => load(cursor)} type="button">加载更多</button> : null}
+      {cursor !== null || itemCount > 0 ? (
+        <div className="timeline-load-more-row">
+          {cursor !== null ? (
+            <button
+              className="timeline-load-more"
+              type="button"
+              disabled={loading}
+              onClick={() => load(cursor)}
+            >
+              加载更多
+            </button>
+          ) : null}
+          {loadMoreError !== null ? (
+            <span className="timeline-load-more-error">{loadMoreError}</span>
+          ) : null}
+          {itemCount > 0 ? (
+            <span className="timeline-loaded-count">已加载 {itemCount} 项变更</span>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

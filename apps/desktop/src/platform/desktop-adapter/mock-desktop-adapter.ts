@@ -5,6 +5,8 @@ import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto"
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
+import type { TimelineGroupDto } from "../../generated/query/TimelineGroupDto";
+import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
 
 import type { DesktopAdapter } from "./desktop-adapter";
 import type {
@@ -180,10 +182,10 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async getTimeline(_input: TimelineInput = {}) {
+  async getTimeline(_input: TimelineInput = {}): Promise<TimelinePageDto> {
     return {
       metadata: this.#metadata(),
-      groups: [],
+      groups: [] satisfies readonly TimelineGroupDto[],
       page_info: { next_cursor: null },
     };
   }

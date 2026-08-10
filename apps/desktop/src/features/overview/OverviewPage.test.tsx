@@ -1,18 +1,31 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { RouteId } from "../../app/routes";
 import { DesktopAdapterProvider } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { MockDesktopAdapter } from "../../platform/desktop-adapter/mock-desktop-adapter";
 import type { GitHubActionsSummarySnapshot } from "../../platform/desktop-adapter/desktop-adapter";
-import { createQueryEvidenceLifecycleSnapshotFixture, createGitHubGoal5SnapshotFixture } from "../../test/fixtures/query-fixtures";
+import {
+  createGitHubGoal5SnapshotFixture,
+  createQueryEvidenceLifecycleSnapshotFixture,
+} from "../../test/fixtures/query-fixtures";
 import { OverviewPage } from "./OverviewPage";
 
 afterEach(cleanup);
 
-function renderPage(adapter: MockDesktopAdapter = new MockDesktopAdapter(createQueryEvidenceLifecycleSnapshotFixture())) {
+interface RenderPageOptions {
+  readonly adapter?: MockDesktopAdapter;
+  readonly onNavigate?: (routeId: RouteId) => void;
+}
+
+function renderPage({
+  adapter = new MockDesktopAdapter(createQueryEvidenceLifecycleSnapshotFixture()),
+  onNavigate,
+}: RenderPageOptions = {}) {
   render(
     <DesktopAdapterProvider adapter={adapter}>
-      <OverviewPage />
+      <OverviewPage onNavigate={onNavigate} />
     </DesktopAdapterProvider>,
   );
 }
@@ -26,41 +39,89 @@ class GitHubActionsSummaryAdapter extends MockDesktopAdapter {
   }
 }
 
+class TruncatedResourcesAdapter extends MockDesktopAdapter {
+  override async searchResources() {
+    const page = await super.searchResources();
+    return { ...page, items: page.items.slice(0, 2) };
+  }
+}
+
+class AllHealthyResourcesAdapter extends MockDesktopAdapter {
+  override async searchResources() {
+    const page = await super.searchResources();
+    return {
+      ...page,
+      items: page.items.map((item) => ({
+        ...item,
+        lifecycle: "active" as const,
+        health: "healthy" as const,
+        freshness: "fresh" as const,
+      })),
+    };
+  }
+}
+
 describe("OverviewPage", () => {
-  it("separates expired facts from resource health and connector failures", async () => {
+  it("summarizes resources, connections, attention and the snapshot in one panel", async () => {
     renderPage();
-    expect(await screen.findAllByText("已保存事实已过期")).not.toHaveLength(0);
-    expect(screen.getByText("不可达")).toBeInTheDocument();
-    expect(screen.getAllByText("健康度").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("新鲜度").length).toBeGreaterThan(0);
+    expect(await screen.findByText("共 4 个资源")).toBeInTheDocument();
+    expect(screen.getByText("4 个资源")).toBeInTheDocument();
+    expect(screen.getByText("3 个连接")).toBeInTheDocument();
+    expect(screen.getByText("1 异常")).toBeInTheDocument();
+    expect(screen.getByText("3 条事项")).toBeInTheDocument();
+    expect(screen.getByText("上次快照")).toBeInTheDocument();
+    expect(screen.getByText("总体可用，有 3 个事项需要你留意。")).toBeInTheDocument();
+    expect(screen.queryByText(/仅基于前 25 个资源/)).not.toBeInTheDocument();
   });
 
-  it("does not invent a critical path from fixture activity", async () => {
+  it("sorts attention rows by severity and shows plain-language reasons", async () => {
     renderPage();
+    const firstRow = await screen.findByRole("button", { name: /Fixture Database Beta/ });
+    const list = firstRow.closest(".overview-attention-list");
+    if (list === null) throw new Error("attention list was not rendered");
+    const rows = Array.from(list.querySelectorAll("button"));
+    const names = rows.map((row) => row.textContent ?? "");
+    expect(names).toHaveLength(3);
+    const expectedOrder = [
+      "Fixture Database Beta",
+      "Fixture Tombstoned Endpoint",
+      "Fixture Orphaned Worker",
+    ];
     expect(
-      await screen.findByText(/当前没有固定关键路径/),
-    ).toBeInTheDocument();
+      expectedOrder.map((name) => names.findIndex((text) => text.includes(name))),
+    ).toEqual([0, 1, 2]);
+    expect(screen.getAllByText("最后更新")).toHaveLength(2);
+    expect(screen.getByText("状态降级")).toBeInTheDocument();
+    expect(screen.getAllByText("已过期")).toHaveLength(2);
+    expect(screen.getByText("降级")).toBeInTheDocument();
+    const times = document.querySelectorAll('time[dateTime="2000-01-01T00:00:00Z"]');
+    expect(times).toHaveLength(3);
+    for (const time of times) {
+      expect(time).toHaveTextContent("2000-01-01");
+      expect(time).toHaveAttribute("title", "2000-01-01T00:00:00Z");
+    }
   });
 
-  it("keeps observation timestamps visible", async () => {
-    renderPage();
-    expect(await screen.findAllByText("2000-01-01T00:00:00Z")).not.toHaveLength(0);
-  });
-
-  it("shows empty GitHub Actions state when no summary data", async () => {
-    renderPage();
-    expect(
-      await screen.findByText(/没有已同步的 GitHub Actions 数据/),
-    ).toBeInTheDocument();
-  });
-
-  it("filters github.workflow_run from attention queue", async () => {
-    const githubAdapter = new MockDesktopAdapter(createGitHubGoal5SnapshotFixture());
-    renderPage(githubAdapter);
+  it("filters github.workflow_run from the attention list", async () => {
+    renderPage({ adapter: new MockDesktopAdapter(createGitHubGoal5SnapshotFixture()) });
+    expect(await screen.findByText("共 3 个资源")).toBeInTheDocument();
     expect(screen.queryByText(/Fixture Run/)).not.toBeInTheDocument();
   });
 
-  it("renders GitHub Actions aggregation when summary is populated", async () => {
+  it("navigates through the quick link tiles", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    renderPage({ onNavigate });
+    await user.click(await screen.findByRole("button", { name: "资源清单 · 共 4 个资源" }));
+    expect(onNavigate).toHaveBeenCalledWith("inventory");
+    await user.click(screen.getByRole("button", { name: /连接器\s*·\s*3 个连接\s*·\s*1 异常/ }));
+    expect(onNavigate).toHaveBeenCalledWith("connectors");
+    await user.click(screen.getByRole("button", { name: "时间线 · 0 项变更" }));
+    expect(onNavigate).toHaveBeenCalledWith("timeline");
+    expect(onNavigate).toHaveBeenCalledTimes(3);
+  });
+
+  it("renders the GitHub Actions chip when summary data exists", async () => {
     const summary: GitHubActionsSummarySnapshot = {
       items: [{
         connection_id: "fixture-github-connection",
@@ -68,18 +129,48 @@ describe("OverviewPage", () => {
         repositories: [{
           repository_id: "fixture-github-repository-10",
           repository_name: "Fixture Repository",
-          action_count: 1,
-          succeeded: 1,
-          failed: 0,
-          running: 0,
+          action_count: 4,
+          succeeded: 3,
+          failed: 1,
+          running: 2,
         }],
       }],
     };
-    const githubAdapter = new GitHubActionsSummaryAdapter(createGitHubGoal5SnapshotFixture(), summary);
-    renderPage(githubAdapter);
-    const h3Elements = await screen.findAllByText("GitHub Fixture Connection");
-    const h3InGithubSection = h3Elements.find((el) => el.tagName === "H3");
-    expect(h3InGithubSection).toBeInTheDocument();
-    expect(screen.getByText("Fixture Repository")).toBeInTheDocument();
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    renderPage({
+      adapter: new GitHubActionsSummaryAdapter(createGitHubGoal5SnapshotFixture(), summary),
+      onNavigate,
+    });
+    const chip = await screen.findByRole("button", {
+      name: "GitHub Actions · 通过率 75% · 2 运行中",
+    });
+    await user.click(chip);
+    expect(onNavigate).toHaveBeenCalledWith("connectors");
+  });
+
+  it("omits the GitHub Actions chip when the summary is empty", async () => {
+    renderPage();
+    expect(await screen.findByText("共 4 个资源")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /GitHub Actions/ })).not.toBeInTheDocument();
+  });
+
+  it("notes when attention is computed from a truncated resource page", async () => {
+    renderPage({
+      adapter: new TruncatedResourcesAdapter(createQueryEvidenceLifecycleSnapshotFixture()),
+    });
+    expect(await screen.findByText("仅基于前 25 个资源计算。")).toBeInTheDocument();
+  });
+
+  it("shows an empty attention state with a link to the inventory", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    renderPage({
+      adapter: new AllHealthyResourcesAdapter(createQueryEvidenceLifecycleSnapshotFixture()),
+      onNavigate,
+    });
+    expect(await screen.findByText("没有需要关注的事项。")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看全部资源" }));
+    expect(onNavigate).toHaveBeenCalledWith("inventory");
   });
 });
