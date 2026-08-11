@@ -22,12 +22,10 @@ describe("Goal 3 shell semantics", () => {
     expect(screen.getByRole("main")).toBeInTheDocument();
     expect(screen.getByRole("complementary", { name: "证据检查器" })).toBeInTheDocument();
     expect(screen.getByRole("contentinfo", { name: "控制平面运行时" })).toBeInTheDocument();
-    expect(
-      await screen.findByRole("button", {
-        name: /Fixture Database Beta.*已过期/,
-      }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("1 异常")).toBeInTheDocument();
+    expect(await screen.findAllByRole("button", { name: "查看资源" })).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "核验证据" })).toHaveLength(3);
+    expect(screen.getByText("待核验")).toBeInTheDocument();
+    expect(screen.getByText("异常连接")).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { level: 2, name: "需要关注" }),
     ).toBeInTheDocument();

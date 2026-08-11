@@ -45,7 +45,7 @@ export function PrimaryCanvas({
   openInspectorButtonRef,
 }: PrimaryCanvasProps) {
   let content;
-  if (route.id === "overview") content = <OverviewPage onInspectResource={onInspectResource} onNavigate={onNavigate} queryVersion={queryVersion} />;
+  if (route.id === "overview") content = <OverviewPage onInspectRelation={onInspectRelation} onInspectResource={onInspectResource} onNavigate={onNavigate} queryVersion={queryVersion} />;
   else if (route.id === "inventory") content = detailResourceId ? <ResourceDetailPage resourceId={detailResourceId} queryVersion={queryVersion} /> : <InventoryPage onSelectResource={onSelectResource} queryVersion={queryVersion} />;
   else if (route.id === "topology") content = topologyFocusId ? <TopologyPage focusResourceId={topologyFocusId} onCreateRelation={onCreateRelation} onEditRelation={onEditRelation} onFocusResource={onTopologyFocus} onInspectRelation={onInspectRelation} onInspectResource={onInspectResource} queryVersion={queryVersion} /> : <><header className="shell-route-header"><div className="shell-route-title"><p className="shell-eyebrow">受限关系查询</p><h1>{route.label}</h1><p>{route.description}</p></div></header><section className="shell-placeholder"><div><h2>建立或查看资源关系</h2><p>直接创建手工关系，或从资源清单与全局搜索选择资源作为拓扑焦点。</p><button className="shell-control-button" onClick={() => onCreateRelation(null)} type="button">新增关联</button></div></section></>;
   else if (route.id === "timeline") content = <TimelinePage queryVersion={queryVersion} />;
