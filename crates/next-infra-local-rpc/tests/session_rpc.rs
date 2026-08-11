@@ -309,6 +309,18 @@ impl QuerySource for FixtureSource {
         })))
     }
 
+    fn relations_for_resources(
+        &self,
+        _resource_ids: &BTreeSet<String>,
+        _limit: usize,
+        _after: Option<&str>,
+    ) -> Result<SourceSnapshot<SourcePage<next_infra_query::dto::RelationDto>>, Self::Error> {
+        Ok(snapshot(SourcePage {
+            items: vec![],
+            next_after: None,
+        }))
+    }
+
     fn get_health_summary(&self) -> Result<SourceSnapshot<HealthSummaryBody>, Self::Error> {
         Ok(snapshot(HealthSummaryBody {
             resource_health: Default::default(),

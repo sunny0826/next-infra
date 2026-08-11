@@ -1,6 +1,7 @@
 import type { ConnectionDto } from "../../generated/query/ConnectionDto";
 import type { ConnectorCoverageSnapshotDto } from "../../generated/query/ConnectorCoverageSnapshotDto";
 import type { RelationDto } from "../../generated/query/RelationDto";
+import type { RelationPageDto } from "../../generated/query/RelationPageDto";
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
@@ -18,6 +19,7 @@ import type {
   LocalSettings,
   QueryInvalidation,
   RecentChangesInput,
+  RelationsForResourcesInput,
   RuntimeCapabilities,
   SearchResourcesInput,
   SyncStatusInput,
@@ -150,6 +152,23 @@ export class MockDesktopAdapter implements DesktopAdapter {
       edges: copyItems(this.#snapshot.relations),
       frontier: [],
       truncated: false,
+    };
+  }
+
+  async getRelationsForResources(
+    input: RelationsForResourcesInput,
+  ): Promise<RelationPageDto> {
+    const ids = new Set(input.resource_ids);
+    return {
+      metadata: this.#metadata(),
+      items: copyItems(
+        this.#snapshot.relations.filter(
+          (relation) =>
+            ids.has(relation.source_resource_id) &&
+            ids.has(relation.target_resource_id),
+        ),
+      ),
+      page_info: { next_cursor: null },
     };
   }
 

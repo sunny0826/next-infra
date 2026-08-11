@@ -381,6 +381,15 @@ pub struct ResourcePageDto {
     pub page_info: PageInfo,
 }
 
+/// Bounded relation page whose source and target are both in a resource set.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
+pub struct RelationPageDto {
+    pub metadata: SnapshotMetadata,
+    pub items: Vec<RelationDto>,
+    pub page_info: PageInfo,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "typescript-bindings", derive(ts_rs::TS))]
 pub struct ResourceDetailDto {

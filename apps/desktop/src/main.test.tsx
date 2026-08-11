@@ -248,6 +248,11 @@ describe("React app shell", () => {
       ).toBeInTheDocument();
     });
     expect(within(inspector).getByText("资源")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "返回资源清单" }));
+    expect(
+      await screen.findByRole("heading", { level: 1, name: "资源清单" }),
+    ).toBeInTheDocument();
   });
 
   it("remembers a selected resource as a reachable bounded Topology focus", async () => {

@@ -2,8 +2,8 @@
 
 use crate::adapter::{
     DesktopQueryAdapter, GetResourceCommand, GetTopologyCommand, LocalSettings,
-    RecentChangesCommand, RuntimeCapabilities, SearchResourcesCommand, SyncStatusCommand,
-    TimelineCommand, validate_settings_update,
+    RecentChangesCommand, RelationsForResourcesCommand, RuntimeCapabilities,
+    SearchResourcesCommand, SyncStatusCommand, TimelineCommand, validate_settings_update,
 };
 use crate::host::authorization::authorize_launch;
 use crate::host::lifecycle::LaunchSource;
@@ -56,8 +56,8 @@ use next_infra_normalizer::{AttributeSchema, Normalizer, RelationSchema};
 use next_infra_query::dto::{
     BindingCommandResultDto, BindingDto, ChangePageDto, ConnectionPurgeSummary,
     ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, CreateBindingCommandDto,
-    DisableBindingCommandDto, ErrorEnvelope, HealthSummaryDto, ResourceDetailDto, ResourcePageDto,
-    SyncStatusDto, TimelinePageDto, TopologyDto, UpdateBindingCommandDto,
+    DisableBindingCommandDto, ErrorEnvelope, HealthSummaryDto, RelationPageDto, ResourceDetailDto,
+    ResourcePageDto, SyncStatusDto, TimelinePageDto, TopologyDto, UpdateBindingCommandDto,
 };
 use next_infra_query::service::QueryService;
 use next_infra_runtime::{
@@ -3489,6 +3489,7 @@ pub fn invoke_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Sen
         query_search_resources,
         query_get_resource,
         query_get_topology,
+        query_relations_for_resources,
         query_health_summary,
         query_recent_changes,
         query_timeline,
@@ -4375,6 +4376,14 @@ fn query_get_topology(
     request: GetTopologyCommand,
 ) -> Result<TopologyDto, ErrorEnvelope> {
     state.query.get_topology(request)
+}
+
+#[tauri::command]
+fn query_relations_for_resources(
+    state: State<'_, AppState>,
+    request: RelationsForResourcesCommand,
+) -> Result<RelationPageDto, ErrorEnvelope> {
+    state.query.relations_for_resources(request)
 }
 
 #[tauri::command]

@@ -11,16 +11,16 @@ use next_infra_query::dto::{
     ConnectorCoverageSnapshotDto, ConnectorHealth, ConnectorHealthCountsDto,
     CreateBindingCommandDto, DisableBindingCommandDto, ErrorEnvelope, EvidenceType, FieldChangeDto,
     Freshness, FreshnessCountsDto, FrontierDirectionDto, HealthSummaryDto, Lifecycle, PageInfo,
-    QueryViewState, RelationDto, RelationEvidenceDto, ResourceDetailDto, ResourceDto,
-    ResourceHealth, ResourceHealthCountsDto, ResourcePageDto, SchemaVersion, SnapshotMetadata,
-    SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto, SyncRunErrorDto, SyncRunStatusDto,
-    SyncRunWarningDto, SyncStatusDto, SyncTriggerDto, TimelineGroupDto, TimelineItemDto,
-    TimelineOriginDto, TimelinePageDto, TimelineVersionLinkDto, TopologyDto, TopologyFrontierDto,
-    UpdateBindingCommandDto,
+    QueryViewState, RelationDto, RelationEvidenceDto, RelationPageDto, ResourceDetailDto,
+    ResourceDto, ResourceHealth, ResourceHealthCountsDto, ResourcePageDto, SchemaVersion,
+    SnapshotMetadata, SyncCoverageDto, SyncModeDto, SyncRunCountsDto, SyncRunDto, SyncRunErrorDto,
+    SyncRunStatusDto, SyncRunWarningDto, SyncStatusDto, SyncTriggerDto, TimelineGroupDto,
+    TimelineItemDto, TimelineOriginDto, TimelinePageDto, TimelineVersionLinkDto, TopologyDto,
+    TopologyFrontierDto, UpdateBindingCommandDto,
 };
 use ts_rs::{Config, TS};
 
-const EXPECTED_BINDINGS: [&str; 54] = [
+const EXPECTED_BINDINGS: [&str; 55] = [
     "BindingCommandResultDto.ts",
     "BindingDto.ts",
     "BindingSnapshotDto.ts",
@@ -51,6 +51,7 @@ const EXPECTED_BINDINGS: [&str; 54] = [
     "QueryViewState.ts",
     "RelationDto.ts",
     "RelationEvidenceDto.ts",
+    "RelationPageDto.ts",
     "ResourceDetailDto.ts",
     "ResourceDto.ts",
     "ResourceHealth.ts",
@@ -135,6 +136,7 @@ fn export_types() {
     ChangeDto::export_all(&config).expect("failed to export change binding");
     RelationEvidenceDto::export_all(&config).expect("failed to export relation evidence binding");
     ResourcePageDto::export_all(&config).expect("failed to export resource page binding");
+    RelationPageDto::export_all(&config).expect("failed to export relation page binding");
     ResourceDetailDto::export_all(&config).expect("failed to export resource detail binding");
     FrontierDirectionDto::export_all(&config).expect("failed to export frontier direction binding");
     TopologyFrontierDto::export_all(&config).expect("failed to export topology frontier binding");

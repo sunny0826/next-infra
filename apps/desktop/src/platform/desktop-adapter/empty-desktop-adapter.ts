@@ -7,6 +7,7 @@ import type {
   LocalSettings,
   QueryInvalidation,
   RecentChangesInput,
+  RelationsForResourcesInput,
   RuntimeCapabilities,
   SearchResourcesInput,
   SyncStatusInput,
@@ -44,6 +45,10 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
   }
 
   async getTopology(_input: GetTopologyInput): Promise<never> {
+    throw new Error("Desktop query service is unavailable.");
+  }
+
+  async getRelationsForResources(_input: RelationsForResourcesInput): Promise<never> {
     throw new Error("Desktop query service is unavailable.");
   }
 

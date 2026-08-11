@@ -5,6 +5,7 @@ import type { ConnectorCoverageDto } from "../../generated/query/ConnectorCovera
 import type { SyncRunDto } from "../../generated/query/SyncRunDto";
 import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
+import { canPurgeConnection } from "../../platform/desktop-adapter/connection-capabilities";
 import {
   desktopErrorCode,
   type ConnectionPurgeSummary,
@@ -18,9 +19,6 @@ import { usePersistedState } from "./use-persisted-state";
 const CONNECTOR_DRAFT_PREFIX = "next-infra.connector-draft";
 
 const SYNC_RUN_LIMIT = 5;
-
-/** Connector types whose local snapshot may be purged (delete) from the UI. */
-const PURGEABLE_CONNECTOR_TYPES = new Set(["github", "ssh"]);
 
 interface ConnectionRow {
   readonly connection: ConnectionDto;
@@ -680,7 +678,7 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
             <td><span className={`connectors-status state-${connection.health}`}>{displayEnum(connection.health)}</span></td>
             <td><time>{connection.last_success_at ?? "从未"}</time></td><td><time>{connection.last_attempt_at ?? "从未"}</time></td>
             <td><code>{recentStatus ? displayEnum(recentStatus) : "无"}</code></td><td><span>{recentError ?? "无"}</span></td><td><span>{recentWarning ?? "无"}</span></td><td><time>{nextScheduledAt ?? "未计划"}</time></td>
-            <td><div className="connectors-actions"><button disabled={!connection.enabled || connection.connector_type !== "github" || connecting || purging} onClick={() => startManualSync(connection)} type="button">手动同步</button><button disabled={!PURGEABLE_CONNECTOR_TYPES.has(connection.connector_type) || connecting || purging} onClick={() => previewConnectionPurge(connection)} type="button">删除本地数据</button></div></td>
+            <td><div className="connectors-actions"><button disabled={!connection.enabled || connection.connector_type !== "github" || connecting || purging} onClick={() => startManualSync(connection)} type="button">手动同步</button><button disabled={!canPurgeConnection(connection.connector_type) || connecting || purging} onClick={() => previewConnectionPurge(connection)} type="button">删除本地数据</button></div></td>
             </tr>
             {expanded ? <tr className="connectors-detail-row" id={`connectors-run-detail-${connection.connection_id}`}><td colSpan={9}><SyncRunDetail connection={connection} runs={row.recentRuns} /></td></tr> : null}
             </Fragment>;

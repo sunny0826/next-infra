@@ -58,4 +58,37 @@ describe("MockDesktopAdapter", () => {
     expect(secondResources.metadata).not.toBe(firstResources.metadata);
     expect(secondConnections.metadata).not.toBe(firstConnections.metadata);
   });
+
+  it("filters snapshot relations by the requested resource ids", async () => {
+    const fixture = createDesktopAdapterSnapshotFixture();
+    const adapter = new MockDesktopAdapter(fixture);
+
+    await expect(
+      adapter.getRelationsForResources({
+        resource_ids: ["fixture-resource-alpha", "fixture-resource-beta"],
+      }),
+    ).resolves.toEqual({
+      metadata: fixture.metadata,
+      items: fixture.relations,
+      page_info: { next_cursor: null },
+    });
+
+    await expect(
+      adapter.getRelationsForResources({ resource_ids: ["fixture-resource-alpha"] }),
+    ).resolves.toEqual({
+      metadata: fixture.metadata,
+      items: [],
+      page_info: { next_cursor: null },
+    });
+
+    await expect(
+      adapter.getRelationsForResources({
+        resource_ids: ["fixture-resource-absent"],
+      }),
+    ).resolves.toEqual({
+      metadata: fixture.metadata,
+      items: [],
+      page_info: { next_cursor: null },
+    });
+  });
 });

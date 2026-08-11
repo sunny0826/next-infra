@@ -10,6 +10,7 @@
 .inventory-filters input { background: var(--rack-canvas); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-primary); height: 30px; padding: 0 var(--space-2); }
 .inventory-filters button, .inventory-pagination button { background: var(--rack-raised); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-secondary); height: 29px; padding: 0 var(--space-3); }
 .inventory-filters button.is-active { border-color: var(--telemetry-cyan-soft); color: var(--telemetry-cyan); }
+.inventory-status-group { display: flex; gap: var(--space-1); }
 .inventory-filters :focus-visible, .inventory-pagination :focus-visible, .inventory-frame tr:focus-visible { outline: 2px solid var(--telemetry-cyan); outline-offset: -2px; }
 .inventory-summary { display: flex; justify-content: space-between; }
 .inventory-frame { border: 1px solid var(--aluminum-line); overflow-x: auto; }
@@ -18,7 +19,18 @@
 .inventory-frame td { border-top: 1px solid var(--aluminum-line); color: var(--label-secondary); font-size: 11px; height: 40px; padding: 0 var(--space-2); }
 .inventory-frame tbody tr { background: var(--rack-canvas); cursor: pointer; }
 .inventory-frame tbody tr:hover { background: var(--rack-hover); }
+.inventory-frame tbody tr.inventory-row--tombstoned, .inventory-frame tbody tr.inventory-row--orphaned { opacity: .55; }
 .inventory-frame td:first-child { display: grid; gap: 2px; padding-top: 6px; }
+.inventory-tree-line { align-items: center; display: flex; gap: var(--space-2); min-height: 34px; }
+.inventory-tree-label { display: grid; gap: 2px; }
+.inventory-resource-id { white-space: nowrap; }
+.inventory-disclosure { align-items: center; background: none; border: 1px solid transparent; border-radius: var(--radius-control); color: var(--label-muted); cursor: pointer; display: inline-flex; flex: none; height: 16px; justify-content: center; margin: 0; padding: 0; width: 16px; }
+.inventory-disclosure:hover { border-color: var(--aluminum-line); color: var(--telemetry-cyan); }
+.inventory-disclosure:focus-visible { outline: 2px solid var(--telemetry-cyan); outline-offset: -2px; }
+.inventory-disclosure-chevron { height: 10px; width: 10px; transform: rotate(0deg); transition: transform 120ms ease; }
+.inventory-disclosure[aria-expanded="false"] .inventory-disclosure-chevron { transform: rotate(-90deg); }
+.inventory-disclosure-spacer { flex: none; height: 16px; width: 16px; }
+@media (prefers-reduced-motion: reduce) { .inventory-disclosure-chevron { transition: none; } }
 .inventory-frame code, .inventory-frame time { color: var(--label-muted); font: 9px var(--font-mono); }
 .inventory-badge { align-items: center; display: inline-flex; font: 9px var(--font-mono); gap: 5px; text-transform: uppercase; }
 .inventory-badge::before { background: var(--cloud-unknown); border-radius: 50%; content: ""; height: 5px; width: 5px; }
@@ -30,4 +42,31 @@
 .inventory-state--error { border-color: var(--fault-vermilion); }
 .inventory-pagination { display: flex; gap: var(--space-2); justify-content: flex-end; }
 .inventory-pagination button:disabled { color: var(--label-muted); opacity: .55; }
-@media (max-width: 560px) { .inventory-page { padding: 14px 14px 24px; } .inventory-header, .inventory-filters { align-items: stretch; flex-direction: column; } .inventory-frame table { min-width: 660px; } }
+.inventory-notice { background: var(--rack-surface); border: 1px solid var(--fault-vermilion); color: var(--label-secondary); padding: var(--space-3); }
+.inventory-expiry { border: 1px solid var(--inspection-amber); display: grid; gap: var(--space-2); padding: var(--space-3); }
+.inventory-expiry header { align-items: flex-end; display: flex; gap: var(--space-3); justify-content: space-between; }
+.inventory-expiry header strong { color: var(--inspection-amber); font-size: 11px; letter-spacing: .055em; text-transform: uppercase; }
+.inventory-expiry header span { color: var(--label-secondary); font-size: 11px; }
+.inventory-expiry-row { align-items: center; display: flex; gap: var(--space-3); }
+.inventory-expiry-name { color: var(--label-primary); font-size: 11px; }
+.inventory-expiry-counts { color: var(--label-muted); font: 9px var(--font-mono); }
+.inventory-expiry-row button { background: var(--rack-raised); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-secondary); height: 29px; padding: 0 var(--space-3); }
+.inventory-expiry-row button:hover { border-color: var(--inspection-amber); color: var(--inspection-amber); }
+.inventory-purge-confirmation { border: 1px solid var(--fault-vermilion); display: grid; gap: var(--space-3); padding: var(--space-3); }
+.inventory-purge-confirmation h2 { color: var(--fault-vermilion); font-size: 11px; letter-spacing: .055em; margin: 0; text-transform: uppercase; }
+.inventory-purge-confirmation p { color: var(--label-secondary); font-size: 11px; margin: var(--space-1) 0 0; }
+.inventory-purge-confirmation dl { display: grid; gap: 1px; grid-template-columns: repeat(7, minmax(72px, 1fr)); margin: 0; }
+.inventory-purge-confirmation dl div { background: var(--rack-surface); display: grid; gap: 3px; padding: var(--space-2); }
+.inventory-purge-confirmation dt { color: var(--label-muted); font: 9px var(--font-mono); text-transform: uppercase; }
+.inventory-purge-confirmation dd { color: var(--label-primary); font: 13px var(--font-mono); margin: 0; }
+.inventory-purge-actions { display: flex; gap: var(--space-2); }
+.inventory-purge-actions button { background: var(--rack-raised); border: 1px solid var(--aluminum-line); border-radius: var(--radius-control); color: var(--label-secondary); height: 29px; padding: 0 var(--space-3); }
+.inventory-purge-actions button:disabled { opacity: .5; }
+.inventory-purge-actions button:last-child { border-color: var(--fault-vermilion); color: var(--fault-vermilion); }
+@media (max-width: 560px) {
+  .inventory-page { padding: 14px 14px 24px; }
+  .inventory-header, .inventory-filters, .inventory-expiry header, .inventory-expiry-row { align-items: stretch; flex-direction: column; }
+  .inventory-status-group, .inventory-purge-actions { flex-wrap: wrap; }
+  .inventory-purge-confirmation dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .inventory-frame table { min-width: 660px; }
+}

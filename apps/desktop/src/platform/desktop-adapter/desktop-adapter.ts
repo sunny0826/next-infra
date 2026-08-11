@@ -5,6 +5,7 @@ import type { Freshness } from "../../generated/query/Freshness";
 import type { HealthSummaryDto } from "../../generated/query/HealthSummaryDto";
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourceHealth } from "../../generated/query/ResourceHealth";
+import type { RelationPageDto } from "../../generated/query/RelationPageDto";
 import type { ResourcePageDto } from "../../generated/query/ResourcePageDto";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TopologyDto } from "../../generated/query/TopologyDto";
@@ -40,6 +41,12 @@ export interface GetTopologyInput {
   readonly depth?: number;
   readonly max_nodes?: number;
   readonly max_edges?: number;
+}
+
+export interface RelationsForResourcesInput {
+  readonly resource_ids: readonly string[];
+  readonly limit?: number;
+  readonly cursor?: string;
 }
 
 export interface RecentChangesInput {
@@ -256,6 +263,7 @@ export interface DesktopAdapter {
   searchResources(input?: SearchResourcesInput): Promise<ResourcePageDto>;
   getResource(input: GetResourceInput): Promise<ResourceDetailDto>;
   getTopology(input: GetTopologyInput): Promise<TopologyDto>;
+  getRelationsForResources(input: RelationsForResourcesInput): Promise<RelationPageDto>;
   getHealthSummary(): Promise<HealthSummaryDto>;
   getRecentChanges(input?: RecentChangesInput): Promise<ChangePageDto>;
   getTimeline(input?: TimelineInput): Promise<TimelinePageDto>;

@@ -578,6 +578,35 @@ impl QuerySource for CommittedQuerySource {
         })
     }
 
+    fn relations_for_resources(
+        &self,
+        resource_ids: &BTreeSet<String>,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<SourceSnapshot<SourcePage<RelationDto>>, Self::Error> {
+        let context = self.context_snapshot()?;
+        let ids = resource_ids
+            .iter()
+            .map(|id| ResourceId::new(id.clone()))
+            .collect::<Result<BTreeSet<_>, _>>()
+            .map_err(|error| QuerySourceError::Contract(error.to_string()))?;
+        let projection = self
+            .store
+            .read(|store| store.query_relations_within_resources(&ids, limit, after))
+            .map_err(QuerySourceError::from)?;
+        let metadata = self.metadata(projection.metadata, &context);
+        let body = SourcePage {
+            items: projection
+                .body
+                .items
+                .iter()
+                .map(projected_relation_dto)
+                .collect::<Result<Vec<_>, _>>()?,
+            next_after: projection.body.next_after,
+        };
+        Ok(SourceSnapshot { metadata, body })
+    }
+
     fn get_health_summary(&self) -> Result<SourceSnapshot<HealthSummaryBody>, Self::Error> {
         let context = self.context_snapshot()?;
         let cutoffs = self.cutoffs(&context)?;
