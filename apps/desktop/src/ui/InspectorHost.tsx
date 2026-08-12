@@ -1,7 +1,13 @@
+import { useEffect, useRef, useState, type Ref } from "react";
 import { Icon } from "./Icon";
 import type { RelationDto } from "../generated/query/RelationDto";
 import type { ResourceDto } from "../generated/query/ResourceDto";
+import { EvidenceSpine } from "../features/evidence/EvidenceSpine";
+import { useDesktopAdapter } from "../platform/desktop-adapter/DesktopAdapterContext";
 import { displayEnum } from "../i18n";
+
+/** Shared by the 打开检查器/关闭检查器 toggle buttons via aria-controls. */
+export const INSPECTOR_ASIDE_ID = "evidence-inspector";
 
 export type InspectorSelection =
   | { readonly type: "resource"; readonly resource: ResourceDto }
@@ -10,65 +16,154 @@ export type InspectorSelection =
 
 interface InspectorHostProps {
   onClose: () => void;
+  onCreateRelation: (source: ResourceDto | null) => void;
+  onEditRelation: (relation: RelationDto) => void;
   open: boolean;
   routeLabel: string;
   selection: InspectorSelection;
+  /** Focus target when the inspector opens; owned by AppShell. */
+  asideHeadRef: Ref<HTMLDivElement>;
 }
 
-function RelationEvidence({ relation }: { relation: RelationDto }) {
-  const evidence = relation.evidence;
+interface RelationEvidenceState {
+  readonly source: ResourceDto;
+  readonly target: ResourceDto;
+  readonly relations: readonly RelationDto[];
+}
 
-  if (evidence.type === "provider") {
-    return (
-      <dl className="shell-inspector-facts">
-        <dt>证据类型</dt><dd>提供方</dd>
-        <dt>连接器</dt><dd><code>{evidence.connector_type}</code></dd>
-        <dt>连接</dt><dd><code>{evidence.connection_id}</code></dd>
-        <dt>SyncRun</dt><dd><code>{evidence.sync_run_id}</code></dd>
-        <dt>字段路径</dt><dd><code>{evidence.field_path}</code></dd>
-      </dl>
-    );
-  }
-
-  if (evidence.type === "configured") {
-    return (
-      <dl className="shell-inspector-facts">
-        <dt>证据类型</dt><dd>已配置</dd>
-        <dt>绑定</dt><dd><code>{evidence.binding_id}</code></dd>
-        <dt>创建时间</dt><dd><time dateTime={evidence.created_at}>{evidence.created_at}</time></dd>
-      </dl>
-    );
-  }
-
+function linksThePair(
+  candidate: RelationDto,
+  sourceId: string,
+  targetId: string,
+): boolean {
   return (
-    <dl className="shell-inspector-facts">
-      <dt>证据类型</dt><dd>推断</dd>
-      <dt>规则版本</dt><dd><code>{evidence.rule_version}</code></dd>
-      <dt>资源输入</dt>
-      <dd>
-        <ul>
-          {evidence.input_resource_version_ids.map((versionId) => <li key={versionId}><code>{versionId}</code></li>)}
-        </ul>
-      </dd>
-      <dt>关系输入</dt>
-      <dd>
-        {evidence.input_relation_version_ids.length === 0 ? "无" : (
-          <ul>
-            {evidence.input_relation_version_ids.map((versionId) => <li key={versionId}><code>{versionId}</code></li>)}
-          </ul>
-        )}
-      </dd>
-      <dt>置信度</dt><dd>{evidence.confidence_basis_points} bp</dd>
-    </dl>
+    (candidate.source_resource_id === sourceId &&
+      candidate.target_resource_id === targetId) ||
+    (candidate.source_resource_id === targetId &&
+      candidate.target_resource_id === sourceId)
   );
 }
 
-export function InspectorHost({ onClose, open, routeLabel, selection }: InspectorHostProps) {
+/**
+ * Resolves both endpoints of a selected relation and renders the full evidence
+ * spine (source fact → evidence path → target fact). The selected relation is
+ * always included even when the endpoint details only carry a partial edge
+ * list; loading stays muted and resolution failures degrade to a calm message.
+ */
+function RelationEvidenceSpine({
+  onEditRelation,
+  relation,
+}: {
+  readonly onEditRelation: (relation: RelationDto) => void;
+  readonly relation: RelationDto;
+}) {
+  const adapter = useDesktopAdapter();
+  const [state, setState] = useState<RelationEvidenceState | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setState(null);
+    setFailed(false);
+    Promise.all([
+      adapter.getResource({
+        resource_id: relation.source_resource_id,
+        include: ["relations"],
+      }),
+      adapter.getResource({
+        resource_id: relation.target_resource_id,
+        include: ["relations"],
+      }),
+    ])
+      .then(([sourceDetail, targetDetail]) => {
+        if (!active) return;
+        const byId = new Map<string, RelationDto>([
+          [relation.relation_id, relation],
+        ]);
+        for (const candidate of [
+          ...sourceDetail.relations,
+          ...targetDetail.relations,
+        ]) {
+          if (
+            linksThePair(
+              candidate,
+              relation.source_resource_id,
+              relation.target_resource_id,
+            )
+          ) {
+            byId.set(candidate.relation_id, candidate);
+          }
+        }
+        setState({
+          source: sourceDetail.resource,
+          target: targetDetail.resource,
+          relations: [...byId.values()],
+        });
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [adapter, relation]);
+
+  if (failed) {
+    return (
+      <p className="shell-inspector-callout">
+        无法加载此关系的端点事实，请稍后重试。
+      </p>
+    );
+  }
+  if (state === null) {
+    return <p className="shell-inspector-subtitle">正在读取端点事实…</p>;
+  }
   return (
-    <aside aria-label="证据检查器" className="shell-inspector" hidden={!open}>
-      <div className="shell-inspector-head">
+    <>
+      <EvidenceSpine
+        relations={state.relations}
+        source={state.source}
+        target={state.target}
+      />
+      {relation.evidence.type === "configured" ? (
+        <button
+          className="shell-control-button"
+          onClick={() => onEditRelation(relation)}
+          type="button"
+        >
+          编辑关联
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+export function InspectorHost({
+  onClose,
+  onCreateRelation,
+  onEditRelation,
+  open,
+  routeLabel,
+  selection,
+  asideHeadRef,
+}: InspectorHostProps) {
+  return (
+    <aside
+      aria-label="证据检查器"
+      className="shell-inspector"
+      hidden={!open}
+      id={INSPECTOR_ASIDE_ID}
+    >
+      <div className="shell-inspector-head" ref={asideHeadRef} tabIndex={-1}>
         <h2>证据链</h2>
-        <button aria-label="关闭检查器" className="shell-icon-button" onClick={onClose} type="button">
+        <button
+          aria-controls={INSPECTOR_ASIDE_ID}
+          aria-expanded={open}
+          aria-label="关闭检查器"
+          className="shell-icon-button"
+          onClick={onClose}
+          type="button"
+        >
           <Icon name="close" />
         </button>
       </div>
@@ -99,25 +194,26 @@ export function InspectorHost({ onClose, open, routeLabel, selection }: Inspecto
               <dt>生命周期</dt><dd>{displayEnum(selection.resource.lifecycle)}</dd>
               <dt>观测时间</dt><dd><time dateTime={selection.resource.observed_at}>{selection.resource.observed_at}</time></dd>
             </dl>
-            <h4>证据</h4>
-            <p className="shell-inspector-subtitle">ResourceDto 仅提供当前事实；此选择中不包含关系来源。</p>
+            <p className="shell-inspector-callout">
+              ResourceDto 仅提供当前事实；此选择中不包含关系来源。
+            </p>
+            <button
+              className="shell-control-button"
+              onClick={() => onCreateRelation(selection.resource)}
+              type="button"
+            >
+              从此资源建立关联
+            </button>
           </>
         ) : null}
 
         {selection?.type === "relation" ? (
           <>
             <p className="shell-inspector-type">关系</p>
-            <h3>{selection.relation.kind}</h3>
-            <code>{selection.relation.relation_id}</code>
-            <h4>当前事实</h4>
-            <dl className="shell-inspector-facts">
-              <dt>生命周期</dt><dd>{displayEnum(selection.relation.lifecycle)}</dd>
-              <dt>来源</dt><dd><code>{selection.relation.source_resource_id}</code></dd>
-              <dt>目标</dt><dd><code>{selection.relation.target_resource_id}</code></dd>
-              <dt>最近观测</dt><dd><time dateTime={selection.relation.last_seen_at}>{selection.relation.last_seen_at}</time></dd>
-            </dl>
-            <h4>证据</h4>
-            <RelationEvidence relation={selection.relation} />
+            <RelationEvidenceSpine
+              onEditRelation={onEditRelation}
+              relation={selection.relation}
+            />
           </>
         ) : null}
       </div>

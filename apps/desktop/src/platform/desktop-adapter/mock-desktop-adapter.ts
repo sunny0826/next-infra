@@ -4,9 +4,11 @@ import type { RelationDto } from "../../generated/query/RelationDto";
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourceDto } from "../../generated/query/ResourceDto";
 import type { SnapshotMetadata } from "../../generated/query/SnapshotMetadata";
+import type { SyncRunDto } from "../../generated/query/SyncRunDto";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TimelineGroupDto } from "../../generated/query/TimelineGroupDto";
 import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
+import type { TopologyDto } from "../../generated/query/TopologyDto";
 
 import type { DesktopAdapter } from "./desktop-adapter";
 import type {
@@ -56,6 +58,11 @@ export interface DesktopAdapterSnapshot {
   readonly resources: readonly ResourceDto[];
   readonly relations: readonly RelationDto[];
   readonly connections: readonly ConnectionDto[];
+  /**
+   * Opt-in SyncRun history, ordered most-recent-first per connection.
+   * Absent snapshots keep the default empty-run behavior.
+   */
+  readonly sync_runs?: readonly SyncRunDto[];
 }
 
 function copyMetadata(metadata: SnapshotMetadata | null): SnapshotMetadata | null {
@@ -72,6 +79,9 @@ function copySnapshot(snapshot: DesktopAdapterSnapshot): DesktopAdapterSnapshot 
     resources: copyItems(snapshot.resources),
     relations: copyItems(snapshot.relations),
     connections: copyItems(snapshot.connections),
+    ...(snapshot.sync_runs !== undefined
+      ? { sync_runs: copyItems(snapshot.sync_runs) }
+      : {}),
   };
 }
 
@@ -124,7 +134,7 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async getTopology(input: GetTopologyInput) {
+  async getTopology(input: GetTopologyInput): Promise<TopologyDto> {
     if (
       !this.#snapshot.resources.some(
         (item) => item.resource_id === input.focus_resource_id,
@@ -207,10 +217,19 @@ export class MockDesktopAdapter implements DesktopAdapter {
       (item) => item.connection_id === input.connection_id,
     );
     if (connection === undefined) throw new Error("Fixture connection was not found.");
+    const runs =
+      this.#snapshot.sync_runs === undefined
+        ? []
+        : copyItems(
+            this.#snapshot.sync_runs.filter(
+              (run) => run.connection_id === input.connection_id,
+            ),
+          );
+    const limit = input.recent_run_limit ?? runs.length;
     return {
       metadata: this.#metadata(),
       connection: { ...connection },
-      recent_runs: [],
+      recent_runs: runs.slice(0, limit),
       next_scheduled_at: null,
     };
   }
@@ -284,7 +303,7 @@ export class MockDesktopAdapter implements DesktopAdapter {
     return { connection_id: `fixture-tencent-${input.display_name || "connection"}`, sync_run_id: "fixture-tencent-sync" };
   }
 
-  async previewGitHubConnectionPurge(connectionId: string) {
+  async previewConnectionPurge(connectionId: string) {
     const resourceIds = new Set(
       this.#snapshot.resources
         .filter((resource) => resource.connection_id === connectionId)
@@ -305,8 +324,8 @@ export class MockDesktopAdapter implements DesktopAdapter {
     };
   }
 
-  async purgeGitHubConnection(connectionId: string) {
-    return this.previewGitHubConnectionPurge(connectionId);
+  async purgeConnection(connectionId: string) {
+    return this.previewConnectionPurge(connectionId);
   }
 
   async manualSync(connectionId: string) {

@@ -2,8 +2,8 @@ use crate::{
     OpenSshClient, ProbeId, ProbeOutcome, SshBatchOutput, SshCancellation, SshConnectionConfigV1,
     probes::{
         common::{CommonModuleState, CommonProbeInput, HostPlatform, map_common, parse_identity},
-        linux::map_systemd_services,
-        macos::map_launchd_services,
+        linux::{map_systemd_services, parse_systemd_services},
+        macos::{map_launchd_services, parse_launchd_services},
     },
     ssh_descriptor,
 };
@@ -75,6 +75,109 @@ impl<T, C> SshConnector<T, C> {
             client,
             clock,
         }
+    }
+}
+
+/// One service discovered by validation-time service discovery.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscoveredSshService {
+    pub service_id: String,
+    /// `"launchd"` on Darwin, `"systemd"` on Linux.
+    pub service_type: &'static str,
+}
+
+/// Best-effort discovery outcome. Services may be empty either because the host
+/// genuinely has no services or because a probe degraded; the static warnings
+/// carry no provider output.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SshServiceDiscovery {
+    pub services: Vec<DiscoveredSshService>,
+    pub warnings: Vec<&'static str>,
+}
+
+const DISCOVERY_IDENTITY_WARNING: &str = "ssh.service-discovery.identity";
+const DISCOVERY_SERVICES_WARNING: &str = "ssh.service-discovery.services";
+
+impl<T, C> SshConnector<T, C>
+where
+    T: SshProbeClient,
+{
+    /// Discover host services after identity validation has passed.
+    ///
+    /// Platform selection and probe definitions match `sync`. Discovery is
+    /// best-effort: any probe or parse failure degrades to the services already
+    /// discovered (possibly none) plus a static warning, and never fails the
+    /// enclosing validation.
+    pub async fn discover_services(&self, config: &SshConnectionConfigV1) -> SshServiceDiscovery {
+        let cancellation = SshCancellation::default();
+        let platform = match self
+            .client
+            .execute_batch(config, &[ProbeId::HostIdentityV1], &cancellation)
+            .await
+            .and_then(identity_stdout)
+            .and_then(|stdout| {
+                parse_identity(&stdout)
+                    .map(|identity| identity.platform)
+                    .map_err(|_| invalid_response())
+            }) {
+            Ok(platform) => platform,
+            Err(_) => return degraded_discovery(DISCOVERY_IDENTITY_WARNING),
+        };
+        let probe = match platform {
+            HostPlatform::Darwin => ProbeId::MacosLaunchdServicesV1,
+            HostPlatform::Linux => ProbeId::LinuxSystemdServicesV1,
+        };
+        let service_batch = match self
+            .client
+            .execute_batch(config, &[probe], &cancellation)
+            .await
+        {
+            Ok(batch) => batch,
+            Err(_) => return degraded_discovery(DISCOVERY_SERVICES_WARNING),
+        };
+        let (outputs, failures) = match split_outcomes(service_batch, &[probe]) {
+            Ok(parts) => parts,
+            Err(_) => return degraded_discovery(DISCOVERY_SERVICES_WARNING),
+        };
+        if !failures.is_empty() {
+            return degraded_discovery(DISCOVERY_SERVICES_WARNING);
+        }
+        let Some(stdout) = output(&outputs, probe) else {
+            return degraded_discovery(DISCOVERY_SERVICES_WARNING);
+        };
+        let services = match platform {
+            HostPlatform::Darwin => match parse_launchd_services(stdout, None) {
+                Ok(list) => list
+                    .into_iter()
+                    .map(|service| DiscoveredSshService {
+                        service_id: service.service_label,
+                        service_type: "launchd",
+                    })
+                    .collect(),
+                Err(_) => return degraded_discovery(DISCOVERY_SERVICES_WARNING),
+            },
+            HostPlatform::Linux => match parse_systemd_services(stdout, None) {
+                Ok(list) => list
+                    .into_iter()
+                    .map(|service| DiscoveredSshService {
+                        service_id: service.unit,
+                        service_type: "systemd",
+                    })
+                    .collect(),
+                Err(_) => return degraded_discovery(DISCOVERY_SERVICES_WARNING),
+            },
+        };
+        SshServiceDiscovery {
+            services,
+            warnings: Vec::new(),
+        }
+    }
+}
+
+fn degraded_discovery(warning: &'static str) -> SshServiceDiscovery {
+    SshServiceDiscovery {
+        services: Vec::new(),
+        warnings: vec![warning],
     }
 }
 
@@ -462,7 +565,7 @@ fn targeted_partial_failure() -> ConnectorFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ProbeOutput;
+    use crate::{HostAlias, HostIdentity, ProbeOutput, ProbeProfile};
     use serde_json::json;
     use std::sync::{Arc, Mutex};
 
@@ -681,5 +784,127 @@ mod tests {
         };
         assert_eq!(failure.code, ErrorCode::PartialPagination);
         assert!(matches!(batch.coverage, SyncCoverage::Partial { .. }));
+    }
+
+    fn discovery_config() -> SshConnectionConfigV1 {
+        SshConnectionConfigV1 {
+            host_identity: HostIdentity::parse(IDENTITY).unwrap(),
+            host_alias: HostAlias::parse("fixture-host").unwrap(),
+            connect_timeout_secs: 10,
+            probe_profile: ProbeProfile::BaselineV1,
+            allowed_service_ids: Vec::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn discover_services_lists_launchd_services_on_darwin() {
+        let fake = FakeClient::new(vec![
+            identity(b"Darwin\narm64\n"),
+            batch(vec![success(
+                ProbeId::MacosLaunchdServicesV1,
+                b"PID Status Label\n123 0 app.running\n- 0 app.ondemand\n- 78 app.failed\n",
+            )]),
+        ]);
+        let requests = fake.requests.clone();
+        let connector = SshConnector::new(fake);
+        let discovery = connector.discover_services(&discovery_config()).await;
+        assert_eq!(discovery.warnings, Vec::<&'static str>::new());
+        assert_eq!(
+            discovery
+                .services
+                .iter()
+                .map(|service| (service.service_id.as_str(), service.service_type))
+                .collect::<Vec<_>>(),
+            [
+                ("app.failed", "launchd"),
+                ("app.ondemand", "launchd"),
+                ("app.running", "launchd")
+            ]
+        );
+        assert_eq!(
+            requests.lock().unwrap()[1],
+            vec![ProbeId::MacosLaunchdServicesV1]
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_services_lists_systemd_units_on_linux() {
+        let fake = FakeClient::new(vec![
+            identity(b"Linux\nx86_64\n"),
+            batch(vec![success(
+                ProbeId::LinuxSystemdServicesV1,
+                b"app-active.service loaded active running one\nignored.socket loaded active running skip\napp-dead.service loaded inactive dead two\n",
+            )]),
+        ]);
+        let requests = fake.requests.clone();
+        let connector = SshConnector::new(fake);
+        let discovery = connector.discover_services(&discovery_config()).await;
+        assert_eq!(discovery.warnings, Vec::<&'static str>::new());
+        assert_eq!(
+            discovery
+                .services
+                .iter()
+                .map(|service| (service.service_id.as_str(), service.service_type))
+                .collect::<Vec<_>>(),
+            [
+                ("app-active.service", "systemd"),
+                ("app-dead.service", "systemd"),
+            ]
+        );
+        assert_eq!(
+            requests.lock().unwrap()[1],
+            vec![ProbeId::LinuxSystemdServicesV1]
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_services_is_empty_when_host_has_no_services() {
+        let fake = FakeClient::new(vec![
+            identity(b"Linux\nx86_64\n"),
+            batch(vec![success(ProbeId::LinuxSystemdServicesV1, b"")]),
+        ]);
+        let connector = SshConnector::new(fake);
+        let discovery = connector.discover_services(&discovery_config()).await;
+        assert!(discovery.services.is_empty());
+        assert_eq!(discovery.warnings, Vec::<&'static str>::new());
+    }
+
+    #[tokio::test]
+    async fn discover_services_degrades_on_service_probe_failure() {
+        let fake = FakeClient::new(vec![
+            identity(b"Linux\nx86_64\n"),
+            batch(vec![failed(
+                ProbeId::LinuxSystemdServicesV1,
+                ErrorCode::ProviderUnavailable,
+            )]),
+        ]);
+        let connector = SshConnector::new(fake);
+        let discovery = connector.discover_services(&discovery_config()).await;
+        assert!(discovery.services.is_empty());
+        assert_eq!(discovery.warnings, vec!["ssh.service-discovery.services"]);
+    }
+
+    #[tokio::test]
+    async fn discover_services_degrades_on_service_parse_failure() {
+        let fake = FakeClient::new(vec![
+            identity(b"Darwin\narm64\n"),
+            batch(vec![success(
+                ProbeId::MacosLaunchdServicesV1,
+                b"not a header\n",
+            )]),
+        ]);
+        let connector = SshConnector::new(fake);
+        let discovery = connector.discover_services(&discovery_config()).await;
+        assert!(discovery.services.is_empty());
+        assert_eq!(discovery.warnings, vec!["ssh.service-discovery.services"]);
+    }
+
+    #[tokio::test]
+    async fn discover_services_degrades_when_identity_reprobe_fails() {
+        let fake = FakeClient::new(vec![Err(invalid_response()), identity(b"Linux\nx86_64\n")]);
+        let connector = SshConnector::new(fake);
+        let discovery = connector.discover_services(&discovery_config()).await;
+        assert!(discovery.services.is_empty());
+        assert_eq!(discovery.warnings, vec!["ssh.service-discovery.identity"]);
     }
 }

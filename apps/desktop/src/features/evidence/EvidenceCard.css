@@ -1,0 +1,241 @@
+.evidence-card {
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-panel);
+  background: var(--rack-surface);
+  color: var(--label-primary);
+  font-family: var(--font-ui);
+  min-width: 0;
+}
+
+/* Frozen evidence line types (§10) reused as the card rail accent. */
+.evidence-card--provider {
+  border-left: 3px solid var(--aluminum-line-faint);
+}
+
+.evidence-card--configured {
+  border-left: 3px double var(--aluminum-line-faint);
+}
+
+.evidence-card--inferred {
+  border-left: 3px dashed var(--aluminum-line-faint);
+}
+
+.evidence-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--aluminum-line);
+}
+
+.evidence-card__badge {
+  display: inline-grid;
+  grid-template-columns: 5px auto;
+  column-gap: var(--space-1);
+  align-items: center;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--aluminum-line);
+  border-radius: 2px;
+  color: var(--label-primary);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.evidence-card__badge-dot {
+  grid-column: 1;
+  grid-row: 1;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--aluminum-strong);
+}
+
+.evidence-card__badge-label {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.evidence-card__badge-note {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--label-secondary);
+  font-size: 10px;
+}
+
+.evidence-card__badge--provider .evidence-card__badge-dot {
+  background: var(--heartbeat-green);
+}
+
+.evidence-card__badge--configured .evidence-card__badge-dot {
+  background: var(--inspection-amber);
+}
+
+.evidence-card__badge--inferred .evidence-card__badge-dot {
+  background: var(--cloud-unknown);
+}
+
+.evidence-card__arrow {
+  color: var(--aluminum-strong);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1;
+}
+
+.evidence-card__kind {
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.evidence-card__lifecycle {
+  margin-left: auto;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--aluminum-line);
+  border-radius: 2px;
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.evidence-card__details {
+  border-top: 1px solid var(--aluminum-line);
+}
+
+.evidence-card__summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  color: var(--label-secondary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.evidence-card__summary:hover {
+  color: var(--label-primary);
+}
+
+.evidence-card__summary::after {
+  margin-left: auto;
+  color: var(--label-muted);
+  content: "详情";
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.evidence-card__facts {
+  display: grid;
+  grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  font-size: 12px;
+}
+
+.evidence-card__facts dt {
+  color: var(--label-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.evidence-card__facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--label-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.evidence-card__facts dd code,
+.evidence-card__facts dd time {
+  color: var(--label-secondary);
+  font: 12px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.evidence-card__copyable {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
+  min-width: 0;
+}
+
+.evidence-card__copyable code {
+  min-width: 0;
+}
+
+.evidence-card__copy {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: none;
+  color: var(--label-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.evidence-card__copy:hover {
+  border-color: var(--aluminum-line);
+  background: var(--rack-hover);
+  color: var(--label-primary);
+}
+
+.evidence-card__copy:focus-visible {
+  outline: 2px solid var(--telemetry-cyan);
+  outline-offset: -2px;
+}
+
+.evidence-card__copy .shell-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.evidence-card__copy-done {
+  color: var(--heartbeat-green);
+  font-size: 10px;
+  font-family: var(--font-ui);
+  white-space: nowrap;
+}
+
+.evidence-card__facts dd ul {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.evidence-card__confidence {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.evidence-card__confidence-track {
+  display: block;
+  height: 3px;
+  background: var(--rack-hover);
+  overflow: hidden;
+}
+
+.evidence-card__confidence-fill {
+  display: block;
+  height: 100%;
+  background: var(--inspection-amber);
+}
+
+@container (max-width: 420px) {
+  .evidence-card__facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

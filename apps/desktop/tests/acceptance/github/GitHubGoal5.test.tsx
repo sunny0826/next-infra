@@ -61,14 +61,19 @@ describe("UI-G5-01 GitHub vertical acceptance", () => {
   it("keeps workflow run health visible without inventing a critical path", async () => {
     renderWithGitHubFixture(<OverviewPage />);
 
-    expect(await screen.findByText("共 3 个资源")).toBeInTheDocument();
+    // The frozen overview contract concludes on the abnormal observation chain
+    // and never re-introduces resource totals or a GitHub Actions quick card.
+    const summary = await screen.findByRole("region", { name: "本地状态摘要" });
     expect(
-      screen.getByRole("button", { name: /连接器\s*·\s*1 个连接\s*·\s*1 异常/ }),
+      within(summary).getByText("有 1 个连接异常，观测链路不完整。"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("总体可用，有 1 个连接异常需要你留意。"),
-    ).toBeInTheDocument();
+    const connectionsLabel = within(summary).getByText("异常连接");
+    const connectionsCell = connectionsLabel.closest(".overview-summary-cell");
+    expect(connectionsCell).not.toBeNull();
+    expect(within(connectionsCell as HTMLElement).getByText("1")).toBeInTheDocument();
+    expect(screen.queryByText(/GitHub Actions/)).not.toBeInTheDocument();
     expect(screen.queryByText(/关键路径/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/共 \d+ 个资源/)).not.toBeInTheDocument();
 
     cleanup();
     renderWithGitHubFixture(

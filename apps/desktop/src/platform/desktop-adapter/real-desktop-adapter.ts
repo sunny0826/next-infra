@@ -262,16 +262,16 @@ export class RealDesktopAdapter implements DesktopAdapter {
     );
   }
 
-  async previewGitHubConnectionPurge(connectionId: string) {
-    return this.#invoke<Awaited<ReturnType<DesktopAdapter["previewGitHubConnectionPurge"]>>>(
-      "github_connection_purge_preview",
+  async previewConnectionPurge(connectionId: string) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["previewConnectionPurge"]>>>(
+      "connection_purge_preview",
       { request: { connection_id: connectionId } },
     );
   }
 
-  async purgeGitHubConnection(connectionId: string) {
-    return this.#invoke<Awaited<ReturnType<DesktopAdapter["purgeGitHubConnection"]>>>(
-      "github_connection_purge",
+  async purgeConnection(connectionId: string) {
+    return this.#invoke<Awaited<ReturnType<DesktopAdapter["purgeConnection"]>>>(
+      "connection_purge",
       { request: { connection_id: connectionId } },
     );
   }

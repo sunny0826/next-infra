@@ -1,7 +1,8 @@
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { Fragment, FormEvent, useCallback, useEffect, useState } from "react";
 
 import type { ConnectionDto } from "../../generated/query/ConnectionDto";
 import type { ConnectorCoverageDto } from "../../generated/query/ConnectorCoverageDto";
+import type { SyncRunDto } from "../../generated/query/SyncRunDto";
 import { displayEnum } from "../../i18n";
 import { useDesktopAdapter } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import {
@@ -11,9 +12,15 @@ import {
 } from "../../platform/desktop-adapter/desktop-adapter";
 
 import "./connectors.css";
+import { SyncRunDetail } from "./SyncRunDetail";
 import { usePersistedState } from "./use-persisted-state";
 
 const CONNECTOR_DRAFT_PREFIX = "next-infra.connector-draft";
+
+const SYNC_RUN_LIMIT = 5;
+
+/** Connector types whose local snapshot may be purged (delete) from the UI. */
+const PURGEABLE_CONNECTOR_TYPES = new Set(["github", "ssh"]);
 
 interface ConnectionRow {
   readonly connection: ConnectionDto;
@@ -21,6 +28,7 @@ interface ConnectionRow {
   readonly recentStatus: string | null;
   readonly recentError: string | null;
   readonly recentWarning: string | null;
+  readonly recentRuns: readonly SyncRunDto[];
 }
 
 interface PurgeConfirmation {
@@ -201,6 +209,7 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
   const [dialogProvider, setDialogProvider] = useState<string | null>(null);
   const [purgeConfirmation, setPurgeConfirmation] = useState<PurgeConfirmation | null>(null);
   const [purging, setPurging] = useState(false);
+  const [expandedConnectionId, setExpandedConnectionId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const [connectionsSnapshot, coverageSnapshot] = await Promise.all([
@@ -209,10 +218,11 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
     ]);
     const statuses = await Promise.all(
       connectionsSnapshot.items.map(async (connection) => {
-        const status = await adapter.getSyncStatus({ connection_id: connection.connection_id, recent_run_limit: 1 });
+        const status = await adapter.getSyncStatus({ connection_id: connection.connection_id, recent_run_limit: SYNC_RUN_LIMIT });
         return {
           connection,
           nextScheduledAt: status.next_scheduled_at,
+          recentRuns: status.recent_runs,
           recentStatus: status.recent_runs[0]?.status ?? null,
           recentError: status.recent_runs[0]?.errors[0]
             ? `${status.recent_runs[0].errors[0].code}: ${status.recent_runs[0].errors[0].message}`
@@ -435,25 +445,25 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
     }
   }
 
-  async function previewGitHubConnectionPurge(connection: ConnectionDto) {
+  async function previewConnectionPurge(connection: ConnectionDto) {
     if (purging) return;
     setNotice(null);
     setError(null);
     try {
-      const summary = await adapter.previewGitHubConnectionPurge(connection.connection_id);
+      const summary = await adapter.previewConnectionPurge(connection.connection_id);
       setPurgeConfirmation({ connection, summary });
     } catch {
       setError("无法读取该连接的本地快照清理范围。");
     }
   }
 
-  async function purgeGitHubConnection() {
+  async function purgeConnection() {
     if (purgeConfirmation === null || purging) return;
     setPurging(true);
     setNotice(null);
     setError(null);
     try {
-      const summary = await adapter.purgeGitHubConnection(
+      const summary = await adapter.purgeConnection(
         purgeConfirmation.connection.connection_id,
       );
       setPurgeConfirmation(null);
@@ -488,7 +498,7 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
           <div><dt>同步记录</dt><dd>{purgeConfirmation.summary.sync_runs}</dd></div>
         </dl>
         {purgeConfirmation.summary.bindings > 0 ? <p>包含关联到该连接资源的手工绑定；这些绑定也会被删除。</p> : null}
-        <div className="connectors-purge-actions"><button disabled={purging} onClick={() => setPurgeConfirmation(null)} type="button">取消</button><button disabled={purging} onClick={purgeGitHubConnection} type="button">{purging ? "正在删除…" : "确认删除本地快照"}</button></div>
+        <div className="connectors-purge-actions"><button disabled={purging} onClick={() => setPurgeConfirmation(null)} type="button">取消</button><button disabled={purging} onClick={purgeConnection} type="button">{purging ? "正在删除…" : "确认删除本地快照"}</button></div>
       </section> : null}
             <section className="connectors-section" aria-labelledby="add-connection">
         <div className="overview-section-heading">
@@ -661,14 +671,22 @@ export function ConnectorsPage({ queryVersion = 0 }: { readonly queryVersion?: n
       ) : null}
 <section className="connectors-section" aria-labelledby="connection-state"><div><h2 id="connection-state">连接状态</h2><span>手动同步与页面刷新相互独立</span></div>
         <div className="connectors-frame"><table><thead><tr><th>连接</th><th>健康度</th><th>最近成功</th><th>最近尝试</th><th>最近运行</th><th>最近错误</th><th>最近警告</th><th>下次计划</th><th>操作</th></tr></thead><tbody>
-          {rows.map(({ connection, nextScheduledAt, recentStatus, recentError, recentWarning }) => <tr key={connection.connection_id}>
-            <td><strong>{connection.display_name}</strong><code>{connection.connector_type}</code></td>
+          {rows.map((row) => {
+            const { connection, nextScheduledAt, recentStatus, recentError, recentWarning } = row;
+            const expanded = expandedConnectionId === connection.connection_id;
+            return <Fragment key={connection.connection_id}>
+            <tr>
+            <td><button aria-controls={`connectors-run-detail-${connection.connection_id}`} aria-expanded={expanded} className="connectors-expand" onClick={() => setExpandedConnectionId(expanded ? null : connection.connection_id)} type="button">{expanded ? "收起" : "展开"}</button><strong>{connection.display_name}</strong><code>{connection.connector_type}</code></td>
             <td><span className={`connectors-status state-${connection.health}`}>{displayEnum(connection.health)}</span></td>
             <td><time>{connection.last_success_at ?? "从未"}</time></td><td><time>{connection.last_attempt_at ?? "从未"}</time></td>
             <td><code>{recentStatus ? displayEnum(recentStatus) : "无"}</code></td><td><span>{recentError ?? "无"}</span></td><td><span>{recentWarning ?? "无"}</span></td><td><time>{nextScheduledAt ?? "未计划"}</time></td>
-            <td><div className="connectors-actions"><button disabled={!connection.enabled || connection.connector_type !== "github" || connecting || purging} onClick={() => startManualSync(connection)} type="button">手动同步</button><button disabled={connection.connector_type !== "github" || connecting || purging} onClick={() => previewGitHubConnectionPurge(connection)} type="button">删除本地数据</button></div></td>
-          </tr>)}
+            <td><div className="connectors-actions"><button disabled={!connection.enabled || connection.connector_type !== "github" || connecting || purging} onClick={() => startManualSync(connection)} type="button">手动同步</button><button disabled={!PURGEABLE_CONNECTOR_TYPES.has(connection.connector_type) || connecting || purging} onClick={() => previewConnectionPurge(connection)} type="button">删除本地数据</button></div></td>
+            </tr>
+            {expanded ? <tr className="connectors-detail-row" id={`connectors-run-detail-${connection.connection_id}`}><td colSpan={9}><SyncRunDetail connection={connection} runs={row.recentRuns} /></td></tr> : null}
+            </Fragment>;
+          })}
         </tbody></table></div>
+        {rows.length === 0 ? <p className="connectors-empty connectors-setup-hint">尚无本地连接。请在「添加连接」中配置第一个只读连接器，建立首次同步。</p> : null}
       </section>
       <section className="connectors-section" aria-labelledby="coverage-state"><div><h2 id="coverage-state">连接器覆盖矩阵</h2><span>声明的模块范围，不等于同步覆盖或连接健康度</span></div>
         {coverage.length === 0 ? <p className="connectors-empty">没有可用的连接器覆盖目录。</p> : <div className="connectors-coverage">

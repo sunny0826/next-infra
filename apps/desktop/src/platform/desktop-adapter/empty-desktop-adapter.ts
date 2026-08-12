@@ -132,12 +132,12 @@ export class EmptyDesktopAdapter implements DesktopAdapter {
     throw new Error("Tencent connection creation is unavailable.");
   }
 
-  async previewGitHubConnectionPurge(_connectionId: string): Promise<never> {
-    throw new Error("GitHub connection cleanup is unavailable.");
+  async previewConnectionPurge(_connectionId: string): Promise<never> {
+    throw new Error("Connection snapshot cleanup is unavailable.");
   }
 
-  async purgeGitHubConnection(_connectionId: string): Promise<never> {
-    throw new Error("GitHub connection cleanup is unavailable.");
+  async purgeConnection(_connectionId: string): Promise<never> {
+    throw new Error("Connection snapshot cleanup is unavailable.");
   }
 
   async manualSync(_connectionId: string): Promise<never> {

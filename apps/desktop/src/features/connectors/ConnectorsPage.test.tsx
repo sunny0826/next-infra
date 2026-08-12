@@ -1,10 +1,11 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DesktopAdapterProvider } from "../../platform/desktop-adapter/DesktopAdapterContext";
 import { MockDesktopAdapter } from "../../platform/desktop-adapter/mock-desktop-adapter";
 import type { SshValidateResult, DokployValidateResult } from "../../platform/desktop-adapter/desktop-adapter";
 import { createConnectorCoverageFixtures, createGitHubGoal5SnapshotFixture, createGoal9ConnectorCoverageFixtures, createQueryEvidenceLifecycleSnapshotFixture } from "../../test/fixtures/query-fixtures";
+import { createSyncRunSnapshotFixture } from "../../test/fixtures/sync-run-fixture";
 import { ConnectorsPage } from "./ConnectorsPage";
 
 afterEach(() => {
@@ -19,6 +20,12 @@ async function openProviderForm(providerName: string) {
 
 class ConnectorAdapter extends MockDesktopAdapter {
   override async listConnectorCoverage() { return { metadata: (await this.searchResources()).metadata, items: [...createConnectorCoverageFixtures(), ...createGoal9ConnectorCoverageFixtures()] }; }
+}
+
+class SyncRunAdapter extends ConnectorAdapter {
+  constructor() {
+    super(createSyncRunSnapshotFixture());
+  }
 }
 
 describe("ConnectorsPage", () => {
@@ -92,6 +99,24 @@ describe("ConnectorsPage", () => {
     expect(screen.getByText(/将永久删除“GitHub Fixture Connection”/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "确认删除本地快照" }));
     expect(await screen.findByText(/已删除 3 个资源、2 条关系/)).toBeInTheDocument();
+  });
+
+  it("enables purge for SSH connections and disables it for other connectors", async () => {
+    const purgeableSnapshot = {
+      metadata: { schema_version: 1, snapshot_version: "fixture-purge-allowlist-v1", generated_at: "2000-01-01T00:00:00Z" },
+      resources: [],
+      relations: [],
+      connections: [
+        { connection_id: "fixture-ssh-purge-conn", connector_type: "ssh" as const, display_name: "Fixture SSH Purge", enabled: true, health: "healthy" as const, last_success_at: null, last_attempt_at: null },
+        { connection_id: "fixture-dokploy-purge-conn", connector_type: "dokploy" as const, display_name: "Fixture Dokploy Purge", enabled: true, health: "healthy" as const, last_success_at: null, last_attempt_at: null },
+      ],
+    };
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter(purgeableSnapshot)}><ConnectorsPage /></DesktopAdapterProvider>);
+
+    const sshRow = (await screen.findByText("Fixture SSH Purge")).closest("tr") as HTMLElement;
+    const dokployRow = screen.getByText("Fixture Dokploy Purge").closest("tr") as HTMLElement;
+    expect(within(sshRow).getByRole("button", { name: "删除本地数据" })).toBeEnabled();
+    expect(within(dokployRow).getByRole("button", { name: "删除本地数据" })).toBeDisabled();
   });
 
   it("renders the SSH connection form section", async () => {
@@ -350,5 +375,58 @@ describe("ConnectorsPage", () => {
     expect(await screen.findByText(/已验证腾讯云凭据，发现 7 个资源/)).toBeInTheDocument();
     fireEvent.submit(screen.getByRole("button", { name: "创建腾讯云连接并同步" }).closest("form")!);
     expect(await screen.findByText(/腾讯云连接已创建，将在后台同步：fixture-tc-sync/)).toBeInTheDocument();
+  });
+
+  it("expands a connection row into a SyncRun provenance chain", async () => {
+    render(<DesktopAdapterProvider adapter={new SyncRunAdapter()}><ConnectorsPage /></DesktopAdapterProvider>);
+    const expanders = await screen.findAllByRole("button", { name: "展开" });
+    fireEvent.click(expanders[0]);
+
+    const detail = within(document.getElementById("connectors-run-detail-fixture-connection-sync") as HTMLElement);
+    expect(detail.getByLabelText("同步来源链")).toBeInTheDocument();
+    expect(detail.getByText("连接器")).toBeInTheDocument();
+    expect(detail.getByText("连接")).toBeInTheDocument();
+    expect(detail.getByText("同步运行")).toBeInTheDocument();
+    expect(detail.getByText("覆盖")).toBeInTheDocument();
+    expect(detail.getAllByText("fixture-sync-run-failed").length).toBeGreaterThan(0);
+    expect(detail.getAllByText("失败").length).toBeGreaterThan(0);
+    expect(detail.getByText(/读取 3 · 创建 0 · 更新 0 · 未变 0 · 警告 0/)).toBeInTheDocument();
+  });
+
+  it("shows the coverage reason on a partial SyncRun", async () => {
+    render(<DesktopAdapterProvider adapter={new SyncRunAdapter()}><ConnectorsPage /></DesktopAdapterProvider>);
+    const expanders = await screen.findAllByRole("button", { name: "展开" });
+    fireEvent.click(expanders[0]);
+
+    const detail = within(document.getElementById("connectors-run-detail-fixture-connection-sync") as HTMLElement);
+    expect(detail.getByText("Fixture: remaining pages skipped after quota limit.")).toBeInTheDocument();
+    expect(detail.getByText("fixture-sync-run-partial")).toBeInTheDocument();
+    expect(detail.getAllByText("部分覆盖").length).toBeGreaterThan(0);
+  });
+
+  it("shows the error message on a failed SyncRun", async () => {
+    render(<DesktopAdapterProvider adapter={new SyncRunAdapter()}><ConnectorsPage /></DesktopAdapterProvider>);
+    const expanders = await screen.findAllByRole("button", { name: "展开" });
+    fireEvent.click(expanders[0]);
+
+    const detail = within(document.getElementById("connectors-run-detail-fixture-connection-sync") as HTMLElement);
+    expect(detail.getByText("fixture_auth_expired: Fixture: credential refresh failed.（可重试）")).toBeInTheDocument();
+  });
+
+  it("shows the never-synced state for a connection without runs", async () => {
+    render(<DesktopAdapterProvider adapter={new SyncRunAdapter()}><ConnectorsPage /></DesktopAdapterProvider>);
+    const expanders = await screen.findAllByRole("button", { name: "展开" });
+    fireEvent.click(expanders[1]);
+
+    const detail = within(document.getElementById("connectors-run-detail-fixture-connection-never") as HTMLElement);
+    expect(detail.getByText("从未成功同步")).toBeInTheDocument();
+    expect(detail.getByText("无覆盖记录")).toBeInTheDocument();
+    expect(detail.getByText(/该连接从未成功同步。尚无 SyncRun 记录/)).toBeInTheDocument();
+  });
+
+  it("shows initial-setup guidance when no connections exist", async () => {
+    render(<DesktopAdapterProvider adapter={new ConnectorAdapter({ metadata: { schema_version: 1, snapshot_version: "fixture-empty-v1", generated_at: "2000-01-01T00:00:00Z" }, resources: [], relations: [], connections: [] })}><ConnectorsPage /></DesktopAdapterProvider>);
+    expect(await screen.findByText(/尚无本地连接。请在「添加连接」中配置第一个只读连接器/)).toBeInTheDocument();
+    expect(screen.getByText("0 个本地连接")).toBeInTheDocument();
   });
 });

@@ -4,6 +4,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::BTreeSet, fmt, str::FromStr};
 use uuid::Uuid;
 
+/// `connect_timeout_secs` accepted range, aligned with the Host-side connect
+/// timeout validation (5..=14 seconds) so any config that passes connection
+/// setup also passes every sync-time config validation.
+const MIN_CONNECT_TIMEOUT_SECS: u8 = 5;
 const DEFAULT_CONNECT_TIMEOUT_SECS: u8 = 10;
 const MAX_SERVICE_IDS: usize = 64;
 const MAX_SERVICE_ID_BYTES: usize = 128;
@@ -161,7 +165,8 @@ impl SshConnectionConfigV1 {
     }
 
     pub fn validate(&self) -> Result<(), SshError> {
-        if !(1..=DEFAULT_CONNECT_TIMEOUT_SECS).contains(&self.connect_timeout_secs)
+        if !(MIN_CONNECT_TIMEOUT_SECS..=crate::MAX_CONNECT_TIMEOUT_SECS)
+            .contains(&self.connect_timeout_secs)
             || self.allowed_service_ids.len() > MAX_SERVICE_IDS
             || self
                 .allowed_service_ids
@@ -245,6 +250,34 @@ mod tests {
             "host$(id)",
         ] {
             assert!(HostAlias::parse(invalid).is_err(), "{invalid:?}");
+        }
+    }
+
+    #[test]
+    fn connect_timeout_accepts_host_aligned_range_and_rejects_outside() {
+        for timeout in [5, 10, 14] {
+            let value = json!({
+                "host_identity": identity(),
+                "host_alias": "fixture-host",
+                "connect_timeout_secs": timeout,
+                "probe_profile": "baseline-v1",
+            });
+            assert!(
+                SshConnectionConfigV1::from_json(value).is_ok(),
+                "connect_timeout_secs={timeout} should be accepted"
+            );
+        }
+        for timeout in [0, 4, 15] {
+            let value = json!({
+                "host_identity": identity(),
+                "host_alias": "fixture-host",
+                "connect_timeout_secs": timeout,
+                "probe_profile": "baseline-v1",
+            });
+            assert!(
+                SshConnectionConfigV1::from_json(value).is_err(),
+                "connect_timeout_secs={timeout} should be rejected"
+            );
         }
     }
 

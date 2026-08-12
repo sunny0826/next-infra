@@ -167,6 +167,9 @@ Stop rule: 需要修改共享契约或越过独占路径时立即停止并回报
 61. [CON-G8-02 Dokploy live smoke 验收记录](./CON-G8-02-2026-08-07.md)
 62. [CON-G8-04 Cloudflare live smoke 验收记录](./CON-G8-04-2026-08-07.md)
 63. [CON-G9-S4 Supabase managed live smoke 验收记录](./CON-G9-S4-2026-08-07.md)
+64. [DEC-G7-02 手工跨 Provider 关系合同](../design/decisions/DEC-G7-02-manual-cross-provider-relations.md)
+65. [MREL 手工跨 Provider 关系任务冻结与完成归档](./MREL-TASK-FREEZE-2026-08-09.md)
+66. [MREL 手工跨 Provider 关系 Gate](./MREL-GATE-2026-08-09.md)
 
 ## 6. 设计决策包
 

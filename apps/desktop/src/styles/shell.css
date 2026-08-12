@@ -586,7 +586,7 @@ input:focus-visible {
 .shell-inspector-kicker {
   color: var(--telemetry-cyan);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -602,7 +602,7 @@ input:focus-visible {
   margin-top: 12px !important;
   color: var(--label-muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 10px;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -613,13 +613,18 @@ input:focus-visible {
   margin-top: 4px;
   overflow-wrap: anywhere;
   color: var(--label-muted);
-  font: 9px var(--font-mono);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 .shell-inspector-body h4 {
   margin: var(--space-4) 0 var(--space-2);
   color: var(--label-muted);
-  font: 9px var(--font-mono);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 650;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -640,22 +645,23 @@ input:focus-visible {
   margin: 0;
   padding: var(--space-2);
   border-bottom: 1px solid var(--aluminum-line);
-  font: 10px/1.4 var(--font-mono);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .shell-inspector-facts dt {
   color: var(--label-muted);
-  letter-spacing: 0.025em;
-  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.shell-inspector-facts > :nth-last-child(-n + 2) {
+  border-bottom: 0;
 }
 
 .shell-inspector-facts dd {
   color: var(--label-secondary);
   overflow-wrap: anywhere;
-}
-
-.shell-inspector-facts > :nth-last-child(-n + 2) {
-  border-bottom: 0;
 }
 
 .shell-inspector-facts dd code,
@@ -676,7 +682,7 @@ input:focus-visible {
   margin-top: 4px !important;
   color: var(--label-muted);
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .shell-inspector-summary {
@@ -686,7 +692,19 @@ input:focus-visible {
   border-radius: var(--radius-control);
   background: var(--rack-surface);
   color: var(--label-secondary);
-  font-size: 10px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.shell-inspector-callout {
+  margin-top: var(--space-3) !important;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--aluminum-line);
+  border-left: 2px solid var(--aluminum-strong);
+  border-radius: var(--radius-control);
+  background: var(--rack-surface);
+  color: var(--label-secondary);
+  font-size: 11px;
   line-height: 1.55;
 }
 

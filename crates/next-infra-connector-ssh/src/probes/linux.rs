@@ -58,15 +58,15 @@ impl fmt::Display for SystemdParseError {
 
 impl std::error::Error for SystemdParseError {}
 
+/// `Some(allowlist)`: strict sync contract (malformed/duplicate/overflow fail).
+/// `None`: best-effort discovery (skip bad rows, truncate at the output cap).
 pub fn parse_systemd_services(
     input: &[u8],
-    allowlist: &[ServiceId],
+    allowlist: Option<&[ServiceId]>,
 ) -> Result<Vec<SystemdService>, SystemdParseError> {
     let text = checked_text(input)?;
-    let allowed = allowlist
-        .iter()
-        .map(ServiceId::expose)
-        .collect::<BTreeSet<_>>();
+    let allowed = allowlist.map(|ids| ids.iter().map(ServiceId::expose).collect::<BTreeSet<_>>());
+    let discovery = allowlist.is_none();
     let mut seen = BTreeSet::new();
     let mut services = Vec::new();
     for (row, line) in text
@@ -81,29 +81,44 @@ pub fn parse_systemd_services(
         let Some(unit) = fields.next() else {
             continue;
         };
-        if !allowed.contains(unit) {
+        if let Some(allowed) = &allowed
+            && !allowed.contains(unit)
+        {
             continue;
         }
-        let load_state = fields
-            .next()
-            .ok_or_else(|| error(SystemdParseErrorKind::Malformed))?;
-        let active_state = fields
-            .next()
-            .ok_or_else(|| error(SystemdParseErrorKind::Malformed))?;
-        let sub_state = fields
-            .next()
-            .ok_or_else(|| error(SystemdParseErrorKind::Malformed))?;
-        if unit.len() > 128
-            || !unit.ends_with(".service")
-            || ServiceId::parse(unit).is_err()
-            || !valid_state(load_state)
-            || !valid_state(active_state)
-            || !valid_state(sub_state)
-        {
+        let load_state = fields.next();
+        let active_state = fields.next();
+        let sub_state = fields.next();
+        let Some((load_state, active_state, sub_state)) = load_state
+            .zip(active_state)
+            .zip(sub_state)
+            .map(|((a, b), c)| (a, b, c))
+        else {
+            if discovery {
+                continue;
+            }
+            return Err(error(SystemdParseErrorKind::Malformed));
+        };
+        let well_formed = unit.len() <= 128
+            && unit.ends_with(".service")
+            && ServiceId::parse(unit).is_ok()
+            && valid_state(load_state)
+            && valid_state(active_state)
+            && valid_state(sub_state);
+        if !well_formed {
+            if discovery {
+                continue;
+            }
             return Err(error(SystemdParseErrorKind::Malformed));
         }
         if !seen.insert(unit) {
+            if discovery {
+                continue;
+            }
             return Err(error(SystemdParseErrorKind::Duplicate));
+        }
+        if services.len() >= MAX_SYSTEMD_OUTPUTS && discovery {
+            break;
         }
         services.push(SystemdService {
             unit: unit.to_owned(),
@@ -126,7 +141,7 @@ pub fn map_systemd_services(
     input: &[u8],
     allowlist: &[ServiceId],
 ) -> Result<(Vec<ResourceObservation>, Vec<RelationObservation>), SystemdParseError> {
-    let services = parse_systemd_services(input, allowlist)?;
+    let services = parse_systemd_services(input, Some(allowlist))?;
     let host = ResourceLocator {
         kind: kind("ssh.host"),
         external_id: host_identity.external_id(),
@@ -258,7 +273,7 @@ mod tests {
     fn parses_allowlisted_states_and_discards_descriptions() {
         let services = parse_systemd_services(
             b"app-active.service loaded active running Visible description\napp-failed.service loaded failed failed Failure details\nignored.service loaded active running Private description\n",
-            &allowed(&["app-active.service", "app-failed.service", "missing.service"]),
+            Some(&allowed(&["app-active.service", "app-failed.service", "missing.service"])),
         )
         .unwrap();
         assert_eq!(services.len(), 2);
@@ -271,10 +286,35 @@ mod tests {
     fn missing_is_empty_and_unallowlisted_malformed_rows_are_discarded() {
         let services = parse_systemd_services(
             b"ignored.service INVALID INVALID INVALID hidden\n",
-            &allowed(&["missing.service"]),
+            Some(&allowed(&["missing.service"])),
         )
         .unwrap();
         assert!(services.is_empty());
+    }
+
+    #[test]
+    fn discovery_skips_bad_rows_and_truncates_at_the_output_cap() {
+        let services = parse_systemd_services(
+            b"app-active.service loaded active running one\nignored.socket loaded active running skip\napp-dead.service loaded inactive dead two\n",
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            services
+                .iter()
+                .map(|service| service.unit.as_str())
+                .collect::<Vec<_>>(),
+            ["app-active.service", "app-dead.service"]
+        );
+
+        let mut rows = String::new();
+        for index in 0..(MAX_SYSTEMD_OUTPUTS + 8) {
+            rows.push_str(&format!(
+                "cap-{index}.service loaded active running hidden\n"
+            ));
+        }
+        let capped = parse_systemd_services(rows.as_bytes(), None).unwrap();
+        assert_eq!(capped.len(), MAX_SYSTEMD_OUTPUTS);
     }
 
     #[test]
@@ -283,18 +323,19 @@ mod tests {
         assert_eq!(
             parse_systemd_services(
                 b"app.service loaded active running one\napp.service loaded inactive dead two\n",
-                &allowlist,
+                Some(&allowlist),
             )
             .unwrap_err()
             .kind,
             SystemdParseErrorKind::Duplicate
         );
         assert!(
-            parse_systemd_services(b"app.service LOADED active running\n", &allowlist).is_err()
+            parse_systemd_services(b"app.service LOADED active running\n", Some(&allowlist))
+                .is_err()
         );
         let error = parse_systemd_services(
             b"app.service loaded active running Bearer fixture-secret\n",
-            &allowlist,
+            Some(&allowlist),
         )
         .unwrap_err();
         assert_eq!(error.kind, SystemdParseErrorKind::UnsafeOutput);
@@ -305,7 +346,7 @@ mod tests {
             rows.push_str("ignored.service loaded inactive dead hidden\n");
         }
         assert_eq!(
-            parse_systemd_services(rows.as_bytes(), &[])
+            parse_systemd_services(rows.as_bytes(), Some(&[]))
                 .unwrap_err()
                 .kind,
             SystemdParseErrorKind::RowLimit

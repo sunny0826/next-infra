@@ -1,0 +1,469 @@
+.relation-dialog-overlay {
+  align-items: flex-start;
+  background: var(--scrim);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 40px 24px 56px;
+  position: fixed;
+  z-index: 80;
+}
+
+.relation-dialog {
+  background: var(--rack-surface);
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-dialog);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100vh - 96px);
+  max-width: 920px;
+  width: 100%;
+}
+
+.relation-dialog-header {
+  align-items: center;
+  border-bottom: 1px solid var(--aluminum-line);
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+}
+
+.relation-dialog-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.relation-dialog-header p,
+.relation-dialog-header h2,
+.relation-dialog-header span {
+  margin: 0;
+}
+
+.relation-dialog-header p {
+  color: var(--telemetry-cyan);
+  font: 9px var(--font-mono);
+  letter-spacing: .08em;
+}
+
+.relation-dialog-header h2 {
+  color: var(--label-primary);
+  font-size: 14px;
+  letter-spacing: -.01em;
+}
+
+.relation-dialog-header span {
+  color: var(--label-muted);
+  font-size: 10px;
+}
+
+.relation-dialog-close {
+  align-items: center;
+  background: var(--rack-raised);
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-control);
+  color: var(--label-secondary);
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.relation-dialog-close:hover {
+  border-color: var(--telemetry-cyan-soft);
+  color: var(--telemetry-cyan);
+}
+
+.relation-dialog-close:focus-visible {
+  outline: 2px solid var(--telemetry-cyan);
+  outline-offset: 2px;
+}
+
+.relation-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+}
+
+.relation-dialog .relation-builder {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+.relation-save-notice {
+  align-items: center;
+  background: var(--rack-raised);
+  border: 1px solid var(--telemetry-cyan-soft);
+  border-radius: var(--radius-control);
+  bottom: 42px;
+  box-shadow: var(--shadow-dialog);
+  color: var(--label-primary);
+  display: flex;
+  gap: var(--space-2);
+  max-width: min(460px, calc(100vw - 32px));
+  padding: var(--space-2) var(--space-3);
+  position: fixed;
+  right: var(--space-4);
+  z-index: 70;
+}
+
+.relation-save-notice span {
+  font-size: 11px;
+}
+
+.relation-save-notice button {
+  background: transparent;
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-control);
+  color: var(--telemetry-cyan);
+  min-height: 26px;
+  padding: 0 var(--space-2);
+}
+
+.relation-save-notice button:hover {
+  background: var(--rack-hover);
+}
+
+.relation-builder {
+  background: var(--rack-canvas);
+  border: 1px solid var(--aluminum-line);
+  color: var(--label-primary);
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+
+.relation-builder-header,
+.relation-builder-actions {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+}
+
+.relation-builder-header {
+  justify-content: space-between;
+}
+
+.relation-builder-eyebrow,
+.relation-builder-mode,
+.relation-builder-label,
+.relation-resource-picker-label,
+.relation-picker-inputs label > span,
+.relation-picker-filter > span {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.relation-builder-eyebrow {
+  margin: 0 0 var(--space-1);
+}
+
+.relation-builder h2 {
+  font-size: 15px;
+  letter-spacing: -.015em;
+  margin: 0;
+}
+
+.relation-builder-mode {
+  border: 1px solid var(--aluminum-line);
+  color: var(--telemetry-cyan);
+  padding: var(--space-1) var(--space-2);
+}
+
+.relation-builder-notice,
+.relation-builder-state,
+.relation-picker-state {
+  border: 1px solid var(--aluminum-line);
+  color: var(--label-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+  margin: 0;
+  padding: var(--space-2);
+}
+
+.relation-builder-notice {
+  border-color: var(--telemetry-cyan-soft);
+  color: var(--telemetry-cyan);
+}
+
+.relation-builder-state--error,
+.relation-picker-state--error {
+  border-color: var(--fault-vermilion);
+  color: var(--fault-vermilion);
+}
+
+.relation-builder-fields {
+  align-items: end;
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.relation-resource-picker {
+  min-width: 0;
+  position: relative;
+}
+
+.relation-resource-picker-trigger,
+.relation-builder-actions button,
+.relation-picker-filter-options button {
+  background: var(--rack-raised);
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-control);
+  color: var(--label-secondary);
+}
+
+.relation-resource-picker-trigger {
+  align-items: center;
+  display: flex;
+  gap: var(--space-2);
+  justify-content: space-between;
+  min-height: 44px;
+  padding: var(--space-2);
+  text-align: left;
+  width: 100%;
+}
+
+.relation-resource-picker-trigger:hover,
+.relation-builder-actions button:hover,
+.relation-picker-filter-options button:hover,
+.relation-builder-kind-list button:hover {
+  background: var(--rack-hover);
+}
+
+.relation-resource-picker-value {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.relation-resource-picker-value code,
+.relation-picker-options code,
+.relation-builder-preview-block code {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.relation-picker-panel {
+  background: var(--rack-surface);
+  border: 1px solid var(--aluminum-line);
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+  max-height: 340px;
+  overflow: auto;
+  padding: var(--space-2);
+  position: absolute;
+  width: 100%;
+  z-index: 2;
+}
+
+.relation-picker-inputs {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+}
+
+.relation-picker-inputs label {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.relation-picker-inputs input {
+  background: var(--rack-canvas);
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-control);
+  color: var(--label-primary);
+  height: 29px;
+  min-width: 0;
+  padding: 0 var(--space-2);
+}
+
+.relation-picker-filter {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.relation-picker-filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.relation-picker-filter-options button {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+  min-height: 24px;
+  padding: 0 var(--space-1);
+}
+
+.relation-picker-filter-options button.is-active {
+  border-color: var(--telemetry-cyan-soft);
+  color: var(--telemetry-cyan);
+}
+
+.relation-picker-options {
+  display: grid;
+  gap: var(--space-1);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.relation-picker-options li {
+  min-width: 0;
+}
+
+.relation-picker-options button {
+  background: var(--rack-canvas);
+  border: 1px solid transparent;
+  color: var(--label-secondary);
+  display: grid;
+  gap: 2px;
+  padding: var(--space-2);
+  text-align: left;
+  width: 100%;
+}
+
+.relation-picker-options button.is-selected,
+.relation-picker-options button:hover {
+  border-color: var(--telemetry-cyan-soft);
+}
+
+.relation-picker-state {
+  text-align: center;
+}
+
+.relation-builder-swap {
+  background: var(--rack-raised);
+  border: 1px solid var(--aluminum-line);
+  border-radius: var(--radius-control);
+  color: var(--telemetry-cyan);
+  height: 30px;
+  padding: 0 var(--space-2);
+}
+
+.relation-builder-kind-field {
+  border: 1px solid var(--aluminum-line);
+  margin: 0;
+  min-width: 0;
+  padding: var(--space-2);
+}
+
+.relation-builder-kind-field legend {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+  padding: 0 var(--space-1);
+  text-transform: uppercase;
+}
+
+.relation-builder-kind-list {
+  display: grid;
+  gap: var(--space-1);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.relation-builder-kind-list button {
+  background: var(--rack-surface);
+  border: 1px solid var(--aluminum-line);
+  color: var(--label-secondary);
+  display: grid;
+  gap: 2px;
+  min-height: 58px;
+  padding: var(--space-2);
+  text-align: left;
+}
+
+.relation-builder-kind-list button.is-selected {
+  border-color: var(--telemetry-cyan-soft);
+  color: var(--telemetry-cyan);
+}
+
+.relation-builder-kind-list button span,
+.relation-builder-kind-list button small {
+  color: var(--label-muted);
+  font: 9px var(--font-mono);
+}
+
+.relation-builder-preview-block {
+  border-left: 2px solid var(--telemetry-cyan);
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+}
+
+.relation-builder-preview {
+  color: var(--label-primary);
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.relation-builder-actions {
+  border-top: 1px solid var(--aluminum-line);
+  padding-top: var(--space-2);
+}
+
+.relation-builder-actions button {
+  min-height: 29px;
+  padding: 0 var(--space-3);
+}
+
+.relation-builder-actions .relation-builder-primary {
+  border-color: var(--telemetry-cyan-soft);
+  color: var(--telemetry-cyan);
+}
+
+.relation-builder-actions .relation-builder-danger {
+  border-color: var(--fault-vermilion);
+  color: var(--fault-vermilion);
+}
+
+.relation-builder-actions-spacer {
+  flex: 1;
+}
+
+.relation-builder :focus-visible {
+  outline: 2px solid var(--telemetry-cyan);
+  outline-offset: 2px;
+}
+
+.relation-builder button:disabled,
+.relation-builder fieldset:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+@media (max-width: 560px) {
+  .relation-dialog-overlay {
+    padding: var(--space-2);
+  }
+
+  .relation-dialog {
+    max-height: calc(100vh - var(--space-4));
+  }
+
+  .relation-dialog-header,
+  .relation-dialog-body {
+    padding: var(--space-3);
+  }
+
+  .relation-builder-fields,
+  .relation-picker-inputs,
+  .relation-builder-kind-list {
+    grid-template-columns: 1fr;
+  }
+
+  .relation-builder-swap {
+    justify-self: start;
+  }
+}

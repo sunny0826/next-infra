@@ -18,7 +18,8 @@ pub enum BindingError<E> {
     Store(E),
     Invalid(DomainError),
     NotFound,
-    Conflict(&'static str),
+    Duplicate,
+    TemporalConflict,
 }
 
 impl<E: fmt::Display> fmt::Display for BindingError<E> {
@@ -27,7 +28,10 @@ impl<E: fmt::Display> fmt::Display for BindingError<E> {
             Self::Store(error) => write!(formatter, "binding store failed: {error}"),
             Self::Invalid(error) => write!(formatter, "binding is invalid: {error}"),
             Self::NotFound => formatter.write_str("binding was not found"),
-            Self::Conflict(message) => formatter.write_str(message),
+            Self::Duplicate => {
+                formatter.write_str("binding already exists for the same endpoints and kind")
+            }
+            Self::TemporalConflict => formatter.write_str("binding mutation time must advance"),
         }
     }
 }
@@ -52,6 +56,7 @@ where
         at: Timestamp,
     ) -> Result<Binding, BindingError<S::Error>> {
         validate_input(&input).map_err(BindingError::Invalid)?;
+        self.ensure_unique(&input, None)?;
         let status = self.endpoint_status(&input)?;
         let binding = Binding {
             binding_id: BindingId::new(format!("binding:v1:{}", Uuid::new_v4()))
@@ -79,6 +84,9 @@ where
         validate_input(&input).map_err(BindingError::Invalid)?;
         let existing = self.binding(binding_id)?;
         ensure_later(at, existing.updated_at)?;
+        if existing.status != BindingStatus::Disabled {
+            self.ensure_unique(&input, Some(binding_id))?;
+        }
         let status = if existing.status == BindingStatus::Disabled {
             BindingStatus::Disabled
         } else {
@@ -184,6 +192,32 @@ where
             },
         )
     }
+
+    fn ensure_unique(
+        &self,
+        input: &BindingInput,
+        excluded_binding_id: Option<&BindingId>,
+    ) -> Result<(), BindingError<S::Error>> {
+        let duplicate = self
+            .store
+            .list_bindings()
+            .map_err(BindingError::Store)?
+            .into_iter()
+            .any(|existing| {
+                excluded_binding_id != Some(&existing.binding_id)
+                    && existing.source_resource_id == input.source_resource_id
+                    && existing.target_resource_id == input.target_resource_id
+                    && existing.kind == input.kind
+                    && matches!(
+                        existing.status,
+                        BindingStatus::Active | BindingStatus::Unresolved
+                    )
+            });
+        if duplicate {
+            return Err(BindingError::Duplicate);
+        }
+        Ok(())
+    }
 }
 
 fn validate_input(input: &BindingInput) -> Result<(), DomainError> {
@@ -197,7 +231,7 @@ fn validate_input(input: &BindingInput) -> Result<(), DomainError> {
 
 fn ensure_later<E>(at: Timestamp, previous: Timestamp) -> Result<(), BindingError<E>> {
     if at <= previous {
-        return Err(BindingError::Conflict("binding mutation time must advance"));
+        return Err(BindingError::TemporalConflict);
     }
     Ok(())
 }
@@ -447,9 +481,13 @@ mod tests {
     }
 
     fn resource(value: &str, lifecycle: Lifecycle) -> Resource {
+        resource_on_connection(value, "fixture-connection", lifecycle)
+    }
+
+    fn resource_on_connection(value: &str, connection: &str, lifecycle: Lifecycle) -> Resource {
         Resource {
             resource_id: id(value, ResourceId::new),
-            connection_id: id("fixture-connection", ConnectionId::new),
+            connection_id: id(connection, ConnectionId::new),
             kind: id("fixture.resource", ResourceKind::new),
             external_id: id(format!("external-{value}").as_str(), ExternalId::new),
             name: value.into(),
@@ -592,6 +630,199 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, BindingError::Invalid(_)));
         assert!(store.commits.is_empty());
+    }
+
+    #[test]
+    fn cross_connection_binding_rejects_active_duplicates_but_allows_other_kinds_and_disabled() {
+        let mut store = store();
+        let source = id("cross-source", ResourceId::new);
+        let target = id("cross-target", ResourceId::new);
+        store.resources.insert(
+            source.clone(),
+            resource_on_connection(
+                "cross-source",
+                "fixture-source-connection",
+                Lifecycle::Active,
+            ),
+        );
+        store.resources.insert(
+            target.clone(),
+            resource_on_connection(
+                "cross-target",
+                "fixture-target-connection",
+                Lifecycle::Active,
+            ),
+        );
+        assert_ne!(
+            store.resources[&source].connection_id,
+            store.resources[&target].connection_id
+        );
+
+        let binding = BindingService::new(&mut store)
+            .create(
+                BindingInput {
+                    source_resource_id: source.clone(),
+                    target_resource_id: target.clone(),
+                    kind: id("fixture.depends_on", RelationKind::new),
+                },
+                Timestamp::from_unix_millis(10).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(binding.status, BindingStatus::Active);
+
+        let duplicate = BindingService::new(&mut store).create(
+            BindingInput {
+                source_resource_id: source.clone(),
+                target_resource_id: target.clone(),
+                kind: id("fixture.depends_on", RelationKind::new),
+            },
+            Timestamp::from_unix_millis(20).unwrap(),
+        );
+        assert!(matches!(duplicate, Err(BindingError::Duplicate)));
+
+        let different_kind = BindingService::new(&mut store)
+            .create(
+                BindingInput {
+                    source_resource_id: source.clone(),
+                    target_resource_id: target.clone(),
+                    kind: id("fixture.runs_on", RelationKind::new),
+                },
+                Timestamp::from_unix_millis(30).unwrap(),
+            )
+            .unwrap();
+        assert_ne!(different_kind.binding_id, binding.binding_id);
+
+        let disabled = BindingService::new(&mut store)
+            .disable(
+                &binding.binding_id,
+                Timestamp::from_unix_millis(40).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(disabled.status, BindingStatus::Disabled);
+
+        let replacement = BindingService::new(&mut store)
+            .create(
+                BindingInput {
+                    source_resource_id: source,
+                    target_resource_id: target,
+                    kind: id("fixture.depends_on", RelationKind::new),
+                },
+                Timestamp::from_unix_millis(50).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(replacement.status, BindingStatus::Active);
+        assert_ne!(replacement.binding_id, binding.binding_id);
+        assert_eq!(store.list_bindings().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn update_rejects_another_binding_duplicate_but_excludes_itself() {
+        let mut store = store();
+        let duplicate_input = input("source", "target", "fixture.depends_on");
+        let first = BindingService::new(&mut store)
+            .create(
+                duplicate_input.clone(),
+                Timestamp::from_unix_millis(10).unwrap(),
+            )
+            .unwrap();
+        let second = BindingService::new(&mut store)
+            .create(
+                input("source", "target", "fixture.runs_on"),
+                Timestamp::from_unix_millis(20).unwrap(),
+            )
+            .unwrap();
+
+        let self_update = BindingService::new(&mut store)
+            .update(
+                &first.binding_id,
+                duplicate_input.clone(),
+                Timestamp::from_unix_millis(30).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(self_update.kind.as_str(), "fixture.depends_on");
+
+        let duplicate = BindingService::new(&mut store).update(
+            &second.binding_id,
+            duplicate_input,
+            Timestamp::from_unix_millis(30).unwrap(),
+        );
+        assert!(matches!(duplicate, Err(BindingError::Duplicate)));
+        assert_eq!(
+            store
+                .get_binding(&second.binding_id)
+                .unwrap()
+                .unwrap()
+                .kind
+                .as_str(),
+            "fixture.runs_on"
+        );
+
+        let temporal = BindingService::new(&mut store).update(
+            &first.binding_id,
+            input("source", "target", "fixture.depends_on"),
+            Timestamp::from_unix_millis(30).unwrap(),
+        );
+        assert!(matches!(temporal, Err(BindingError::TemporalConflict)));
+    }
+
+    #[test]
+    fn unresolved_binding_rejects_duplicate_and_recovers_before_disable() {
+        let mut store = store();
+        store
+            .resources
+            .get_mut(&id("target", ResourceId::new))
+            .unwrap()
+            .lifecycle = Lifecycle::Tombstoned;
+
+        let binding = BindingService::new(&mut store)
+            .create(
+                input("source", "target", "fixture.depends_on"),
+                Timestamp::from_unix_millis(10).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(binding.status, BindingStatus::Unresolved);
+
+        let duplicate = BindingService::new(&mut store).create(
+            input("source", "target", "fixture.depends_on"),
+            Timestamp::from_unix_millis(20).unwrap(),
+        );
+        assert!(matches!(duplicate, Err(BindingError::Duplicate)));
+
+        store
+            .resources
+            .get_mut(&id("target", ResourceId::new))
+            .unwrap()
+            .lifecycle = Lifecycle::Active;
+        let recovered = BindingService::new(&mut store)
+            .reconcile(
+                &binding.binding_id,
+                Timestamp::from_unix_millis(30).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(recovered.status, BindingStatus::Active);
+
+        let still_duplicate = BindingService::new(&mut store).create(
+            input("source", "target", "fixture.depends_on"),
+            Timestamp::from_unix_millis(40).unwrap(),
+        );
+        assert!(matches!(still_duplicate, Err(BindingError::Duplicate)));
+
+        let disabled = BindingService::new(&mut store)
+            .disable(
+                &binding.binding_id,
+                Timestamp::from_unix_millis(50).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(disabled.status, BindingStatus::Disabled);
+
+        let replacement = BindingService::new(&mut store)
+            .create(
+                input("source", "target", "fixture.depends_on"),
+                Timestamp::from_unix_millis(60).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(replacement.status, BindingStatus::Active);
+        assert_ne!(replacement.binding_id, binding.binding_id);
     }
 
     #[test]
