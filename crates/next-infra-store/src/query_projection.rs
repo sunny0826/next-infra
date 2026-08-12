@@ -179,7 +179,22 @@ impl Store {
             ));
         }
         self.with_projection_snapshot(|connection| {
-            read_relations_for_resources(connection, resource_ids, limit, after)
+            read_relations_for_resources(connection, resource_ids, limit, after, false)
+        })
+    }
+
+    pub fn query_relations_within_resources(
+        &self,
+        resource_ids: &BTreeSet<ResourceId>,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<ProjectionSnapshot<ProjectionPage<ProjectedRelation>>, StoreError> {
+        validate_limit(limit)?;
+        if resource_ids.len() > MAX_PROJECTION_PAGE_LIMIT {
+            return Err(StoreError::Contract("too many resource ids".into()));
+        }
+        self.with_projection_snapshot(|connection| {
+            read_relations_for_resources(connection, resource_ids, limit, after, true)
         })
     }
 
@@ -481,6 +496,7 @@ fn read_relations_for_resources(
     resource_ids: &BTreeSet<ResourceId>,
     limit: usize,
     after: Option<&str>,
+    require_both_endpoints: bool,
 ) -> Result<ProjectionPage<ProjectedRelation>, StoreError> {
     if resource_ids.is_empty() {
         return Ok(ProjectionPage {
@@ -489,8 +505,17 @@ fn read_relations_for_resources(
         });
     }
     let placeholders = placeholders(resource_ids.len());
+    let endpoint_predicate = if require_both_endpoints {
+        format!(
+            "r.source_resource_id IN ({placeholders}) AND r.target_resource_id IN ({placeholders})"
+        )
+    } else {
+        format!(
+            "r.source_resource_id IN ({placeholders}) OR r.target_resource_id IN ({placeholders})"
+        )
+    };
     let mut sql = format!(
-        "SELECT {PROJECTED_RELATION_COLUMNS}, provider_connection.connector_type, configured_binding.created_at FROM relations r LEFT JOIN connections provider_connection ON r.evidence_type = 'provider' AND json_extract(r.evidence_json, '$.connection_id') = provider_connection.connection_id LEFT JOIN bindings configured_binding ON r.evidence_type = 'configured' AND json_extract(r.evidence_json, '$.binding_id') = configured_binding.binding_id WHERE (r.source_resource_id IN ({placeholders}) OR r.target_resource_id IN ({placeholders}))"
+        "SELECT {PROJECTED_RELATION_COLUMNS}, provider_connection.connector_type, configured_binding.created_at FROM relations r LEFT JOIN connections provider_connection ON r.evidence_type = 'provider' AND json_extract(r.evidence_json, '$.connection_id') = provider_connection.connection_id LEFT JOIN bindings configured_binding ON r.evidence_type = 'configured' AND json_extract(r.evidence_json, '$.binding_id') = configured_binding.binding_id WHERE ({endpoint_predicate})"
     );
     let mut values = resource_ids
         .iter()

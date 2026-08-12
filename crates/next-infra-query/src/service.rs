@@ -14,6 +14,8 @@ pub const MAX_TOPOLOGY_NODES: usize = 200;
 pub const MAX_TOPOLOGY_EDGES: usize = 400;
 pub const DEFAULT_TIMELINE_LIMIT: usize = 50;
 pub const MAX_TIMELINE_LIMIT: usize = 200;
+pub const DEFAULT_RELATIONS_LIMIT: usize = 200;
+pub const MAX_RELATIONS_LIMIT: usize = 400;
 
 const CURSOR_PREFIX: &str = "niq1:";
 const MAX_CURSOR_LENGTH: usize = 512;
@@ -28,6 +30,13 @@ pub struct SearchResourcesRequest {
     pub health: BTreeSet<ResourceHealth>,
     pub freshness: BTreeSet<Freshness>,
     pub labels: BTreeMap<String, String>,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RelationsForResourcesRequest {
+    pub resource_ids: Vec<String>,
     pub limit: Option<usize>,
     pub cursor: Option<String>,
 }
@@ -176,6 +185,12 @@ pub trait QuerySource {
         &self,
         plan: &TopologyPlan,
     ) -> Result<SourceSnapshot<Option<TopologyBody>>, Self::Error>;
+    fn relations_for_resources(
+        &self,
+        resource_ids: &BTreeSet<String>,
+        limit: usize,
+        after: Option<&str>,
+    ) -> Result<SourceSnapshot<SourcePage<RelationDto>>, Self::Error>;
     fn get_health_summary(&self) -> Result<SourceSnapshot<HealthSummaryBody>, Self::Error>;
     fn list_connections(&self) -> Result<SourceSnapshot<Vec<ConnectionDto>>, Self::Error>;
     fn get_recent_changes(
@@ -302,6 +317,35 @@ where
             edges: body.edges,
             frontier: body.frontier,
             truncated: body.truncated,
+        })
+    }
+
+    pub fn get_relations_for_resources(
+        &self,
+        request: RelationsForResourcesRequest,
+    ) -> QueryResult<RelationPageDto> {
+        let limit = bounded_limit(request.limit, DEFAULT_RELATIONS_LIMIT, MAX_RELATIONS_LIMIT)?;
+        let resource_ids = request.resource_ids.into_iter().collect::<BTreeSet<_>>();
+        if resource_ids.is_empty() {
+            return Err(contract_error("resource_ids must not be empty"));
+        }
+        if resource_ids.len() > MAX_RESOURCE_LIMIT {
+            return Err(contract_error("too many resource ids"));
+        }
+        let snapshot = self
+            .source
+            .relations_for_resources(
+                &resource_ids,
+                limit,
+                decode_cursor(request.cursor.as_deref())?.as_deref(),
+            )
+            .map_err(|_| source_error())?;
+        let page = snapshot.body;
+        validate_page_size(page.items.len(), limit)?;
+        Ok(RelationPageDto {
+            metadata: snapshot.metadata,
+            items: page.items,
+            page_info: PageInfo::new(page.next_after.map(encode_cursor)),
         })
     }
 

@@ -7,6 +7,7 @@ import type { ErrorEnvelope } from "../../generated/query/ErrorEnvelope";
 import type { HealthSummaryDto } from "../../generated/query/HealthSummaryDto";
 import type { ResourceDetailDto } from "../../generated/query/ResourceDetailDto";
 import type { ResourcePageDto } from "../../generated/query/ResourcePageDto";
+import type { RelationPageDto } from "../../generated/query/RelationPageDto";
 import type { SyncStatusDto } from "../../generated/query/SyncStatusDto";
 import type { TopologyDto } from "../../generated/query/TopologyDto";
 import type { TimelinePageDto } from "../../generated/query/TimelinePageDto";
@@ -21,6 +22,7 @@ import type {
   ManualSyncResult,
   QueryInvalidation,
   RecentChangesInput,
+  RelationsForResourcesInput,
   RuntimeCapabilities,
   SearchResourcesInput,
   SyncStatusInput,
@@ -126,6 +128,12 @@ export class RealDesktopAdapter implements DesktopAdapter {
 
   async getTopology(input: GetTopologyInput) {
     return this.#invoke<TopologyDto>("query_get_topology", { request: input });
+  }
+
+  async getRelationsForResources(input: RelationsForResourcesInput) {
+    return this.#invoke<RelationPageDto>("query_relations_for_resources", {
+      request: input,
+    });
   }
 
   async getHealthSummary() {

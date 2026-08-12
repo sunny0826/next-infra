@@ -209,6 +209,10 @@ export function AppShell() {
     setInspectorOpen(true);
   }
 
+  function returnToInventory() {
+    updateRouteState("inventory", { detailResourceId: null });
+  }
+
   function selectSearchResult(resource: ResourceDto) {
     setSearchValue("");
     setSearchResults([]);
@@ -249,6 +253,7 @@ export function AppShell() {
         onNavigate={navigate}
         onOpenInspector={() => setInspectorOpen(true)}
         onSelectResource={selectInventoryResource}
+        onBackToInventory={returnToInventory}
         onTopologyFocus={focusTopology}
         openInspectorButtonRef={openInspectorButtonRef}
         queryVersion={queryVersion}

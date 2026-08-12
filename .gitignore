@@ -6,3 +6,4 @@ dist/
 apps/desktop/src-tauri/gen/
 .omo/
 .playwright-mcp/
+output/

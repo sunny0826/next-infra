@@ -1938,6 +1938,20 @@ mod tests {
         assert_eq!(frontier.metadata, metadata);
         assert_eq!(frontier.body.items.len(), 1);
 
+        let within_alpha = store
+            .query_relations_within_resources(&BTreeSet::from([alpha.clone()]), 10, None)
+            .unwrap();
+        assert!(within_alpha.body.items.is_empty());
+
+        let within_alpha_beta = store
+            .query_relations_within_resources(
+                &BTreeSet::from([alpha.clone(), id("fixture-resource-beta", ResourceId::new)]),
+                10,
+                None,
+            )
+            .unwrap();
+        assert_eq!(within_alpha_beta.body.items.len(), 1);
+
         let resources = store
             .query_resources_by_ids(&BTreeSet::from([
                 alpha.clone(),

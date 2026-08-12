@@ -33,6 +33,7 @@ const enumLabels: Readonly<Record<string, string>> = {
   supported: "支持",
   succeeded: "成功",
   targeted: "定向",
+  tombstoned: "已删除",
   truncated: "已截断",
   unavailable: "不可用",
   unhealthy: "不健康",

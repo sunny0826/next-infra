@@ -71,6 +71,18 @@ impl QuerySource for FakeSource {
         }))
     }
 
+    fn relations_for_resources(
+        &self,
+        _resource_ids: &BTreeSet<String>,
+        _limit: usize,
+        _after: Option<&str>,
+    ) -> Result<SourceSnapshot<SourcePage<RelationDto>>, Self::Error> {
+        self.snapshot(SourcePage {
+            items: vec![],
+            next_after: None,
+        })
+    }
+
     fn get_health_summary(&self) -> Result<SourceSnapshot<HealthSummaryBody>, Self::Error> {
         self.snapshot(HealthSummaryBody {
             resource_health: ResourceHealthCountsDto {

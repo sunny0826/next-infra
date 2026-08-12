@@ -48,6 +48,24 @@ describe("RealDesktopAdapter", () => {
     expect(invoke).toHaveBeenNthCalledWith(3, "query_list_connections", undefined);
   });
 
+  it("loads relations for a bounded resource set through the dedicated command", async () => {
+    const { fake, invoke } = transport();
+    invoke.mockResolvedValue({ items: [], page_info: { next_cursor: null } });
+    const adapter = new RealDesktopAdapter(fake);
+
+    await adapter.getRelationsForResources({
+      resource_ids: ["fixture-resource-alpha", "fixture-resource-beta"],
+      limit: 400,
+    });
+
+    expect(invoke).toHaveBeenCalledWith("query_relations_for_resources", {
+      request: {
+        resource_ids: ["fixture-resource-alpha", "fixture-resource-beta"],
+        limit: 400,
+      },
+    });
+  });
+
   it("returns the manual sync run id without treating it as a UI refresh", async () => {
     const { fake, invoke } = transport();
     invoke.mockResolvedValue({ sync_run_id: "fixture-run" });

@@ -8,7 +8,11 @@ import { EvidenceSpine } from "../evidence/EvidenceSpine";
 
 import "./resource-detail.css";
 
-interface ResourceDetailPageProps { readonly resourceId: string; readonly queryVersion?: number; }
+interface ResourceDetailPageProps {
+  readonly onBack: () => void;
+  readonly resourceId: string;
+  readonly queryVersion?: number;
+}
 
 interface DetailState {
   readonly detail: ResourceDetailDto;
@@ -24,7 +28,7 @@ function normalizedAttributes(value: unknown): readonly [string, string][] {
     .map(([key, item]) => [key, item === null ? "null" : String(item)]);
 }
 
-export function ResourceDetailPage({ resourceId, queryVersion = 0 }: ResourceDetailPageProps) {
+export function ResourceDetailPage({ onBack, resourceId, queryVersion = 0 }: ResourceDetailPageProps) {
   const adapter = useDesktopAdapter();
   const [state, setState] = useState<DetailState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,13 +73,16 @@ export function ResourceDetailPage({ resourceId, queryVersion = 0 }: ResourceDet
     return [...groups.values()];
   }, [state]);
 
-  if (error !== null) return <section className="resource-detail-state resource-detail-state--error" role="alert">{error}</section>;
-  if (state === null) return <section className="resource-detail-state" aria-busy="true">正在读取资源详情…</section>;
+  const backButton = <button aria-label="返回资源清单" className="resource-detail-back" onClick={onBack} type="button">← 返回资源清单</button>;
+
+  if (error !== null) return <div className="resource-detail-page">{backButton}<section className="resource-detail-state resource-detail-state--error" role="alert">{error}</section></div>;
+  if (state === null) return <div className="resource-detail-page">{backButton}<section className="resource-detail-state" aria-busy="true">正在读取资源详情…</section></div>;
 
   const { detail } = state;
   const attributes = normalizedAttributes(detail.attributes);
   return (
     <div className="resource-detail-page">
+      {backButton}
       <header>
         <p className="resource-detail-eyebrow">资源核验</p>
         <h1>{detail.resource.display_name}</h1>

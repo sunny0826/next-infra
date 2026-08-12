@@ -6,12 +6,13 @@
 
 use next_infra_query::dto::{
     ChangePageDto, ConnectionSnapshotDto, ConnectorCoverageSnapshotDto, ErrorEnvelope, Freshness,
-    HealthSummaryDto, ResourceDetailDto, ResourceHealth, ResourcePageDto, SyncStatusDto,
-    TimelinePageDto, TopologyDto,
+    HealthSummaryDto, RelationPageDto, ResourceDetailDto, ResourceHealth, ResourcePageDto,
+    SyncStatusDto, TimelinePageDto, TopologyDto,
 };
 use next_infra_query::service::{
     GetResourceRequest, GetTopologyRequest, QueryService, QuerySource, RecentChangesRequest,
-    ResourceInclude, SearchResourcesRequest, SyncStatusRequest, TimelineRequest,
+    RelationsForResourcesRequest, ResourceInclude, SearchResourcesRequest, SyncStatusRequest,
+    TimelineRequest,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -66,6 +67,13 @@ pub struct GetTopologyCommand {
     pub depth: Option<u8>,
     pub max_nodes: Option<usize>,
     pub max_edges: Option<usize>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct RelationsForResourcesCommand {
+    pub resource_ids: Vec<String>,
+    pub limit: Option<usize>,
+    pub cursor: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
@@ -141,6 +149,18 @@ where
             max_nodes: request.max_nodes,
             max_edges: request.max_edges,
         })
+    }
+
+    pub fn relations_for_resources(
+        &self,
+        request: RelationsForResourcesCommand,
+    ) -> Result<RelationPageDto, ErrorEnvelope> {
+        self.service
+            .get_relations_for_resources(RelationsForResourcesRequest {
+                resource_ids: request.resource_ids,
+                limit: request.limit,
+                cursor: request.cursor,
+            })
     }
 
     pub fn get_health_summary(&self) -> Result<HealthSummaryDto, ErrorEnvelope> {
